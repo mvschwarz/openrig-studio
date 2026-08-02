@@ -90,11 +90,26 @@ trap cleanup EXIT HUP TERM INT
   tmux kill-session -t "=$GS" 2>/dev/null ) &
 WATCH=$!
 
-# window-size latest: size to the client that attached most recently, so a
-# small viewer does not drag every other client down with it. The default sizes
-# the shared window across the whole group, which is how one small browser
-# clamped a seat from 49x57 to 49x13 for every attached client.
+# window-size LARGEST. Grouped sessions share their windows and a window has
+# ONE size, so the option decides whose client wins. The default is `latest`,
+# which means the most recently attached client resizes the window for
+# everyone — one small browser opening a sidebar dragged a seat from 49x57 to
+# 49x13 for every attached client, including the agent's own.
+#
+# Measured with real attached clients (a 200x57 and a 40x12): `latest` gave
+# 40x11 to all of them, `largest` gave 200x56. So the small viewer now gets a
+# cropped view of a full-size window instead of shrinking the seat, which is
+# the right trade — a sidebar must never degrade the session it is watching.
+#
+# Set on the VIEWER only. Setting it on the canonical seat would work too and
+# is exactly the mutation a viewer must not perform; measured that the viewer
+# side alone is sufficient.
+#
+# NOTE FOR ANYONE CHANGING THIS: `latest` IS THE DEFAULT. Setting it is a
+# no-op, which is how a first attempt at this fix passed review and changed
+# nothing — check `tmux show-options -g window-size` before believing an edit
+# here did anything.
 tmux new-session -s "$GS" -t "$SID" \; \
   set-option -t "$GS" status off \; \
-  set-option -t "$GS" window-size latest \; \
+  set-option -t "$GS" window-size largest \; \
   set-window-option -t "$GS" aggressive-resize on
