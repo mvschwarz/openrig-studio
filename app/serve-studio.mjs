@@ -660,7 +660,18 @@ http.createServer((req, res) => {
   // and the validation report lives at /api/contract.
   if (u.pathname === "/surfaces.json") {
     const doc = packageSource.result.doc && typeof packageSource.result.doc === "object" ? packageSource.result.doc : {};
-    return sendJson(res, 200, { ...doc, surfaces: mergedSurfaces().rows });
+    // A consumer may contribute the SEAT ROSTER the same way it contributes
+    // surfaces. Previously only `surfaces` was overridden, so the package
+    // document's own roster reached every install and a consumer's declared
+    // seats were read by nothing — no warning, no error, nothing at
+    // /api/contract. A plausible declaration that did exactly nothing, which
+    // is worse than an unsupported one. The sidebar is the product thesis, so
+    // a fixture seat sitting in that panel on a real box is the same lie as a
+    // fixture rig on the floor.
+    const overlay = consumerSource?.result?.doc && typeof consumerSource.result.doc === "object" ? consumerSource.result.doc : {};
+    const seats = Array.isArray(overlay.chatSeats) ? { chatSeats: overlay.chatSeats } : {};
+    const chatPort = overlay.chatLocalPort != null ? { chatLocalPort: overlay.chatLocalPort } : {};
+    return sendJson(res, 200, { ...doc, ...seats, ...chatPort, surfaces: mergedSurfaces().rows });
   }
 
   // static: shell.html at /, surfaces + assets from the app dir — and, when a

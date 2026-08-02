@@ -45,7 +45,22 @@
   #agents.open { display: flex; }
   #agents-head { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--edge); }
   #agents-head .word { color: var(--bone); font-size: 9.5px; letter-spacing: .22em; font-weight: 700; cursor: pointer; }
+  #agents-head select { background: transparent; color: var(--body); border: 1px solid var(--edge2);
+    border-radius: 2px; font: inherit; font-size: 10px; padding: 1px 4px; margin-left: 10px; }
+  #seatName { flex: 1; color: var(--faint); font-size: 10px; letter-spacing: .04em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; padding-left: 8px; }
+  /* the launcher: a rig's whole team as tiles */
+  #seatTiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 10px 12px; }
+  #seatTiles:empty { display: none; }
+  .seatTile { background: rgba(255,255,255,.04); border: 1px solid var(--edge2); border-radius: 2px;
+    color: var(--body); font: inherit; font-size: 10px; padding: 5px 4px; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .seatTile:hover { color: var(--bone); border-color: rgba(255,255,255,.35); }
+  .seatTile.active { color: #111; background: var(--bone); border-color: var(--bone); }
+  #chatframe { flex: 1; width: 100%; border: 0; background: var(--ink); min-height: 0; }
+  #chatframe:not([src]) { display: none; }
   #agents-body { padding: 14px; color: var(--body); font-size: 12px; line-height: 1.6; }
+  #agents-body:empty { display: none; }
   #agents-body .seatrow { padding: 8px 10px; border: 1px solid var(--edge2); border-radius: 2px; margin-bottom: 6px; }
   #agents-body .honest { color: var(--faint); font-size: 10.5px; margin-top: 10px; }
   #agentToggle { position: absolute; right: 14px; top: 14px; z-index: 40; background: var(--bone);
@@ -67,8 +82,14 @@
     <button id="agentToggle" title="the seat roster">AGENTS ▸</button>
   </main>
   <aside id="agents">
-    <div id="agents-head"><span class="word" id="agentsWord">AGENTS ▾</span></div>
+    <div id="agents-head">
+      <span class="word" id="agentsWord">AGENTS ▾</span>
+      <select id="chatRigSel" title="which rig's seats fill the launcher"></select>
+      <span id="seatName"></span>
+    </div>
+    <div id="seatTiles"></div>
     <div id="agents-body"></div>
+    <iframe allow="clipboard-read; clipboard-write" id="chatframe" title="agent seat"></iframe>
   </aside>
 </div>
 <script>
@@ -161,18 +182,84 @@
     if (e.data.t === "open-agent") openAgents(e.data.seat);
   });
 
-  // --- agent sidebar: the contracted seat surface is roster + summon ------
-  // This reference runtime has no live seat backing; the sidebar says so
-  // honestly instead of pretending (a seat that looks attached but isn't
-  // would be worse than none).
+  // --- agent sidebar: a real seat's session in a frame -------------------
+  // PORTED, not retyped, from the studio-box shell where this has a week of
+  // real use behind it. The multiplayer surface — a human and the agents that
+  // wrote the app, on the same screen — is the point of this SDK, so it lives
+  // here rather than in any one app's provider.
+  //
+  // Degrades honestly in three distinguishable ways, because "no seats" has
+  // more than one cause and a surface can only act on the difference if it is
+  // told which: no roster declared at all, a roster with no terminal endpoint
+  // (so seats are listed but not attachable), and a working attach.
   const agents = document.getElementById("agents");
   const agentsBody = document.getElementById("agents-body");
-  function openAgents(seat) {
-    const roster = reg.chatSeats || [];
-    agentsBody.innerHTML = (roster.length
-      ? roster.map((r) => `<div class="seatrow"${r.seat === seat ? ' style="border-color:rgba(255,255,255,.5)"' : ""}>${r.name || r.seat}<br/><span style="color:var(--faint);font-size:10px">${r.seat}</span></div>`).join("")
-      : `<div>no seats in the manifest roster</div>`)
-      + `<div class="honest">reference runtime: seat rows are declared in the manifest; live seat attach requires a seat backend, which this fixture-backed runtime does not include. Summoning works; typing is runtime-internal.</div>`;
+  const seats = (reg.chatSeats || []).filter((s) => s && s.seat);
+  const termPort = reg.chatLocalPort;
+  const isLocal = ["127.0.0.1", "localhost"].includes(location.hostname);
+  // The seat name IS the argument — a terminal is addressed by which seat it
+  // is attached to, not by a separate id to keep in sync.
+  const chatUrl = (seat) => isLocal
+    ? `http://127.0.0.1:${termPort}/?arg=${encodeURIComponent(seat)}`
+    : `${location.origin}/chat/?arg=${encodeURIComponent(seat)}`;
+  const rigOf = (seat) => (String(seat).split("@")[1] || "");
+  const attachable = seats.length && (!isLocal || termPort);
+
+  let seat = seats.length ? seats[0].seat : null;
+  try { seat = localStorage.getItem("shell.chatSeat") || seat; } catch {}
+  if (!seats.some((s) => s.seat === seat)) seat = seats.length ? seats[0].seat : null;
+  const rigs = [...new Set(seats.map((s) => rigOf(s.seat)))].filter(Boolean);
+  let chatRig = rigOf(seat) || rigs[0];
+
+  function renderTiles() {
+    const sel = document.getElementById("chatRigSel");
+    const tiles = document.getElementById("seatTiles");
+    // The launcher is RIG-SCOPED: pick a rig, get its whole team as tiles.
+    sel.innerHTML = rigs.map((r) => `<option${r === chatRig ? " selected" : ""}>${r}</option>`).join("");
+    sel.style.display = rigs.length > 1 ? "" : "none";
+    tiles.innerHTML = "";
+    for (const s of seats.filter((s) => !chatRig || rigOf(s.seat) === chatRig)) {
+      const b = document.createElement("button");
+      b.className = "seatTile" + (s.seat === seat ? " active" : "");
+      b.dataset.seat = s.seat; b.textContent = s.name || s.seat.split("@")[0]; b.title = s.seat;
+      b.onclick = () => { seat = s.seat; try { localStorage.setItem("shell.chatSeat", seat); } catch {} ; sync(); };
+      tiles.appendChild(b);
+    }
+    sel.onchange = () => {
+      chatRig = sel.value;
+      const first = seats.find((s) => rigOf(s.seat) === chatRig);
+      if (first) seat = first.seat;
+      sync();
+    };
+  }
+
+  function sync() {
+    document.getElementById("seatName").textContent = seat || "";
+    for (const el of document.getElementById("seatTiles").children) {
+      el.classList.toggle("active", el.dataset.seat === seat);
+    }
+    if (!attachable || !seat) return;
+    const frame = document.getElementById("chatframe");
+    if (frame.dataset.url === chatUrl(seat)) return;
+    // REPLACE the frame node rather than navigating it. Navigating leaves the
+    // previous terminal attached to its seat; replacing detaches it cleanly.
+    const fresh = frame.cloneNode(false);
+    fresh.dataset.url = chatUrl(seat); fresh.src = chatUrl(seat);
+    frame.replaceWith(fresh);
+  }
+
+  function openAgents(want) {
+    if (want && seats.some((s) => s.seat === want)) { seat = want; chatRig = rigOf(want) || chatRig; }
+    if (!seats.length) {
+      agentsBody.innerHTML = `<div>no seat roster declared</div>`
+        + `<div class="honest">a consumer declares seats as <code>chatSeats</code> in its own surfaces manifest. None is declared here, so there is nothing to attach to.</div>`;
+    } else if (!attachable) {
+      agentsBody.innerHTML = `<div>${seats.length} seat(s) declared, no terminal endpoint</div>`
+        + `<div class="honest">the roster is real but <code>chatLocalPort</code> is not set, so seats are listed and cannot be attached. This is a configuration gap, not an empty rig.</div>`;
+    } else {
+      agentsBody.innerHTML = "";
+      renderTiles(); sync();
+    }
     agents.classList.add("open");
     document.getElementById("agentToggle").style.display = "none";
   }
