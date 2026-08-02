@@ -133,12 +133,16 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
 // Write the overlay manifest the SDK reads. chatSeats is RUNTIME state — a live
 // rig roster must never be written back into a source-controlled file — so it
 // only ever lands here, in the composed copy.
-export function writeOverlayManifest({ surfacesOut, rows, chatSeats }) {
+export function writeOverlayManifest({ surfacesOut, rows, chatSeats, chatLocalPort }) {
   const dir = insideRepo(surfacesOut);
   const doc = {
     _note: "COMPOSED AT BOOT from installed apps + box doors. Do not edit — edit the app's app.json or studio.config.json.",
     surfaces: rows,
   };
   if (chatSeats?.length) doc.chatSeats = chatSeats;
+  // The endpoint travels WITH the roster or the tiles are decorative. Omitted
+  // deliberately when no terminal can be served, so the shell reports
+  // listed-but-not-attachable instead of failing on click.
+  if (chatLocalPort != null) doc.chatLocalPort = chatLocalPort;
   fs.writeFileSync(path.join(dir, "surfaces.json"), JSON.stringify(doc, null, 2) + "\n");
 }

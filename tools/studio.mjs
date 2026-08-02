@@ -20,7 +20,7 @@ import fs from "node:fs";
 import os from "node:os";
 import net from "node:net";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { composeRail, writeOverlayManifest } from "./compose-rail.mjs";
 
@@ -53,7 +53,54 @@ if (declared && !composed) {
   console.error(`studio: ${declared} app(s) enabled and NONE composed. Refusing to start and look healthy.`);
   process.exit(1);
 }
-writeOverlayManifest({ surfacesOut: rail.surfacesOut, rows: rail.rows });
+// ---- the seat roster: derived, never authored ------------------------------
+// The sidebar is the point of this shell — a human and the agents that wrote
+// the app, on one screen. Its roster is RUNTIME state, so it is derived from
+// the live rig at boot and never written back into a source-controlled file.
+//
+// Deriving it is also what keeps the roster and the attach allowlist from
+// disagreeing: seat-attach.sh checks the same live rig, so a tile can never
+// exist for a seat that refuses to attach. Two places deriving one property
+// is the drift shape, and the studio this was ported from named that as its
+// own outstanding fix.
+//
+// No rig is a normal state, not an error: the roster is simply absent and the
+// shell says so. A studio need not be attached to a rig; it must know whether
+// it is.
+function liveSeats() {
+  try {
+    const raw = execFileSync("rig", ["ps", "--nodes", "--json"], { encoding: "utf8", timeout: 6000, stdio: ["ignore", "pipe", "ignore"] });
+    const d = JSON.parse(raw);
+    const nodes = Array.isArray(d) ? d : d.nodes ?? [];
+    return nodes
+      .map((n) => ({ seat: n.canonicalSessionName || `${n.logicalId}@${n.rigName}`, name: n.logicalId || n.canonicalSessionName }))
+      .filter((s) => s.seat && !s.seat.includes("undefined"));
+  } catch { return []; }
+}
+const seatRoster = liveSeats();
+// A terminal endpoint is only advertised when one can actually be served.
+// Advertising it without the binary would put clickable tiles in front of a
+// user and fail on click; omitting it makes the shell say "listed, not
+// attachable", which is a configuration gap the operator can act on.
+const haveTtyd = (() => {
+  try { execFileSync("ttyd", ["--version"], { stdio: "ignore", timeout: 4000 }); return true; }
+  catch { return false; }
+})();
+// Allocated AFTER the providers so it cannot collide with them: the public
+// port is n, the runtime n+1, providers from n+2, and the seat terminal takes
+// the next one after those.
+const seatPort = seatRoster.length && haveTtyd ? port + 2 + rail.providers.size : null;
+writeOverlayManifest({
+  surfacesOut: rail.surfacesOut,
+  rows: rail.rows,
+  chatSeats: seatRoster,
+  ...(seatPort ? { chatLocalPort: seatPort } : {}),
+});
+if (seatRoster.length) {
+  console.log(`  seats   : ${seatRoster.length} live${seatPort ? ` · terminals on ${seatPort}` : " · NO ttyd on this box, so seats are listed but not attachable"}`);
+} else {
+  console.log("  seats   : none — no rig on this box, so the agent sidebar will say so rather than show a fixture");
+}
 
 // ---- ports: assigned by the box, guarded before anything binds -------------
 const sdkPort = port + 1;
@@ -124,6 +171,14 @@ const spawnChild = (label, file, args, env) => {
 // live dot: the fiction is a fine SDK example and a lie on a deployed studio.
 const STATE_DIR = path.join(path.dirname(rail.surfacesOut), "state");
 let stateClaimed = false;
+// Providers are node; a seat terminal is not. Same child tracking so it dies
+// with the studio rather than outliving it and holding a port.
+const spawnRaw = (label, cmd, args) => {
+  const c = spawn(cmd, args, { stdio: "inherit" });
+  c.on("error", (e) => console.error(`studio: ${label} could not start — ${e.message}`));
+  c.on("exit", (code) => { if (code) console.error(`studio: ${label} exited ${code}`); });
+  children.push(c);
+};
 // {{port}} · {{port:<pkg>}} · {{root:<kind>}} · {{state}}; an array root repeats its flag.
 const resolveArgs = (args, pkg) => {
   const out = [];
@@ -205,6 +260,20 @@ if (missingCompanions.length) {
   console.error("Refusing to start rather than serve a studio whose write verbs silently do nothing.");
   process.exit(1);
 }
+// The seat terminals. Loopback by IP rather than by interface name, which is
+// the portable form — reaching a studio remotely stays a separate, deliberate
+// act. -a is what passes ?arg=<seat> through to the attach script, so the seat
+// name is the argument and there is no second id to keep in sync.
+if (seatPort) {
+  const script = path.join(path.dirname(new URL(import.meta.url).pathname), "seat-attach.sh");
+  spawnRaw("seat terminals", "ttyd", [
+    "-W", "-a", "-p", String(seatPort), "-i", "127.0.0.1",
+    "-t", "fontSize=10", "-t", "lineHeight=1.35",
+    "bash", script,
+  ]);
+  console.log(`  terminal: seats attachable on ${seatPort}`);
+}
+
 // A provider that generates real state wins over the shipped demo fixture.
 // Missing-file is safe here: the runtime reports an honest degraded envelope
 // until the generator's first write, then its watcher picks the file up.

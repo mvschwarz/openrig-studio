@@ -267,6 +267,22 @@
   document.getElementById("agentsWord").onclick = () => {
     agents.classList.remove("open");
     document.getElementById("agentToggle").style.display = "";
+    // RELEASE the terminal on close. Hiding the panel leaves the connection
+    // open, and a hidden viewer still counts as an attached client — it fights
+    // the visible one for size, and viewer sessions accumulate for as long as
+    // the tab lives. Measured: closing the sidebar left an attached viewer
+    // behind; a real disconnect cleaned it up correctly. Costs about a second
+    // to re-attach on reopen, which is the trade the original made too.
+    // Build a bare replacement rather than cloning: cloneNode copies the src
+    // attribute, so the "fresh" frame reconnects immediately and releases
+    // nothing. Attributes are re-applied except src, which is what detaches.
+    const frame = document.getElementById("chatframe");
+    if (frame && frame.getAttribute("src")) {
+      const bare = document.createElement("iframe");
+      bare.id = "chatframe"; bare.title = "agent seat";
+      bare.setAttribute("allow", "clipboard-read; clipboard-write");
+      frame.replaceWith(bare);
+    }
   };
 })();
 </script>
