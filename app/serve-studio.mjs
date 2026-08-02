@@ -390,7 +390,17 @@ function factoryState() {
   let d;
   try { d = JSON.parse(fs.readFileSync(f, "utf8")); }
   catch (e) { return { ok: false, degraded: `fixture unreadable: ${e.message}`, rig: null, seats: [], queue: [] }; }
-  return { ok: true, rig: d.rig || "fixture", generatedAt: new Date().toISOString(),
+  // A consumer generating this from a REAL source can say why it is empty, and
+  // the reasons are not interchangeable: no rig on this box is a different
+  // fact from a rig with nothing running, and a surface can offer to start one
+  // only if it is told which. Carried through when present so an honest
+  // absence does not arrive looking like an idle rig. Omitted for the shipped
+  // fixture, which is neither — it is a demo, and should not claim to be
+  // attached to anything.
+  const attachment = typeof d.attached === "boolean"
+    ? { attached: d.attached, reason: d.reason ?? null, detail: d.detail ?? null }
+    : {};
+  return { ok: true, rig: d.rig || "fixture", generatedAt: new Date().toISOString(), ...attachment,
     seats: Array.isArray(d.seats) ? d.seats : [], queue: Array.isArray(d.queue) ? d.queue : [] };
 }
 
