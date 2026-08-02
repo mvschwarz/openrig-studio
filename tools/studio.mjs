@@ -80,6 +80,37 @@ const ROOTS = {
   project: exp(config.sliceRoot), media: (config.mediaRoots || []).map(exp),
   canvas: exp(config.canvasRoot), footage: exp(config.footageRoot),
 };
+// FIRST RUN: seed the project with the PROVIDER'S OWN scaffolder.
+//
+// Without this a fresh studio has a sliceRoot that does not exist, and every
+// project verb answers ENOENT — honest, but not a usable app. Seeding with a
+// hand-written timeline.json would be worse: it would parse and then behave
+// wrong, because the real schema carries history and slot state behind it.
+//
+// Only ever into an EMPTY or absent directory. A directory with contents and
+// no timeline.json is somebody's data, and this refuses rather than seeding
+// over it.
+async function seedProject() {
+  const root = ROOTS.project;
+  if (!root || fs.existsSync(path.join(root, "timeline.json"))) return;
+  if (fs.existsSync(root) && fs.readdirSync(root).length) {
+    console.error(`studio: ${root} has contents but no timeline.json — not seeding over it.`);
+    return;
+  }
+  const scaffolder = path.join(appsRoot, "providers", "studio-video", "video-new.mjs");
+  if (!fs.existsSync(scaffolder)) return;
+  try {
+    if (fs.existsSync(root)) fs.rmdirSync(root);
+    fs.mkdirSync(path.dirname(root), { recursive: true });
+    const { scaffoldBundle } = await import(scaffolder);
+    scaffoldBundle(path.basename(root), { parent: path.dirname(root), idea: "studio project", port });
+    console.log(`  seeded  : ${root}`);
+  } catch (e) {
+    console.error(`studio: could not seed the project — ${e.message}`);
+  }
+}
+await seedProject();
+
 const children = [];
 const spawnChild = (label, file, args, env) => {
   const c = spawn(process.execPath, [file, ...args], { stdio: "inherit", env: { ...process.env, ...env } });
