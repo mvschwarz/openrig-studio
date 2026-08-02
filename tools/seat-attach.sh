@@ -71,6 +71,30 @@ if [ -z "$SID" ]; then
 fi
 
 GS="seatview-$$-$RANDOM"
-cleanup() { tmux kill-session -t "=$GS" 2>/dev/null || true; }
+cleanup() { [ -n "${WATCH:-}" ] && kill "$WATCH" 2>/dev/null; tmux kill-session -t "=$GS" 2>/dev/null || true; }
 trap cleanup EXIT HUP TERM INT
-tmux new-session -s "$GS" -t "$SID" \; set-option -t "$GS" status off \; set-window-option aggressive-resize on
+
+# THE VIEWER MUST DIE WITH THE SEAT. Grouped sessions share their windows, so
+# killing the canonical session leaves the group alive as long as any viewer
+# remains — and the PANE KEEPS RUNNING under the viewer. The seat is then gone
+# while its process lives on, and anything that asks tmux what is running
+# reports a dead seat as alive. That is a viewer owning a lifecycle it must
+# never own, and it is worse than a crash because it reads as healthy.
+#
+# Pruning at attach time is NOT enough, and assuming it was is what left this
+# open: pruning cleans up after a death that already happened and does nothing
+# about one that happens WHILE attached. So watch the canonical for as long as
+# this viewer lives, and take the viewer down with it. Contained entirely in
+# the viewer — the seat's own session is never configured or mutated from here.
+( while tmux list-sessions -F '#{session_id}' 2>/dev/null | grep -qxF "$SID"; do sleep 2; done
+  tmux kill-session -t "=$GS" 2>/dev/null ) &
+WATCH=$!
+
+# window-size latest: size to the client that attached most recently, so a
+# small viewer does not drag every other client down with it. The default sizes
+# the shared window across the whole group, which is how one small browser
+# clamped a seat from 49x57 to 49x13 for every attached client.
+tmux new-session -s "$GS" -t "$SID" \; \
+  set-option -t "$GS" status off \; \
+  set-option -t "$GS" window-size latest \; \
+  set-window-option -t "$GS" aggressive-resize on

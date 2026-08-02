@@ -105,6 +105,26 @@
         return;
       }
 
+      // NOT ATTACHED is a different fact from ATTACHED-AND-QUIET, and rendering
+      // them the same way is how a box with no rig showed an empty floor under a
+      // green live signal — the fiction this surface exists to stop. The
+      // generator distinguishes three causes; a viewer can only act on the
+      // difference if the floor says which one it is.
+      if (state.attached === false) {
+        const why = {
+          'no-rig': 'No rig is running on this box.',
+          'no-rig-cli': 'The rig CLI is not installed on this box.',
+          'rig-error': 'The rig is installed but could not be read.',
+        }[state.reason] || 'This box is not attached to a rig.';
+        rig.textContent = 'Not attached';
+        content.innerHTML = `<div class="notice"><strong>${escapeHtml(why)}</strong>` +
+          (state.detail ? `<br/><span>${escapeHtml(state.detail)}</span>` : '') +
+          `<br/><span>This is not an idle rig — there is nothing attached to report on.</span></div>`;
+        updated.textContent = state.generatedAt ? `checked ${new Date(state.generatedAt).toLocaleTimeString()}` : '';
+        setConnection('down', state.reason === 'rig-error' ? 'rig unreadable' : 'no rig');
+        return;
+      }
+
       rig.textContent = state.rig;
       const working = state.seats.filter(seat => seat.state === 'working').length;
       const attention = state.seats.filter(seat => ['blocked', 'stalled', 'down'].includes(seat.state)).length;

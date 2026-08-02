@@ -254,8 +254,12 @@
       agentsBody.innerHTML = `<div>no seat roster declared</div>`
         + `<div class="honest">a consumer declares seats as <code>chatSeats</code> in its own surfaces manifest. None is declared here, so there is nothing to attach to.</div>`;
     } else if (!attachable) {
+      // Say what is observable and stop there. From here the missing endpoint
+      // is all that is visible; whether the terminal binary is absent or simply
+      // unconfigured is known at startup, not in the browser. Naming one of
+      // them would send someone to fix the wrong thing.
       agentsBody.innerHTML = `<div>${seats.length} seat(s) declared, no terminal endpoint</div>`
-        + `<div class="honest">the roster is real but <code>chatLocalPort</code> is not set, so seats are listed and cannot be attached. This is a configuration gap, not an empty rig.</div>`;
+        + `<div class="honest">the roster is real, so this is not an empty rig — but no terminal endpoint was advertised, so these seats cannot be attached. The studio's startup log says why: either the terminal binary is not installed on this box, or none was configured.</div>`;
     } else {
       agentsBody.innerHTML = "";
       renderTiles(); sync();
