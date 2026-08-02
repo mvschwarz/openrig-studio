@@ -101,6 +101,7 @@ writeOverlayManifest({
   rows: rail.rows,
   chatSeats: seatRoster,
   ...(seatPort ? { chatLocalPort: seatPort } : {}),
+  ...(config.welcome ? { welcome: config.welcome } : {}),
 });
 if (seatRoster.length) {
   console.log(`  seats   : ${seatRoster.length} live${seatPort ? ` · terminals on ${seatPort}` : " · NO ttyd on this box, so seats are listed but not attachable"}`);

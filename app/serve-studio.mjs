@@ -742,7 +742,14 @@ http.createServer((req, res) => {
     const seats = live.source === "consumer" ? { chatSeats: live.rows } : {};
     const chatPort = live.source === "consumer" && live.chatLocalPort !== undefined
       ? { chatLocalPort: live.chatLocalPort } : {};
-    return sendJson(res, 200, { ...doc, ...seats, ...chatPort, surfaces: mergedSurfaces().rows });
+    // A box may introduce itself to whoever opens it. Consumer-declared, never
+    // shipped: this runtime goes to every box and knows none of their seat
+    // names, so a welcome written into a surface would be the bespoke lineage
+    // that keeps having to be removed from apps. Carried, not interpreted.
+    const consumerDoc = consumerSource?.result?.doc;
+    const welcome = consumerDoc && typeof consumerDoc.welcome === "object" && consumerDoc.welcome
+      ? { welcome: consumerDoc.welcome } : {};
+    return sendJson(res, 200, { ...doc, ...seats, ...chatPort, ...welcome, surfaces: mergedSurfaces().rows });
   }
 
   // static: shell.html at /, surfaces + assets from the app dir — and, when a

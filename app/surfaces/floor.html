@@ -43,6 +43,18 @@
     .stat span, .meta, .empty { color: var(--muted); font-size: 12px; }
     section { margin-top: 24px; }
     h2 { margin: 0 0 10px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+    .welcome { border: 1px solid var(--edge2); border-radius: 3px; padding: 18px 20px; margin-bottom: 22px;
+      background: rgba(255,255,255,.02); }
+    .welcome h2 { margin: 0 0 8px; font-size: 15px; letter-spacing: .01em; }
+    .welcome p { margin: 0 0 12px; color: var(--body); font-size: 12.5px; line-height: 1.65; max-width: 68ch; }
+    .welcome .wfoot { margin: 12px 0 0; color: var(--faint); font-size: 11.5px; }
+    .wagents { display: flex; flex-wrap: wrap; gap: 10px; }
+    .wagent { display: flex; flex-direction: column; gap: 3px; text-align: left; cursor: pointer;
+      background: rgba(255,255,255,.04); border: 1px solid var(--edge2); border-radius: 3px;
+      padding: 10px 14px; color: var(--body); font: inherit; min-width: 210px; }
+    .wagent:hover { border-color: rgba(255,255,255,.4); color: var(--bone); }
+    .wagent b { font-size: 12.5px; }
+    .wagent span { font-size: 11px; color: var(--faint); }
     .seats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
     .seat { padding: 15px; position: relative; overflow: hidden; }
     .seat::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--state); }
@@ -152,6 +164,7 @@
         </article>`).join('') || '<div class="empty">Queue is clear.</div>';
 
       content.innerHTML = `
+        ${welcomeHtml()}
         <div class="summary">
           <div class="stat"><b>${working}</b><span>working now</span></div>
           <div class="stat"><b>${attention}</b><span>need attention</span></div>
@@ -160,6 +173,40 @@
         <section><h2>Seats · ${state.seats.length}</h2><div class="seats">${seats}</div></section>
         <section><h2>Queue · ${state.queue.length}</h2><div class="queue">${queue}</div></section>`;
       updated.textContent = `Runtime snapshot · ${new Date(state.generatedAt).toLocaleString()}`;
+    }
+
+    // The box's own introduction, declared in its manifest. Absent on a box
+    // that declares none, which is the normal case — this surface ships to
+    // every install and must not assume it is anybody's landing page.
+    let welcome = null;
+    function welcomeHtml() {
+      if (!welcome) return '';
+      const agents = (welcome.agents || []).filter(a => a && a.seat).map(a => `
+        <button class="wagent" data-seat="${escapeHtml(a.seat)}">
+          <b>${escapeHtml(a.label || a.seat)}</b>
+          <span>${escapeHtml(a.hint || '')}</span>
+        </button>`).join('');
+      return `<section class="welcome">
+        ${welcome.title ? `<h2>${escapeHtml(welcome.title)}</h2>` : ''}
+        ${welcome.body ? `<p>${escapeHtml(welcome.body)}</p>` : ''}
+        ${agents ? `<div class="wagents">${agents}</div>` : ''}
+        ${welcome.footer ? `<p class="wfoot">${escapeHtml(welcome.footer)}</p>` : ''}
+      </section>`;
+    }
+    // Summoning a seat is a CONTRACT message (open-agent), not a private
+    // channel invented here — the shell owns the sidebar and this surface only
+    // asks. Delegated so it survives the innerHTML rewrite on every refresh.
+    content.addEventListener('click', (e) => {
+      const b = e.target.closest('.wagent');
+      if (b) parent.postMessage({ t: 'open-agent', seat: b.dataset.seat }, '*');
+    });
+
+    async function loadWelcome() {
+      try {
+        const r = await fetch('/surfaces.json', { cache: 'no-store' });
+        const d = await r.json();
+        welcome = d && typeof d.welcome === 'object' ? d.welcome : null;
+      } catch { welcome = null; }
     }
 
     async function refresh() {
@@ -212,6 +259,7 @@
         if (major !== '0' || missing.length) {
           throw new Error(`Unsupported runtime contract ${contract.contractVersion}${missing.length ? `; missing ${missing.join(', ')}` : ''}`);
         }
+        await loadWelcome();
         await refresh();
         connectEvents();
       } catch (error) {
