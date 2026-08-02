@@ -41,6 +41,7 @@ developer down a path it cannot finish.
   "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read", "shell.protocol"],
   "manifest": {
     "ok": true, "errors": [], "warnings": [], "surfaces": 1,
+    "seats": { "count": 1, "source": "package", "attachable": false },
     "state": "ok",
     "lastLoadedAt": "<ISO timestamp of the last successful load>",
     "reloads": 1,

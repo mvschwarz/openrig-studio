@@ -160,6 +160,36 @@ appear on the rail, the reason is spelled out there.
 - `chatSeats[]` — the agent-sidebar roster (`{seat, name}` rows). The shell
   renders it; surfaces may summon it (see `shell-protocol.md`). Surfaces do
   **not** write it, and it is not part of the surface-row schema.
+- `chatLocalPort` — the port a seat terminal is served on when the shell is
+  reached over loopback. Without it a declared roster is **listed but not
+  attachable**, which is a configuration gap rather than an empty rig, and the
+  runtime warns saying so.
+
+### Seats REPLACE; surfaces MERGE (stable)
+
+These two behave differently and the difference is deliberate, so it is stated
+rather than left to be inferred from the word "overlay".
+
+**Surfaces merge.** The rail is the package's rows followed by yours; reusing an
+id shadows and warns.
+
+**The seat roster replaces.** If your overlay declares `chatSeats`, your roster
+is served *entire* and the package's is dropped. Merging would append the SDK's
+own fixture seat to every real box's roster — reinstating exactly the fiction
+the overlay exists to remove. A roster is a statement about who is actually
+there; a half-fictional one is worse than either half alone.
+
+Consequences worth knowing:
+
+- Declaring `chatSeats` at all takes ownership of the whole roster. There is no
+  way to add one seat to the package's list, and that is intentional.
+- A **declared but unusable** roster is warned, per case: not an array at all;
+  rows carrying no usable `seat`; or a roster with no `chatLocalPort`. Absence
+  is silent because the key is optional — a declaration that does nothing is
+  not.
+- `GET /api/contract` → `manifest.seats` reports `{ count, source, attachable }`.
+  **`source` is the field to check:** `"package"` while you have an overlay
+  configured means your declaration did not take.
 - `_note` — a human/agent-facing comment field. Ignored by the runtime.
 
 ## The example fixture posture

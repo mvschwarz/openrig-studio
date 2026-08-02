@@ -494,6 +494,47 @@ test("an idle overlay does not churn", async (t) => {
   assert.equal(after.integrityReloads, 0);
 });
 
+test("the seat report and the served roster cannot disagree about whose seats are live", async (t) => {
+  // These were computed in two places. A report that describes something the
+  // runtime is not doing is the failure this codebase keeps paying for, so the
+  // resolution lives in one function and this asserts the two consumers of it
+  // still agree — measured against a booted runtime, not read off the source.
+  const { dir, consumer } = scaffold();
+  fs.writeFileSync(path.join(consumer, "surfaces.json"), JSON.stringify({
+    surfaces: [CONSUMER_ROW],
+    chatSeats: [{ seat: "one@rig", name: "ONE" }, { seat: "two@rig", name: "TWO" }],
+    chatLocalPort: 8797,
+  }, null, 2));
+
+  const srv = await start(dir, ["--surfaces", consumer]);
+  t.after(() => srv.stop());
+
+  const report = (await srv.contract()).seats;
+  const served = JSON.parse(await srv.text("/surfaces.json"));
+
+  assert.equal(report.source, "consumer", "the consumer declared a roster; the report must say so");
+  assert.equal(report.count, served.chatSeats.length, "report count and served roster disagree");
+  assert.equal(report.attachable, served.chatLocalPort !== undefined);
+  assert.deepEqual(served.chatSeats.map((s) => s.seat), ["one@rig", "two@rig"]);
+
+  // REPLACE, not merge: the package fixture seat must not ride along, or every
+  // real box's roster carries the SDK's invented seat.
+  assert.ok(!served.chatSeats.some((s) => /fixture/.test(s.seat)),
+    "the package fixture seat was merged into the consumer roster");
+});
+
+test("with an overlay that declares NO seats, the report says the roster is the package's", async (t) => {
+  // The discriminating half. Without this, `source` could be hardcoded to
+  // "consumer" whenever an overlay exists and the test above would still pass.
+  const { dir, consumer } = scaffold();
+  const srv = await start(dir, ["--surfaces", consumer]);
+  t.after(() => srv.stop());
+
+  const report = (await srv.contract()).seats;
+  assert.equal(report.source, "package", "an overlay with no chatSeats must not claim the roster");
+  assert.equal(report.attachable, false, "the package fixture declares no chatLocalPort");
+});
+
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
 });

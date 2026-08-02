@@ -379,6 +379,31 @@ function mergedSurfaces() {
   return { rows: [...byId.values()], warnings, errors, owner };
 }
 
+// Which roster is actually SERVED, and from where.
+//
+// Surfaces MERGE (package rows plus consumer rows, id-shadow warned). The seat
+// roster REPLACES: a declared consumer roster wins entire. That asymmetry is
+// deliberate — merging would append the SDK's fixture seat to every real box's
+// roster, reinstating exactly the fiction the seam exists to remove. It is
+// documented in contract/manifest.md because the behaviours differ and the
+// word "merge" invites the wrong assumption.
+//
+// One function so the served document and the contract report cannot disagree
+// about whose roster is live. Two places computing it independently is how a
+// report ends up describing something the runtime is not doing.
+function servedSeats() {
+  const overlay = consumerSource?.result?.doc;
+  const pkg = packageSource.result.doc;
+  const fromConsumer = overlay && typeof overlay === "object" && Array.isArray(overlay.chatSeats);
+  const doc = fromConsumer ? overlay : (pkg && typeof pkg === "object" ? pkg : {});
+  const rows = Array.isArray(doc.chatSeats) ? doc.chatSeats : [];
+  return {
+    rows,
+    source: fromConsumer ? "consumer" : "package",
+    chatLocalPort: doc.chatLocalPort,
+  };
+}
+
 // The aggregate the rail actually is: every source's errors and warnings, and
 // the merged row count. Per-source detail hangs off it so a reader can tell
 // WHICH manifest is unhealthy rather than only that something is.
@@ -393,6 +418,17 @@ function manifestReport() {
     errors,
     warnings,
     surfaces: merged.rows.length,
+    // A consumer that declares a roster must be able to ASK whether it was
+    // read, rather than infer it from what the sidebar happens to render.
+    // `source` is the whole point: "package" while an overlay is configured
+    // means the consumer's declaration did not take, which is the failure this
+    // field exists to make visible. `attachable` distinguishes listed-but-not-
+    // reachable from an empty rig — different causes a viewer can act on
+    // differently.
+    seats: (() => {
+      const s = servedSeats();
+      return { count: s.rows.length, source: s.source, attachable: s.chatLocalPort !== undefined };
+    })(),
     // Top-level state fields describe the PACKAGE source, unchanged in meaning
     // from before the seam existed. The consumer's are under `consumer`.
     ...packageSource.state,
@@ -697,9 +733,15 @@ http.createServer((req, res) => {
     // is worse than an unsupported one. The sidebar is the product thesis, so
     // a fixture seat sitting in that panel on a real box is the same lie as a
     // fixture rig on the floor.
-    const overlay = consumerSource?.result?.doc && typeof consumerSource.result.doc === "object" ? consumerSource.result.doc : {};
-    const seats = Array.isArray(overlay.chatSeats) ? { chatSeats: overlay.chatSeats } : {};
-    const chatPort = overlay.chatLocalPort != null ? { chatLocalPort: overlay.chatLocalPort } : {};
+    // Resolved by servedSeats() rather than inline, so the document the shell
+    // reads and the report at /api/contract can never disagree about whose
+    // roster is live. They were computed in two places; a report that describes
+    // something the runtime is not doing is the failure mode this codebase
+    // keeps paying for, and two copies of one rule is how you get there.
+    const live = servedSeats();
+    const seats = live.source === "consumer" ? { chatSeats: live.rows } : {};
+    const chatPort = live.source === "consumer" && live.chatLocalPort !== undefined
+      ? { chatLocalPort: live.chatLocalPort } : {};
     return sendJson(res, 200, { ...doc, ...seats, ...chatPort, surfaces: mergedSurfaces().rows });
   }
 
