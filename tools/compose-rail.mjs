@@ -93,7 +93,11 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
       const pkg = m.provider.package;
       providers.add(pkg);
       if (!providerRuns.has(pkg)) {
-        providerRuns.set(pkg, { package: pkg, run: m.provider.run, serves: m.provider.serves ?? [], verbs: [...(m.verbs ?? [])], declaredBy: m.id });
+        // Copy the run spec rather than aliasing the manifest's own object:
+        // companions merge across apps below, and merging into the first app's
+        // parsed manifest would edit one app's declaration on behalf of another.
+        const run = { ...m.provider.run, companions: [...(m.provider.run?.companions ?? [])] };
+        providerRuns.set(pkg, { package: pkg, run, serves: m.provider.serves ?? [], verbs: [...(m.verbs ?? [])], declaredBy: m.id });
       } else {
         const first = providerRuns.get(pkg);
         if (m.provider.run?.entry && first.run?.entry !== m.provider.run.entry) {
@@ -101,6 +105,19 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
         }
         for (const s of m.provider.serves ?? []) if (!first.serves.includes(s)) first.serves.push(s);
         for (const v of m.verbs ?? []) if (!first.verbs.includes(v)) first.verbs.push(v);
+        // Companions merge like serves and verbs, and for the same reason:
+        // first-declaration-wins on the whole run spec would DROP a companion
+        // only the second app declared, which is the accepted-but-unperformed
+        // failure reintroduced by the composer instead of the launcher. Same
+        // entry declared twice with different args is a real disagreement about
+        // how to start one process, so it is reported rather than resolved.
+        for (const c of m.provider.run?.companions ?? []) {
+          const seen = first.run.companions.find((x) => x.entry === c.entry);
+          if (!seen) { first.run.companions.push(c); continue; }
+          if (JSON.stringify(seen.args ?? []) !== JSON.stringify(c.args ?? [])) {
+            missing.push(`${m.id}: declares ${pkg} companion "${c.entry}" with different args than ${first.declaredBy} declared`);
+          }
+        }
       }
     }
     log(`${m.id} — ${m.provider?.package ?? "ultralight, no provider"}`);

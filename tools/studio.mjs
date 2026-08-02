@@ -139,6 +139,14 @@ const resolveArgs = (args, pkg) => {
 };
 const serves = new Map();   // byte-route prefix -> port
 const verbs = new Map();    // /api/ verb -> the provider that DECLARED it
+// A provider is not always ONE process. Some verbs only ACCEPT work — the thing
+// that performs it is a long-running companion (a renderer, a watcher). Those
+// were declared in the manifest and never started, so cutdown's write verbs
+// took a punch, wrote a real marker, and nothing ever rendered: the UI sat on
+// "cutting…" forever. That is the accepted-but-unperformed failure, and it is
+// worse than a 502 because every cheap check passes — the verb answers, the
+// data changes on disk, and only the product is inert.
+const missingCompanions = [];
 for (const [pkg, spec] of rail.providerRuns) {
   const dir = path.join(appsRoot, "providers", path.basename(pkg));
   const entry = spec.run?.entry && path.join(dir, spec.run.entry);
@@ -149,6 +157,28 @@ for (const [pkg, spec] of rail.providerRuns) {
   for (const s of spec.serves ?? []) serves.set(s, providerPorts.get(pkg));
   for (const v of spec.verbs ?? []) verbs.set(v, providerPorts.get(pkg));
   console.log(`  provider: ${pkg} on ${providerPorts.get(pkg)}`);
+  // Declaring a companion IS declaring a requirement — an app that does not
+  // need one does not list one. So a declared companion whose file is absent
+  // is refused by name rather than skipped, for the same reason the rail
+  // refuses when apps are declared and none composed: a studio that looks
+  // healthy while silently swallowing work is the camouflage we keep paying for.
+  for (const c of spec.run.companions ?? []) {
+    const cEntry = c.entry && path.join(dir, c.entry);
+    if (!cEntry || !fs.existsSync(cEntry)) {
+      missingCompanions.push(`${pkg} declares companion "${c.label ?? c.entry}" (${c.entry}) — not found at ${cEntry}`);
+      continue;
+    }
+    const cEnv = {};
+    for (const [k, v] of Object.entries(c.env ?? {})) cEnv[k] = resolveArgs([v], pkg)[0];
+    spawnChild(`${pkg}:${c.label ?? c.entry}`, cEntry, resolveArgs(c.args, pkg), cEnv);
+    console.log(`  companion: ${pkg} — ${c.label ?? c.entry}`);
+  }
+}
+if (missingCompanions.length) {
+  console.error("studio: a declared companion process is missing, so verbs that enqueue for it would accept work nothing performs:");
+  for (const m of missingCompanions) console.error(`  ${m}`);
+  console.error("Refusing to start rather than serve a studio whose write verbs silently do nothing.");
+  process.exit(1);
 }
 spawnChild("runtime", RUNTIME, ["--port", String(sdkPort), "--surfaces", rail.surfacesOut,
   ...(config.fixtures ? ["--fixtures", exp(config.fixtures)] : [])]);
@@ -167,7 +197,20 @@ const SDK_OWNED = new Set(["/api/contract", "/api/factory/state", "/api/events"]
 // video and cutdown verbs 404'd while the host provider answered — the apps
 // were installed, running, and unreachable. Each app DECLARES its verbs; route
 // by that. The single-provider fallback stays for a studio that has one.
+// A verb ending in "/" is a PREFIX, exactly like a byte route in `serves`.
+// Some verbs carry an id in the path (/api/export-status/<jobId>), so an
+// exact-match table can never route them and the app 404s on a verb it
+// correctly declared. Reusing the trailing-slash rule the manifest already
+// uses for byte routes means no second syntax to learn and nothing new to
+// declare — "/api/export-status/" matches its children, "/api/health" does not.
 const soleProvider = providerPorts.size === 1 ? [...providerPorts.values()][0] : null;
+const verbPrefixes = [...verbs.entries()].filter(([v]) => v.endsWith("/"));
+const routeVerb = (pathname) => {
+  const exact = verbs.get(pathname);
+  if (exact) return exact;
+  for (const [prefix, port] of verbPrefixes) if (pathname.startsWith(prefix)) return port;
+  return null;
+};
 
 http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
@@ -181,7 +224,7 @@ http.createServer((req, res) => {
   }
   for (const [prefix, p] of serves) if (url.pathname.startsWith(prefix)) return proxy(p)(req, res);
   if (url.pathname.startsWith("/api/") && !SDK_OWNED.has(url.pathname)) {
-    const p = verbs.get(url.pathname) ?? soleProvider;
+    const p = routeVerb(url.pathname) ?? soleProvider;
     if (p) return proxy(p)(req, res);
   }
   return proxy(sdkPort)(req, res);

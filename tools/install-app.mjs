@@ -156,6 +156,11 @@ function checkRunnable(m) {
 }
 
 // Roots are KINDS. The install binds them; the manifest must not name paths.
+// The kind a manifest declares and the key that binds it are deliberately
+// different words, so the refusal names BOTH — being told to bind "footage"
+// without being told the key is "footageRoot" sends you looking for the wrong
+// thing in the right file.
+const ROOT_KEYS = { project: "sliceRoot", media: "mediaRoots[]", canvas: "canvasRoot", footage: "footageRoot" };
 function checkRoots(m) {
   const roots = m.roots ?? {};
   const bound = { project: config.sliceRoot, media: config.mediaRoots?.[0], canvas: config.canvasRoot, footage: config.footageRoot };
@@ -166,7 +171,7 @@ function checkRoots(m) {
     }
     bound[kind]
       ? ok(`root "${kind}" binds to ${bound[kind]}`)
-      : fail(`root "${kind}" has no binding on this box`, `add a binding for "${kind}" to studio.config.json`);
+      : fail(`root "${kind}" has no binding on this box`, `add a binding for "${kind}" to ${path.basename(CONFIG_PATH)} (${ROOT_KEYS[kind] ?? "see the roots section"})`);
   }
 }
 
