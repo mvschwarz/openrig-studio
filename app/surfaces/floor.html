@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rig Floor</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e13;
+      --panel: #121722;
+      --line: #252c3a;
+      --text: #f3f5f8;
+      --muted: #929cad;
+      --working: #47d18c;
+      --idle: #6d9eff;
+      --blocked: #ffb44a;
+      --stalled: #ff795f;
+      --down: #77808f;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 80% 0%, #172032 0, transparent 34%), var(--bg);
+      color: var(--text);
+      font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    main { width: min(1040px, 100%); margin: 0 auto; padding: 28px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+    .eyebrow { color: var(--working); font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 4px 0 0; font: 600 clamp(28px, 5vw, 46px)/1.05 system-ui, sans-serif; letter-spacing: -.04em; }
+    .connection { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--blocked); box-shadow: 0 0 0 4px #ffb44a18; }
+    .connection.live .pulse { background: var(--working); box-shadow: 0 0 0 4px #47d18c18; }
+    .connection.polling .pulse { background: var(--idle); box-shadow: 0 0 0 4px #6d9eff18; }
+
+    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+    .stat, .seat, .queue-item, .notice { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); border-radius: 12px; }
+    .stat { padding: 14px 16px; }
+    .stat b { display: block; font: 650 24px/1 system-ui, sans-serif; margin-bottom: 5px; }
+    .stat span, .meta, .empty { color: var(--muted); font-size: 12px; }
+    section { margin-top: 24px; }
+    h2 { margin: 0 0 10px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+    .seats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .seat { padding: 15px; position: relative; overflow: hidden; }
+    .seat::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--state); }
+    .seat-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+    .seat-name { overflow-wrap: anywhere; font-weight: 650; }
+    .badge { color: var(--state); border: 1px solid color-mix(in srgb, var(--state) 45%, transparent); border-radius: 999px; padding: 2px 7px; font-size: 10px; text-transform: uppercase; }
+    .seat .meta { margin-top: 12px; display: flex; justify-content: space-between; gap: 8px; }
+    .working { --state: var(--working); }
+    .idle { --state: var(--idle); }
+    .blocked { --state: var(--blocked); }
+    .stalled { --state: var(--stalled); }
+    .down { --state: var(--down); }
+    .queue { display: grid; gap: 8px; }
+    .queue-item { padding: 13px 15px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; }
+    .queue-title { font-weight: 600; }
+    .queue-state { color: var(--idle); font-size: 11px; text-transform: uppercase; }
+    .queue-route { grid-column: 1 / -1; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+    .notice { padding: 18px; color: var(--blocked); }
+    footer { margin-top: 22px; color: var(--muted); font-size: 11px; }
+    @media (max-width: 600px) {
+      main { padding: 18px; }
+      header { align-items: start; flex-direction: column; }
+      .summary { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><div class="eyebrow">Live activity</div><h1 id="rig">Rig floor</h1></div>
+      <div id="connection" class="connection"><span class="pulse"></span><span>connecting</span></div>
+    </header>
+    <div id="content"><div class="notice">Reading the runtime contract…</div></div>
+    <footer id="updated"></footer>
+  </main>
+
+  <script>
+    const content = document.querySelector('#content');
+    const rig = document.querySelector('#rig');
+    const updated = document.querySelector('#updated');
+    const connection = document.querySelector('#connection');
+    let events;
+    let pollTimer;
+    let reconnectTimer;
+
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    })[char]);
+
+    function setConnection(mode, label) {
+      connection.className = `connection ${mode}`;
+      connection.lastElementChild.textContent = label;
+    }
+
+    function render(state) {
+      if (!state.ok) {
+        content.innerHTML = `<div class="notice">Data degraded: ${escapeHtml(state.degraded || 'unknown reason')}</div>`;
+        rig.textContent = 'Rig floor';
+        updated.textContent = '';
+        return;
+      }
+
+      rig.textContent = state.rig;
+      const working = state.seats.filter(seat => seat.state === 'working').length;
+      const attention = state.seats.filter(seat => ['blocked', 'stalled', 'down'].includes(seat.state)).length;
+      const pending = state.queue.length;
+      const seats = state.seats.map(seat => `
+        <article class="seat ${escapeHtml(seat.state)}">
+          <div class="seat-top">
+            <div class="seat-name">${escapeHtml(seat.seat)}</div>
+            <span class="badge">${escapeHtml(seat.state)}</span>
+          </div>
+          <div class="meta">
+            <span>${escapeHtml(seat.pod)} / ${escapeHtml(seat.member)}</span>
+            <span>${seat.ageMinutes == null ? 'age unknown' : `${escapeHtml(seat.ageMinutes)}m`}</span>
+          </div>
+          <div class="meta">
+            <span>${escapeHtml(seat.lifecycle)}</span>
+            <span>${escapeHtml(seat.pendingWork)} pending</span>
+          </div>
+        </article>`).join('') || '<div class="empty">No seats reported.</div>';
+      const queue = state.queue.map(item => `
+        <article class="queue-item">
+          <div class="queue-title">${escapeHtml(item.title)}</div>
+          <div class="queue-state">${escapeHtml(item.state)}</div>
+          <div class="queue-route">${escapeHtml(item.source)} → ${escapeHtml(item.destination)}</div>
+        </article>`).join('') || '<div class="empty">Queue is clear.</div>';
+
+      content.innerHTML = `
+        <div class="summary">
+          <div class="stat"><b>${working}</b><span>working now</span></div>
+          <div class="stat"><b>${attention}</b><span>need attention</span></div>
+          <div class="stat"><b>${pending}</b><span>queue items</span></div>
+        </div>
+        <section><h2>Seats · ${state.seats.length}</h2><div class="seats">${seats}</div></section>
+        <section><h2>Queue · ${state.queue.length}</h2><div class="queue">${queue}</div></section>`;
+      updated.textContent = `Runtime snapshot · ${new Date(state.generatedAt).toLocaleString()}`;
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch('/api/factory/state', { cache: 'no-store' });
+        const state = await response.json();
+        render(state);
+      } catch (error) {
+        content.innerHTML = `<div class="notice">Unable to read floor state: ${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    function startPolling() {
+      clearInterval(pollTimer);
+      pollTimer = setInterval(refresh, 15000);
+      setConnection('polling', 'polling fallback');
+    }
+
+    function connectEvents() {
+      clearTimeout(reconnectTimer);
+      if (events) events.close();
+      events = new EventSource('/api/events');
+      events.onopen = () => {
+        clearInterval(pollTimer);
+        setConnection('live', 'live signal');
+        refresh();
+      };
+      events.onmessage = () => refresh();
+      events.addEventListener('degraded', () => {
+        events.close();
+        startPolling();
+        reconnectTimer = setTimeout(connectEvents, 15000);
+      });
+      events.onerror = () => {
+        events.close();
+        startPolling();
+        reconnectTimer = setTimeout(connectEvents, 15000);
+      };
+    }
+
+    async function boot() {
+      try {
+        const response = await fetch('/api/contract', { cache: 'no-store' });
+        const contract = await response.json();
+        const needed = ['observe.factory-state', 'stream.events'];
+        const missing = needed.filter(capability => !contract.capabilities.includes(capability));
+        // contract-meta compatibility rule: capabilities present + same major.
+        // (Exact-match rejects contract-compatible minor runtimes.)
+        const major = String(contract.contractVersion ?? '').split('.')[0];
+        if (major !== '0' || missing.length) {
+          throw new Error(`Unsupported runtime contract ${contract.contractVersion}${missing.length ? `; missing ${missing.join(', ')}` : ''}`);
+        }
+        await refresh();
+        connectEvents();
+      } catch (error) {
+        content.innerHTML = `<div class="notice">Cannot start: ${escapeHtml(error.message)}</div>`;
+        startPolling();
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

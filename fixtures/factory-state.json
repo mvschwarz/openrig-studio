@@ -1,0 +1,21 @@
+{
+  "rig": "fixture-rig",
+  "seats": [
+    { "seat": "dev-driver@fixture-rig", "pod": "dev", "member": "driver", "state": "working",
+      "ageMinutes": 2, "hasWork": true, "pendingWork": 1, "lifecycle": "running" },
+    { "seat": "dev-qa@fixture-rig", "pod": "dev", "member": "qa", "state": "idle",
+      "ageMinutes": 14, "hasWork": false, "pendingWork": 0, "lifecycle": "running" },
+    { "seat": "orch-lead@fixture-rig", "pod": "orch", "member": "lead", "state": "blocked",
+      "ageMinutes": 31, "hasWork": true, "pendingWork": 3, "lifecycle": "running" },
+    { "seat": "review-r1@fixture-rig", "pod": "review", "member": "r1", "state": "down",
+      "ageMinutes": null, "hasWork": false, "pendingWork": 0, "lifecycle": "stopped" }
+  ],
+  "queue": [
+    { "id": "qitem-fixture-0001", "state": "in-progress", "destination": "dev-driver@fixture-rig",
+      "source": "orch-lead@fixture-rig", "tags": ["fixture", "demo"], "updated": "2026-07-31T00:00:00.000Z",
+      "title": "Implement the widget endpoint" },
+    { "id": "qitem-fixture-0002", "state": "pending", "destination": "dev-qa@fixture-rig",
+      "source": "dev-driver@fixture-rig", "tags": ["fixture", "review"], "updated": "2026-07-31T00:05:00.000Z",
+      "title": "Review the widget endpoint change" }
+  ]
+}

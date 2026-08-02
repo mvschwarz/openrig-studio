@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mvschwarz/openrig-studio/blob/main/contract/surface-row.schema.json",
+  "title": "openrig studio — surface manifest row (contract v0.1)",
+  "description": "One row in surfaces.json surfaces[]. Stability: fields marked x-stability 'stable' change only additively while the contract is 0.x; 'provisional' fields may change with a minor bump. The runtime validates warn-first: rows failing required checks are excluded from the served rail and named in GET /api/contract manifest.errors[]; unknown fields are warnings, never errors.",
+  "type": "object",
+  "required": ["id", "name"],
+  "oneOf": [
+    { "required": ["path"], "not": { "required": ["url"] } },
+    { "required": ["url"], "not": { "required": ["path"] } }
+  ],
+  "properties": {
+    "id": {
+      "type": "string", "minLength": 1,
+      "description": "Unique surface id. Used by deep links (?s=<id>) and the open-surface shell message.",
+      "x-stability": "stable"
+    },
+    "name": {
+      "type": "string", "minLength": 1,
+      "description": "Rail label. Short, uppercase by convention.",
+      "x-stability": "stable"
+    },
+    "path": {
+      "type": "string", "pattern": "^/",
+      "description": "Same-origin path the shell loads in the stage iframe (e.g. /surfaces/mine.html). Exactly one of path or url is required.",
+      "x-stability": "stable"
+    },
+    "url": {
+      "type": "string", "pattern": "^https?://[^/?#\\s]+",
+      "description": "Absolute http(s) URL with a non-empty host (e.g. https://host/path) for external surfaces. Exactly one of path or url is required — never both.",
+      "x-stability": "provisional"
+    },
+    "glyph": { "type": "string", "description": "One-character rail glyph.", "x-stability": "stable" },
+    "hint": { "type": "string", "description": "One-line tooltip shown on the rail tab.", "x-stability": "stable" },
+    "category": { "type": "string", "description": "Grouping hint (create | build | grow | system by convention).", "x-stability": "provisional" },
+    "popout": { "type": "boolean", "description": "Open in a new tab instead of the stage.", "x-stability": "stable" },
+    "hideAgents": { "type": "boolean", "description": "Suppress the agent-sidebar toggle while this surface is active.", "x-stability": "stable" },
+    "unmountOnBlur": { "type": "boolean", "description": "Remove the iframe when backgrounded instead of keeping it alive. Required for terminal-style surfaces: a hidden kept-alive client would stay attached and fight visible clients.", "x-stability": "stable" },
+    "railMin": { "type": "boolean", "description": "Ask the shell to condense its rail while this surface is active.", "x-stability": "provisional" },
+    "project": { "type": "string", "description": "Project-view scoping tag; surfaces without it show in every view.", "x-stability": "provisional" },
+    "port": { "type": "number", "description": "Multi-process deployments only: the localhost port this surface's own server listens on. Single-runtime deployments use path.", "x-stability": "provisional" },
+    "sub": { "type": "string", "description": "Multi-host deployments only: subdomain token for hosted resolution.", "x-stability": "provisional" },
+    "samehost": { "type": "boolean", "description": "Resolve against the shell's own origin in hosted deployments.", "x-stability": "provisional" },
+    "hosts": { "type": "array", "items": { "type": "string" }, "description": "Restrict the row to named host classes; omitted = everywhere.", "x-stability": "provisional" }
+  }
+}

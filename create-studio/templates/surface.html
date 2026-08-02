@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{LABEL}}</title>
+  <!--
+    {{LABEL}} — an openrig studio surface skeleton.
+    Targets contract v{{CONTRACT_VERSION}}. Read contract/contract-meta.md first.
+
+    Everything below uses ONLY stable-classified contract items:
+      GET /api/contract        capability + version check at boot
+      GET /api/factory/state   the read-only observe verb this skeleton renders
+      GET /api/events          change signal — refresh-only, payload never parsed
+      postMessage open-agent   the surface -> shell channel
+
+    It deliberately uses nothing marked provisional or runtime-internal.
+    Extend it by adding your own render; the loop below already keeps you fresh.
+  -->
+  <style>
+    :root {
+      /* The shell is dark. Declaring this stops a light flash on load, which
+         reads as a broken surface. (contract/shell-protocol.md) */
+      color-scheme: dark;
+      --bg: #0b0e13;
+      --panel: #121722;
+      --line: #252c3a;
+      --text: #f3f5f8;
+      --muted: #929cad;
+      --accent: #47d18c;
+      --warn: #ffb44a;
+      --info: #6d9eff;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    main { width: min(880px, 100%); margin: 0 auto; padding: 26px; }
+
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; flex-wrap: wrap; margin-bottom: 22px;
+    }
+    .eyebrow {
+      color: var(--accent); font-size: 11px;
+      letter-spacing: .16em; text-transform: uppercase;
+    }
+    h1 {
+      margin: 4px 0 0;
+      font: 600 clamp(24px, 4vw, 34px)/1.1 system-ui, sans-serif;
+      letter-spacing: -.03em;
+    }
+    .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+    .status.live .dot { background: var(--accent); }
+    .status.polling .dot { background: var(--info); }
+
+    .cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+    .card {
+      border: 1px solid var(--line); border-radius: 12px;
+      background: var(--panel); padding: 16px;
+    }
+    .card h2 {
+      margin: 0 0 10px; font-size: 11px; font-weight: 600; color: var(--muted);
+      letter-spacing: .14em; text-transform: uppercase;
+    }
+    .big { font: 650 26px/1 system-ui, sans-serif; }
+    .row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; }
+    .row + .row { border-top: 1px solid var(--line); }
+    .key { color: var(--muted); }
+    .val { overflow-wrap: anywhere; text-align: right; }
+
+    .notice {
+      border: 1px solid var(--warn); border-radius: 12px;
+      padding: 15px; color: var(--warn); background: #ffb44a10;
+    }
+
+    button {
+      font: inherit; color: var(--text); cursor: pointer;
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 9px; padding: 9px 13px;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+
+    footer { margin-top: 20px; color: var(--muted); font-size: 11px; }
+
+    @media (max-width: 600px) {
+      main { padding: 16px; }
+      header { flex-direction: column; align-items: flex-start; gap: 10px; }
+      .val { text-align: left; }
+      .row { flex-direction: column; gap: 2px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <div class="eyebrow">{{HINT}}</div>
+        <h1>{{LABEL}}</h1>
+      </div>
+      <div class="status" id="status"><span class="dot"></span><span id="statusText">connecting</span></div>
+    </header>
+
+    <div id="content">
+      <div class="notice">Reading the runtime contract&hellip;</div>
+    </div>
+
+    <p style="margin-top:18px">
+      <button id="agents" type="button">Open agent sidebar</button>
+    </p>
+
+    <footer id="footer">Targets contract v{{CONTRACT_VERSION}}.</footer>
+  </main>
+
+  <script>
+    // ---- what this surface needs from the runtime ---------------------------
+    // Every namespace listed here is checked at boot. A runtime that cannot
+    // serve one of them gets a visible failure, not a silent empty render.
+    const NEEDED = ["observe.factory-state", "stream.events"];
+    const TARGET_CONTRACT = {{CONTRACT_VERSION_JS}};
+    const POLL_MS = 15000; // contract/shell-protocol.md: 10-30s, 15s recommended
+
+    const content = document.querySelector("#content");
+    const statusEl = document.querySelector("#status");
+    const statusText = document.querySelector("#statusText");
+    const footer = document.querySelector("#footer");
+
+    let events = null;
+    let pollTimer = null;
+    let retryTimer = null;
+
+    const esc = (value) => String(value ?? "").replace(/[&<>'"]/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
+    })[c]);
+
+    function setStatus(mode, label) {
+      statusEl.className = "status " + mode;
+      statusText.textContent = label;
+    }
+
+    function showNotice(message) {
+      content.innerHTML = '<div class="notice">' + esc(message) + "</div>";
+    }
+
+    // ---- render ------------------------------------------------------------
+    // TODO: this is your starting point. Replace the body of render() with
+    // whatever your surface is actually for. The boot check, the change-signal
+    // loop and the failure handling around it are already correct — you should
+    // not need to touch them to build a normal surface.
+    function render(state) {
+      if (!state.ok) {
+        // A degraded read is the runtime being honest: healthy server, unhealthy
+        // data. Show it. Do not retry-loop. (contract/runtime-api.md)
+        showNotice("Data degraded: " + (state.degraded || "unknown reason"));
+        return;
+      }
+
+      const seats = Array.isArray(state.seats) ? state.seats : [];
+      const queue = Array.isArray(state.queue) ? state.queue : [];
+      const working = seats.filter((s) => s.state === "working").length;
+
+      const seatRows = seats.slice(0, 6).map((seat) => (
+        '<div class="row"><span class="key">' + esc(seat.seat) + "</span>" +
+        '<span class="val">' + esc(seat.state) + "</span></div>"
+      )).join("") || '<div class="row"><span class="key">no seats reported</span></div>';
+
+      content.innerHTML =
+        '<div class="cards">' +
+          '<div class="card"><h2>Rig</h2>' +
+            '<div class="big">' + esc(state.rig) + "</div>" +
+            '<div class="row"><span class="key">seats</span><span class="val">' + seats.length + "</span></div>" +
+            '<div class="row"><span class="key">working</span><span class="val">' + working + "</span></div>" +
+            '<div class="row"><span class="key">queue</span><span class="val">' + queue.length + "</span></div>" +
+          "</div>" +
+          '<div class="card"><h2>Seats</h2>' + seatRows + "</div>" +
+        "</div>";
+
+      footer.textContent =
+        "Targets contract v" + TARGET_CONTRACT +
+        " · snapshot " + new Date(state.generatedAt).toLocaleTimeString();
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch("/api/factory/state", { cache: "no-store" });
+        render(await response.json());
+      } catch (error) {
+        showNotice("Unable to read runtime state: " + error.message);
+      }
+    }
+
+    // ---- the change-signal loop --------------------------------------------
+    // A message means "something changed, re-fetch". The payload is NOT data
+    // and must never be parsed. (contract/runtime-api.md, stream section)
+    function startPolling() {
+      clearInterval(pollTimer);
+      pollTimer = setInterval(refresh, POLL_MS);
+      setStatus("polling", "polling fallback");
+    }
+
+    function fallback() {
+      if (events) { try { events.close(); } catch (e) { /* already closed */ } }
+      startPolling();
+      // Re-fetch NOW, not at the next poll tick. Without this the surface keeps
+      // showing the last good render for up to POLL_MS after the runtime goes
+      // away — stale data that still looks live. When something is wrong it has
+      // to LOOK wrong immediately. (contract/shell-protocol.md)
+      refresh();
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(connect, POLL_MS); // keep trying the stream
+    }
+
+    function connect() {
+      clearTimeout(retryTimer);
+      if (events) { try { events.close(); } catch (e) { /* already closed */ } }
+      events = new EventSource("/api/events");
+      events.onopen = () => {
+        clearInterval(pollTimer);
+        setStatus("live", "live signal");
+        refresh(); // no replay guarantee: re-fetch once on every (re)connect
+      };
+      events.onmessage = () => refresh();
+      events.addEventListener("degraded", fallback); // signal source unhealthy
+      events.onerror = fallback;
+    }
+
+    // ---- boot --------------------------------------------------------------
+    async function boot() {
+      try {
+        const response = await fetch("/api/contract", { cache: "no-store" });
+        const contract = await response.json();
+
+        // The compatibility rule from contract/contract-meta.md: capabilities
+        // present + same MAJOR version. An exact-match check would refuse
+        // runtimes that are contractually guaranteed to work.
+        const missing = NEEDED.filter((n) => !(contract.capabilities || []).includes(n));
+        const major = String(contract.contractVersion ?? "").split(".")[0];
+        const wantMajor = TARGET_CONTRACT.split(".")[0];
+
+        if (major !== wantMajor || missing.length) {
+          throw new Error(
+            "runtime contract v" + contract.contractVersion +
+            " cannot serve this surface (built for v" + TARGET_CONTRACT + ")" +
+            (missing.length ? "; missing capability: " + missing.join(", ") : "")
+          );
+        }
+
+        await refresh();
+        connect();
+      } catch (error) {
+        // Fail visibly, then degrade to polling rather than showing nothing.
+        showNotice("Cannot start: " + error.message);
+        startPolling();
+      }
+    }
+
+    // The only surface -> shell channel. Message set is closed for v0.1.
+    document.querySelector("#agents").addEventListener("click", () => {
+      parent.postMessage({ t: "open-agent" }, "*");
+    });
+
+    boot();
+  </script>
+</body>
+</html>

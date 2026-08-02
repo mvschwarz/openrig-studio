@@ -1,0 +1,18 @@
+{
+  "_note": "Surface manifest \u2014 the registry the shell renders and the runtime validates (warn-first). Row schema: contract/surface-row.schema.json; field semantics: contract/manifest.md. surfaces[] is the app-facing population. chatSeats[] is runtime-owned roster state (rendered by the shell's agent sidebar; not part of the app-facing schema).",
+  "surfaces": [
+    {
+      "id": "floor",
+      "name": "FLOOR",
+      "glyph": "●",
+      "path": "/surfaces/floor.html",
+      "hint": "Live rig-floor seats and queue activity"
+    }
+  ],
+  "chatSeats": [
+    {
+      "seat": "studio-lead@fixture",
+      "name": "LEAD"
+    }
+  ]
+}

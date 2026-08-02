@@ -1,0 +1,278 @@
+// Regression suite for create-studio. Zero dependencies — node:test only.
+//
+//   node --test create-studio/test/
+//
+// Two things the
+// original ad-hoc smoke testing missed, and which this suite exists to keep
+// missing-proof:
+//
+//   1. Option VALUES were never exercised. Admission was covered thoroughly, so
+//      the harness looked strong, but `--hint 'say "hello"'` emitted invalid
+//      JSON while the CLI exited 0. Every user-controlled field is now run
+//      through a hostile-value matrix.
+//   2. Nothing ran twice. A manual pass is not regression coverage: it
+//      does not run tomorrow.
+//
+// Assertion discipline: assert on CONTENT, never on exit status alone. A test
+// that only checks a non-zero exit passes just as happily on a syntax error in
+// the CLI as on a correct rejection. Rejection tests therefore assert the
+// expected REASON, and `positive control` proves the suite can actually fail.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync, execSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PKG = path.resolve(HERE, "..");
+const CLI = path.join(PKG, "index.mjs");
+const SCHEMA = JSON.parse(
+  fs.readFileSync(path.resolve(PKG, "..", "contract", "surface-row.schema.json"), "utf8")
+);
+
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "create-studio-test-"));
+
+function run(args, { cwd, env } = {}) {
+  try {
+    const stdout = execFileSync(process.execPath, [CLI, ...args], {
+      cwd: cwd ?? os.tmpdir(),
+      env: { ...process.env, ...env },
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { code: 0, stdout, stderr: "" };
+  } catch (e) {
+    return { code: e.status ?? 1, stdout: e.stdout ?? "", stderr: e.stderr ?? "" };
+  }
+}
+
+const emitted = (dir, name) => ({
+  row: JSON.parse(fs.readFileSync(path.join(dir, name, "surfaces.row.json"), "utf8")),
+  html: fs.readFileSync(path.join(dir, name, "surface.html"), "utf8"),
+  readme: fs.readFileSync(path.join(dir, name, "README.md"), "utf8"),
+});
+
+// Entries left behind under a parent, ignoring nothing — staging directories are
+// hidden, so a naive readdir that skipped dotfiles would hide exactly the
+// failure this checks for.
+const entries = (dir) => fs.readdirSync(dir);
+
+// ---------------------------------------------------------------- generation
+
+test("emits exactly the three project files and reports success", () => {
+  const dir = tmp();
+  const r = run(["my-surface", "--dir", dir]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(fs.readdirSync(path.join(dir, "my-surface")).sort(),
+    ["README.md", "surface.html", "surfaces.row.json"]);
+  assert.match(r.stdout, /created/);
+});
+
+test("emitted row is schema-shaped: required present, exactly one target, stable fields only", () => {
+  const dir = tmp();
+  assert.equal(run(["my-surface", "--dir", dir]).code, 0);
+  const { row } = emitted(dir, "my-surface");
+
+  for (const key of SCHEMA.required) assert.ok(key in row, `missing required field ${key}`);
+  assert.ok(("path" in row) !== ("url" in row), "must carry exactly one of path|url");
+
+  for (const key of Object.keys(row)) {
+    const prop = SCHEMA.properties[key];
+    assert.ok(prop, `emitted unknown field ${key}`);
+    assert.equal(prop["x-stability"], "stable",
+      `emitted ${key}, which is ${prop["x-stability"]} — the scaffolder emits stable fields only`);
+  }
+  assert.match(row.path, /^\//);
+});
+
+test("emitted surface targets the contract version and only stable endpoints", () => {
+  const dir = tmp();
+  assert.equal(run(["my-surface", "--dir", dir]).code, 0);
+  const { html } = emitted(dir, "my-surface");
+
+  assert.match(html, /const TARGET_CONTRACT = "0\.1"/);
+  const endpoints = [...html.matchAll(/\/api\/[a-z/]+/g)].map((m) => m[0]);
+  for (const e of new Set(endpoints)) {
+    assert.ok(["/api/contract", "/api/factory/state", "/api/events"].includes(e),
+      `emitted a non-stable endpoint: ${e}`);
+  }
+  // runtime-internal surfaces named in contract/runtime-api.md must never appear
+  assert.doesNotMatch(html, /files\/(write|goto|roots)|sidebar-arrangement|oauth|credential/i);
+});
+
+// ------------------------------------------------------------------ escaping
+// The regression that produced this suite. Every user-controlled field crossed
+// with every metacharacter class that has a different meaning in JSON, HTML or
+// Markdown.
+
+const HOSTILE = [
+  ['double quote', 'say "hello" now'],
+  ['backslash', "back\\slash and \\\" mix"],
+  ['newline', "line one\nline two"],
+  ['html metachars', '<strong>OWNED</strong> & <img src=x onerror=alert(1)>'],
+  ['markdown fence', "```json\nnot really\n```"],
+  ['json braces', '{"injected": true}'],
+  ['unicode + quote', '◆ "◆" ◆'],
+];
+
+for (const [label, value] of HOSTILE) {
+  test(`hint survives ${label} in every output context`, () => {
+    const dir = tmp();
+    const r = run(["my-surface", "--dir", dir, "--hint", value]);
+    assert.equal(r.code, 0, r.stderr);
+
+    // JSON context: must parse, and must round-trip the value EXACTLY.
+    const { row, html, readme } = emitted(dir, "my-surface");
+    assert.equal(row.hint, value, "hint did not round-trip through the emitted JSON");
+
+    // HTML context: no raw markup may survive into the document.
+    assert.doesNotMatch(html, /<strong>OWNED<\/strong>/);
+    assert.doesNotMatch(html, /<img src=x/);
+
+    // Markdown context: the fenced blocks in the README must still be balanced.
+    // Fences here are list-indented, so anchor on optional leading whitespace —
+    // matching only column-0 fences would silently skip them.
+    const fences = (readme.match(/^\s*```/gm) || []).length;
+    assert.equal(fences % 2, 0, "emitted README has an unbalanced code fence");
+
+    // The README's inline row must still be parseable JSON, and must be indented
+    // consistently — a ragged block is what a developer copy-pastes out.
+    const block = readme.match(/```json\n([\s\S]*?)\n\s*```/);
+    assert.ok(block, "emitted README lost its json block");
+    const lines = block[1].split("\n");
+    const indent = (l) => l.match(/^ */)[0].length;
+    assert.equal(indent(lines[0]), indent(lines[lines.length - 1]),
+      "json block is ragged: opening and closing braces are at different indents");
+    JSON.parse(block[1]);
+  });
+}
+
+for (const [label, value] of [['double quote', '"'], ['backslash', "\\"], ['newline', "\n"], ['angle bracket', "<"]]) {
+  test(`glyph survives ${label}`, () => {
+    const dir = tmp();
+    const r = run(["my-surface", "--dir", dir, "--glyph", value]);
+    assert.equal(r.code, 0, r.stderr);
+    const { row } = emitted(dir, "my-surface");
+    assert.equal(row.glyph, value, "glyph did not round-trip through the emitted JSON");
+  });
+}
+
+test("negative control: a plain hint also passes (the matrix is not vacuously green)", () => {
+  const dir = tmp();
+  assert.equal(run(["my-surface", "--dir", dir, "--hint", "plain text"]).code, 0);
+  assert.equal(emitted(dir, "my-surface").row.hint, "plain text");
+});
+
+// ----------------------------------------------------------------- admission
+
+const REJECTIONS = [
+  ["traversal", ["../evil"], /single path segment/],
+  ["absolute path", ["/tmp/evil"], /must not be an absolute/],
+  ["nested segment", ["a/b"], /single path segment/],
+  ["uppercase and punctuation", ["My Surface!"], /lowercase letters/],
+  ["empty name", [""], /project name is required/],
+  ["missing name", [], /project name is required/],
+  ["parent traversal name", [".."], /must not start with/],
+  ["leading dot", [".hidden"], /must not start with/],
+  ["reserved device name", ["con"], /is reserved/],
+  ["tilde", ["~evil"], /must not start with/],
+  ["trailing dash", ["bad-"], /lowercase letters/],
+  ["over-long name", ["a".repeat(65)], /characters; the limit/],
+];
+
+for (const [label, args, expected] of REJECTIONS) {
+  test(`rejects ${label} and writes nothing`, () => {
+    const dir = tmp();
+    const r = run([...args, "--dir", dir]);
+    assert.notEqual(r.code, 0, `expected rejection for ${label}`);
+    assert.match(r.stderr, expected, `wrong reason for ${label}: ${r.stderr}`);
+    assert.deepEqual(entries(dir), [], "a rejected run must leave the filesystem untouched");
+  });
+}
+
+test("rejects a multi-character glyph", () => {
+  const dir = tmp();
+  const r = run(["ok-name", "--dir", dir, "--glyph", "ab"]);
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /exactly one character/);
+  assert.deepEqual(entries(dir), []);
+});
+
+test("rejects an option missing its value, and an unknown option", () => {
+  const dir = tmp();
+  assert.match(run(["ok-name", "--dir"]).stderr, /needs a value/);
+  const r = run(["ok-name", "--bogus", "--dir", dir]);
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /unknown option/);
+  assert.deepEqual(entries(dir), []);
+});
+
+test("refuses a non-empty destination and leaves its contents intact", () => {
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, "occupied"));
+  fs.writeFileSync(path.join(dir, "occupied", "keep.txt"), "existing work");
+  const r = run(["occupied", "--dir", dir]);
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /is not empty/);
+  assert.equal(fs.readFileSync(path.join(dir, "occupied", "keep.txt"), "utf8"), "existing work");
+  assert.deepEqual(fs.readdirSync(path.join(dir, "occupied")), ["keep.txt"]);
+});
+
+test("accepts an existing EMPTY destination", () => {
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, "empty-dest"));
+  const r = run(["empty-dest", "--dir", dir]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.ok(fs.existsSync(path.join(dir, "empty-dest", "surface.html")));
+});
+
+test("refuses a destination whose parent does not exist", () => {
+  const r = run(["my-surface", "--dir", path.join(tmp(), "nope")]);
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /parent does not exist/);
+});
+
+// ------------------------------------------------------------------ atomicity
+
+test("a mid-generation failure leaves no project and no staging residue", () => {
+  const dir = tmp();
+  const r = run(["halfway", "--dir", dir], { env: { OPENRIG_STUDIO_CREATE_FAIL_AFTER: "2" } });
+  assert.notEqual(r.code, 0);
+  assert.match(r.stderr, /nothing was written/);
+  assert.deepEqual(entries(dir), [],
+    "destination or hidden staging directory survived a failed generation");
+});
+
+test("failure injection is inert when unset (the atomicity test is not self-fulfilling)", () => {
+  const dir = tmp();
+  assert.equal(run(["halfway", "--dir", dir]).code, 0);
+  assert.ok(fs.existsSync(path.join(dir, "halfway", "surface.html")));
+});
+
+// -------------------------------------------------------------- packaged bin
+
+test("the packed tarball exposes a working bin through npm's own resolution", { timeout: 180_000 }, () => {
+  const dir = tmp();
+  const packed = execSync(`npm pack ${JSON.stringify(PKG)} --pack-destination ${JSON.stringify(dir)}`,
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim().split("\n").pop();
+  const tarball = path.join(dir, packed);
+  assert.ok(fs.existsSync(tarball), "npm pack produced no tarball");
+
+  const out = path.join(dir, "out");
+  fs.mkdirSync(out);
+  execSync(`npm exec --yes --package=${JSON.stringify(tarball)} -- create-studio packed-check`,
+    { cwd: out, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+
+  assert.deepEqual(fs.readdirSync(path.join(out, "packed-check")).sort(),
+    ["README.md", "surface.html", "surfaces.row.json"]);
+  JSON.parse(fs.readFileSync(path.join(out, "packed-check", "surfaces.row.json"), "utf8"));
+});
+
+// ------------------------------------------------------------ suite sanity
+
+test("positive control: this suite is capable of failing", () => {
+  assert.throws(() => assert.equal(1, 2));
+});

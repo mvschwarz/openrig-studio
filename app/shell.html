@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>openrig studio</title>
+<style>
+  :root {
+    --ink: #121214; --panel: rgba(255,255,255,.025); --edge: rgba(255,255,255,.10);
+    --edge2: rgba(255,255,255,.16); --bone: rgba(255,255,255,.95); --dim: rgba(255,255,255,.52);
+    --body: rgba(255,255,255,.68); --faint: rgba(255,255,255,.38); --red: #ff6b5a;
+    --sans: Helvetica, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: dark; }
+  html, body { height: 100%; margin: 0; background: var(--ink); font-family: var(--sans); }
+  #app { display: flex; height: 100vh; }
+  #rail { width: 212px; min-width: 212px; background: var(--panel); border-right: 1px solid var(--edge);
+    display: flex; flex-direction: column; }
+  #rail-head { padding: 20px 16px 10px; color: var(--bone); font-weight: 700; letter-spacing: 4px; font-size: 13px; }
+  #rail-head small { display: block; color: var(--faint); font-weight: 400; letter-spacing: .14em;
+    font-size: 9.5px; margin-top: 5px; text-transform: uppercase; }
+  #tabs { flex: 1; overflow-y: auto; padding: 6px 8px; }
+  .tab { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; margin: 2px 0;
+    border: 1px solid transparent; border-radius: 2px; background: none; color: var(--body); cursor: pointer;
+    font: inherit; font-size: 12.5px; text-align: left; }
+  .tab:hover { color: var(--bone); border-color: var(--edge2); }
+  .tab.active { color: #111; background: var(--bone); border-color: var(--bone); font-weight: 600; }
+  .tab .glyph { font-size: 14px; width: 18px; text-align: center; }
+  .tab .dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--edge2); flex: none; }
+  .tab .dot.live { background: var(--bone); box-shadow: 0 0 6px rgba(255,255,255,.5); }
+  .tab.active .dot.live { background: #111; }
+  .tab .dot.down { background: var(--red); }
+  #manifest-health { padding: 8px 16px; font-size: 10px; letter-spacing: .06em; color: var(--faint); }
+  #manifest-health.bad { color: var(--red); }
+  #rail-foot { padding: 12px 16px; border-top: 1px solid var(--edge); color: var(--faint);
+    font-size: 10px; line-height: 1.6; }
+  #stage { flex: 1; position: relative; background: var(--ink); }
+  #stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--ink); }
+  #stage iframe.hidden { visibility: hidden; pointer-events: none; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--faint); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; }
+  #agents { width: 320px; min-width: 320px; display: none; flex-direction: column;
+    border-left: 1px solid var(--edge); background: var(--panel); }
+  #agents.open { display: flex; }
+  #agents-head { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--edge); }
+  #agents-head .word { color: var(--bone); font-size: 9.5px; letter-spacing: .22em; font-weight: 700; cursor: pointer; }
+  #agents-body { padding: 14px; color: var(--body); font-size: 12px; line-height: 1.6; }
+  #agents-body .seatrow { padding: 8px 10px; border: 1px solid var(--edge2); border-radius: 2px; margin-bottom: 6px; }
+  #agents-body .honest { color: var(--faint); font-size: 10.5px; margin-top: 10px; }
+  #agentToggle { position: absolute; right: 14px; top: 14px; z-index: 40; background: var(--bone);
+    border: none; border-radius: 2px; color: #111; font: inherit; font-size: 9.5px; letter-spacing: .18em;
+    text-transform: uppercase; font-weight: 600; padding: 9px 16px; cursor: pointer; }
+  /* hideAgents rows suppress the sidebar toggle while active (shell-protocol) */
+  body.hide-agents #agentToggle { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <nav id="rail">
+    <div id="rail-head">STUDIO<small>openrig studio · contract v0.1</small></div>
+    <div id="tabs"></div>
+    <div id="manifest-health"></div>
+    <div id="rail-foot">surfaces are rooms.<br/>this is the hallway.</div>
+  </nav>
+  <main id="stage"><div id="empty">no surfaces in the manifest yet</div>
+    <button id="agentToggle" title="the seat roster">AGENTS ▸</button>
+  </main>
+  <aside id="agents">
+    <div id="agents-head"><span class="word" id="agentsWord">AGENTS ▾</span></div>
+    <div id="agents-body"></div>
+  </aside>
+</div>
+<script>
+(async () => {
+  // --- contract meta first: the shell itself is a contract consumer -------
+  let meta = null;
+  try { meta = await (await fetch("/api/contract", { cache: "no-store" })).json(); } catch {}
+  const health = document.getElementById("manifest-health");
+  if (!meta) { health.className = "bad"; health.textContent = "runtime unreachable"; }
+  else if (!meta.manifest.ok) {
+    health.className = "bad";
+    health.textContent = `manifest: ${meta.manifest.errors.length} error(s) — see /api/contract`;
+  } else if (meta.manifest.warnings.length) {
+    health.textContent = `manifest ok · ${meta.manifest.warnings.length} warning(s)`;
+  } else { health.textContent = "manifest ok"; }
+
+  // --- surfaces from the manifest (valid rows only are served) ------------
+  let reg = { surfaces: [] };
+  try { reg = await (await fetch("/surfaces.json", { cache: "no-store" })).json(); } catch {}
+  // defense in depth: the runtime already serves valid rows only; still never
+  // render a row that lacks a target (a path-less row would recurse into "/")
+  const surfaces = (reg.surfaces || [])
+    .filter((s) => s && s.id && (s.url || (typeof s.path === "string" && s.path.startsWith("/"))))
+    .map((s) => s.url ? s : ({ ...s, url: location.origin + s.path }));
+
+  const tabsEl = document.getElementById("tabs");
+  const stage = document.getElementById("stage");
+  const frames = new Map();
+  let activeId = null;
+  const byId = (id) => surfaces.find((s) => s.id === id);
+
+  function activate(id, fromNav) {
+    const s = byId(id); if (!s) return;
+    if (!fromNav && activeId !== id) { try { history.pushState({ s: id }, "", "?s=" + encodeURIComponent(id)); } catch {} }
+    if (s.popout) { window.open(s.url, "os-" + s.id); return; }
+    activeId = id;
+    document.getElementById("empty").style.display = "none";
+    // unmountOnBlur rows release their frame when backgrounded (terminal-
+    // style surfaces must not keep hidden attached clients alive)
+    for (const [fid, f] of frames) {
+      if (fid !== id && (byId(fid) || {}).unmountOnBlur) { f.remove(); frames.delete(fid); }
+    }
+    if (!frames.has(id)) {
+      const f = document.createElement("iframe");
+      f.src = s.url; f.title = s.name;
+      stage.appendChild(f); frames.set(id, f);
+    }
+    for (const [fid, f] of frames) f.classList.toggle("hidden", fid !== id);
+    for (const el of tabsEl.children) el.classList.toggle("active", el.dataset.id === id);
+    document.body.classList.toggle("hide-agents", !!s.hideAgents);
+    document.title = "openrig studio · " + s.name.toLowerCase();
+  }
+
+  function renderTabs() {
+    tabsEl.innerHTML = "";
+    for (const s of surfaces) {
+      const b = document.createElement("button");
+      b.className = "tab"; b.dataset.id = s.id;
+      b.innerHTML = `<span class="glyph">${s.glyph || "□"}</span><span>${s.name}</span><span class="dot" id="dot-${s.id}"></span>`;
+      b.title = s.hint || "";
+      b.onclick = () => activate(s.id);
+      if (s.id === activeId) b.classList.add("active");
+      tabsEl.appendChild(b);
+    }
+  }
+  renderTabs();
+
+  // liveness dots: an opaque no-cors fetch succeeds iff something answers
+  async function pulse() {
+    await Promise.all(surfaces.map(async (s) => {
+      const dot = document.getElementById("dot-" + s.id); if (!dot) return;
+      try { await fetch(s.url, { mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(2500) });
+        dot.className = "dot live"; } catch { dot.className = "dot down"; }
+    }));
+  }
+  pulse(); setInterval(pulse, 15000);
+
+  // deep link
+  const qs = new URLSearchParams(location.search).get("s");
+  if (byId(qs)) activate(qs, true); else if (surfaces[0]) activate(surfaces[0].id, true);
+  addEventListener("popstate", (e) => {
+    const id = (e.state && e.state.s) || new URLSearchParams(location.search).get("s");
+    if (id && byId(id)) activate(id, true);
+  });
+
+  // --- the shell protocol: the ONLY surface->shell API --------------------
+  addEventListener("message", (e) => {
+    if (!e.data || typeof e.data !== "object") return;
+    if (e.data.t === "open-surface" && byId(e.data.id)) activate(e.data.id);
+    if (e.data.t === "open-agent") openAgents(e.data.seat);
+  });
+
+  // --- agent sidebar: the contracted seat surface is roster + summon ------
+  // This reference runtime has no live seat backing; the sidebar says so
+  // honestly instead of pretending (a seat that looks attached but isn't
+  // would be worse than none).
+  const agents = document.getElementById("agents");
+  const agentsBody = document.getElementById("agents-body");
+  function openAgents(seat) {
+    const roster = reg.chatSeats || [];
+    agentsBody.innerHTML = (roster.length
+      ? roster.map((r) => `<div class="seatrow"${r.seat === seat ? ' style="border-color:rgba(255,255,255,.5)"' : ""}>${r.name || r.seat}<br/><span style="color:var(--faint);font-size:10px">${r.seat}</span></div>`).join("")
+      : `<div>no seats in the manifest roster</div>`)
+      + `<div class="honest">reference runtime: seat rows are declared in the manifest; live seat attach requires a seat backend, which this fixture-backed runtime does not include. Summoning works; typing is runtime-internal.</div>`;
+    agents.classList.add("open");
+    document.getElementById("agentToggle").style.display = "none";
+  }
+  document.getElementById("agentToggle").onclick = () => openAgents();
+  document.getElementById("agentsWord").onclick = () => {
+    agents.classList.remove("open");
+    document.getElementById("agentToggle").style.display = "";
+  };
+})();
+</script>
+</body>
+</html>

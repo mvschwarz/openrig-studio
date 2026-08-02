@@ -1,0 +1,22 @@
+{
+  "name": "@openrig/create-studio",
+  "version": "0.1.0",
+  "description": "Scaffold a new openrig studio surface project wired to contract v0.1.",
+  "type": "module",
+  "bin": {
+    "create-studio": "./index.mjs"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.mjs'"
+  },
+  "files": [
+    "index.mjs",
+    "lib",
+    "templates",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "Apache-2.0"
+}
