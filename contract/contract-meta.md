@@ -2,9 +2,24 @@
 
 contractVersion: 0.1
 
-This directory IS the openrig studio SDK contract. If you are a coding agent
-building a surface: read these four documents plus `surface-row.schema.json`,
-then build. Nothing outside this directory and the running runtime is required.
+This directory IS the openrig studio SDK contract **for building a surface**. If
+you are a coding agent building one: read these four documents plus
+`surface-row.schema.json`, then build. Nothing outside this directory and the
+running runtime is required to write a surface that loads in the shell.
+
+**Installing and running an APP is a wider job than writing a surface, and it is
+not yet described here.** An app that brings its own backend also needs a way to
+declare that backend, the directories it reads, the long-running processes it
+depends on, and which verbs route to it. That surface exists — it is `app.json`,
+`studio.json` and the tools in `tools/` — but it is **not yet contract**: it is
+unversioned, carries no stability marks, and may change without a contract
+version bump. Read `tools/install-app.mjs` and `tools/studio.mjs` for what they
+require today, and treat their shape as provisional until it lands here.
+
+Saying so is the point. This document previously claimed nothing outside it was
+required, which was true when the SDK only served surfaces and stopped being
+true once apps had backends. A contract that overstates its own coverage sends a
+developer down a path it cannot finish.
 
 ## The four documents
 
