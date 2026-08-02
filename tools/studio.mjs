@@ -106,7 +106,8 @@ const resolveArgs = (args, pkg) => {
   }
   return out;
 };
-const serves = new Map();   // route prefix -> port
+const serves = new Map();   // byte-route prefix -> port
+const verbs = new Map();    // /api/ verb -> the provider that DECLARED it
 for (const [pkg, spec] of rail.providerRuns) {
   const dir = path.join(appsRoot, "providers", path.basename(pkg));
   const entry = spec.run?.entry && path.join(dir, spec.run.entry);
@@ -115,6 +116,7 @@ for (const [pkg, spec] of rail.providerRuns) {
   for (const [k, v] of Object.entries(spec.run.env ?? {})) env[k] = resolveArgs([v], pkg)[0];
   spawnChild(pkg, entry, resolveArgs(spec.run.args, pkg), env);
   for (const s of spec.serves ?? []) serves.set(s, providerPorts.get(pkg));
+  for (const v of spec.verbs ?? []) verbs.set(v, providerPorts.get(pkg));
   console.log(`  provider: ${pkg} on ${providerPorts.get(pkg)}`);
 }
 spawnChild("runtime", RUNTIME, ["--port", String(sdkPort), "--surfaces", rail.surfacesOut,
@@ -130,7 +132,11 @@ const proxy = (p) => (req, res) => {
 const SDK_OWNED = new Set(["/api/contract", "/api/factory/state", "/api/events"]);
 // A provider is not only its /api/ verbs — byte routes are prefixes, declared
 // by the app. Leaving them out is why media listed and would not play.
-const firstProviderPort = [...providerPorts.values()][0];
+// Routing /api/* to "the first provider" only works with one. With three, the
+// video and cutdown verbs 404'd while the host provider answered — the apps
+// were installed, running, and unreachable. Each app DECLARES its verbs; route
+// by that. The single-provider fallback stays for a studio that has one.
+const soleProvider = providerPorts.size === 1 ? [...providerPorts.values()][0] : null;
 
 http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
@@ -143,8 +149,9 @@ http.createServer((req, res) => {
     res.writeHead(404); return res.end();
   }
   for (const [prefix, p] of serves) if (url.pathname.startsWith(prefix)) return proxy(p)(req, res);
-  if (url.pathname.startsWith("/api/") && !SDK_OWNED.has(url.pathname) && firstProviderPort) {
-    return proxy(firstProviderPort)(req, res);
+  if (url.pathname.startsWith("/api/") && !SDK_OWNED.has(url.pathname)) {
+    const p = verbs.get(url.pathname) ?? soleProvider;
+    if (p) return proxy(p)(req, res);
   }
   return proxy(sdkPort)(req, res);
 }).listen(port, "127.0.0.1", () => {

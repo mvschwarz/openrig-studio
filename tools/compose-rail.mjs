@@ -93,13 +93,14 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
       const pkg = m.provider.package;
       providers.add(pkg);
       if (!providerRuns.has(pkg)) {
-        providerRuns.set(pkg, { package: pkg, run: m.provider.run, serves: m.provider.serves ?? [], declaredBy: m.id });
+        providerRuns.set(pkg, { package: pkg, run: m.provider.run, serves: m.provider.serves ?? [], verbs: [...(m.verbs ?? [])], declaredBy: m.id });
       } else {
         const first = providerRuns.get(pkg);
         if (m.provider.run?.entry && first.run?.entry !== m.provider.run.entry) {
           missing.push(`${m.id}: declares ${pkg} entry "${m.provider.run.entry}" but ${first.declaredBy} declared "${first.run?.entry}"`);
         }
         for (const s of m.provider.serves ?? []) if (!first.serves.includes(s)) first.serves.push(s);
+        for (const v of m.verbs ?? []) if (!first.verbs.includes(v)) first.verbs.push(v);
       }
     }
     log(`${m.id} — ${m.provider?.package ?? "ultralight, no provider"}`);
