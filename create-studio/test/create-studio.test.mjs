@@ -51,7 +51,8 @@ function run(args, { cwd, env } = {}) {
 
 const emitted = (dir, name) => ({
   row: JSON.parse(fs.readFileSync(path.join(dir, name, "surfaces.row.json"), "utf8")),
-  html: fs.readFileSync(path.join(dir, name, "surface.html"), "utf8"),
+  html: fs.readFileSync(path.join(dir, name, `${name}.html`), "utf8"),
+  surfaces: JSON.parse(fs.readFileSync(path.join(dir, name, "surfaces.json"), "utf8")),
   readme: fs.readFileSync(path.join(dir, name, "README.md"), "utf8"),
 });
 
@@ -62,12 +63,12 @@ const entries = (dir) => fs.readdirSync(dir);
 
 // ---------------------------------------------------------------- generation
 
-test("emits exactly the three project files and reports success", () => {
+test("emits a runnable project and reports success", () => {
   const dir = tmp();
   const r = run(["my-surface", "--dir", dir]);
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(fs.readdirSync(path.join(dir, "my-surface")).sort(),
-    ["README.md", "surface.html", "surfaces.row.json"]);
+    ["README.md", "my-surface.html", "studio.json", "surfaces.json", "surfaces.row.json"]);
   assert.match(r.stdout, /created/);
 });
 
@@ -226,7 +227,7 @@ test("accepts an existing EMPTY destination", () => {
   fs.mkdirSync(path.join(dir, "empty-dest"));
   const r = run(["empty-dest", "--dir", dir]);
   assert.equal(r.code, 0, r.stderr);
-  assert.ok(fs.existsSync(path.join(dir, "empty-dest", "surface.html")));
+  assert.ok(fs.existsSync(path.join(dir, "empty-dest", "empty-dest.html")));
 });
 
 test("refuses a destination whose parent does not exist", () => {
@@ -249,7 +250,7 @@ test("a mid-generation failure leaves no project and no staging residue", () => 
 test("failure injection is inert when unset (the atomicity test is not self-fulfilling)", () => {
   const dir = tmp();
   assert.equal(run(["halfway", "--dir", dir]).code, 0);
-  assert.ok(fs.existsSync(path.join(dir, "halfway", "surface.html")));
+  assert.ok(fs.existsSync(path.join(dir, "halfway", "halfway.html")));
 });
 
 // -------------------------------------------------------------- packaged bin
@@ -267,7 +268,7 @@ test("the packed tarball exposes a working bin through npm's own resolution", { 
     { cwd: out, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
   assert.deepEqual(fs.readdirSync(path.join(out, "packed-check")).sort(),
-    ["README.md", "surface.html", "surfaces.row.json"]);
+    ["README.md", "packed-check.html", "studio.json", "surfaces.json", "surfaces.row.json"]);
   JSON.parse(fs.readFileSync(path.join(out, "packed-check", "surfaces.row.json"), "utf8"));
 });
 

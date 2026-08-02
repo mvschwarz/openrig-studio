@@ -145,11 +145,22 @@ function main() {
     // HTML context: escape every interpolated value. The one JS-string context
     // (`const TARGET_CONTRACT = ...`) takes a JSON-encoded *_JS token instead —
     // HTML-escaping there would emit a literal &quot; into executable code.
-    "surface.html": render(
+    // RUNNABLE ON FIRST RUN. This used to emit `surface.html` plus a bare row
+    // and ask the developer to rename the file and hand-assemble a
+    // surfaces.json. Two manual steps between "scaffolded" and "works" is two
+    // places to get it wrong, on the first artifact a new developer ever sees.
+    // The row is still emitted, because README.md explains its shape and a
+    // reader should be able to see the thing being explained.
+    [`${id}.html`]: render(
       read("surface.html"),
       { ...vars, CONTRACT_VERSION_JS: toJsLiteral(CONTRACT_VERSION) },
       (value, key) => (key.endsWith("_JS") ? value : escapeHtml(value))
     ),
+    "surfaces.json": JSON.stringify({ surfaces: [JSON.parse(rowJson)] }, null, 2) + "\n",
+    "studio.json": JSON.stringify({
+      _note: "Boot with: OPENRIG_STUDIO_DIR=. node <sdk>/tools/studio.mjs",
+      port: 8890, apps: [], appsRoot: "./apps",
+    }, null, 2) + "\n",
     "surfaces.row.json": rowJson,
     "README.md": render(read("README.md"), { ...vars, ROW_INLINE: rowInline }),
   };
@@ -176,9 +187,10 @@ function main() {
     // of the tree. The scaffolder is the first artifact a new developer reads;
     // it should not teach the path the SDK exists to remove.
     `\nnext:\n` +
-    `  rename ${rel}/surface.html to ${id}.html and put your row in a surfaces.json beside it\n` +
-    `  (${rel}/surfaces.row.json is that row; ${rel}/README.md shows the shape)\n` +
-    `  node <studio>/app/serve-studio.mjs --surfaces ${rel}   then open http://127.0.0.1:8890/\n\n` +
+    `  node <sdk>/app/serve-studio.mjs --surfaces ${rel}   then open http://127.0.0.1:8890/\n` +
+    `  or, to run providers and apps too:\n` +
+    `    OPENRIG_STUDIO_DIR=${rel} node <sdk>/tools/studio.mjs\n\n` +
+    `It runs as-is — ${id}.html and surfaces.json are already wired.\n` +
     `Your surface stays in YOUR repo — nothing is copied into the studio package.\n` +
     `${rel}/README.md has the details and points at the contract docs.\n`
   );
