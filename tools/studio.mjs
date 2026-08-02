@@ -67,9 +67,15 @@ if (declared && !composed) {
 // No rig is a normal state, not an error: the roster is simply absent and the
 // shell says so. A studio need not be attached to a rig; it must know whether
 // it is.
+//
+// FLEET-WIDE (-A) is required, not optional. Outside a managed session the CLI
+// has no current rig to default to and exits non-zero with "no target" — so a
+// bare invocation fails on precisely the boxes this runs on, while working on
+// a developer machine that happens to be inside a session. Found by deploying
+// to a box that was not the one it was written on.
 function liveSeats() {
   try {
-    const raw = execFileSync("rig", ["ps", "--nodes", "--json"], { encoding: "utf8", timeout: 6000, stdio: ["ignore", "pipe", "ignore"] });
+    const raw = execFileSync("rig", ["ps", "--nodes", "-A", "--json"], { encoding: "utf8", timeout: 6000, stdio: ["ignore", "pipe", "ignore"] });
     const d = JSON.parse(raw);
     const nodes = Array.isArray(d) ? d : d.nodes ?? [];
     return nodes

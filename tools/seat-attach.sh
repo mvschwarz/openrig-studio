@@ -36,7 +36,7 @@ SEAT="${1:-}"
 if ! command -v rig >/dev/null 2>&1; then
   echo "no rig on this box, so there is no roster to attach to"; exit 1
 fi
-if ! rig ps --nodes --json 2>/dev/null \
+if ! rig ps --nodes -A --json 2>/dev/null \
   | python3 -c '
 import json,sys
 want = sys.argv[1]
