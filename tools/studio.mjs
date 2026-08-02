@@ -156,6 +156,8 @@ const verbs = new Map();    // /api/ verb -> the provider that DECLARED it
 // worse than a 502 because every cheap check passes — the verb answers, the
 // data changes on disk, and only the product is inert.
 const missingCompanions = [];
+const verbOwner = new Map();     // verb -> the provider package that claims it
+const verbConflicts = [];
 for (const [pkg, spec] of rail.providerRuns) {
   const dir = path.join(appsRoot, "providers", path.basename(pkg));
   const entry = spec.run?.entry && path.join(dir, spec.run.entry);
@@ -164,7 +166,15 @@ for (const [pkg, spec] of rail.providerRuns) {
   for (const [k, v] of Object.entries(spec.run.env ?? {})) env[k] = resolveArgs([v], pkg)[0];
   spawnChild(pkg, entry, resolveArgs(spec.run.args, pkg), env);
   for (const s of spec.serves ?? []) serves.set(s, providerPorts.get(pkg));
-  for (const v of spec.verbs ?? []) verbs.set(v, providerPorts.get(pkg));
+  // Two providers claiming one verb used to be last-wins with no signal, so
+  // which backend answered depended on compose order. That is how a generic
+  // capability ends up owned by whichever app happened to be installed.
+  for (const v of spec.verbs ?? []) {
+    const prior = verbOwner.get(v);
+    if (prior && prior !== pkg) verbConflicts.push(`${v} is declared by both ${prior} and ${pkg}`);
+    verbOwner.set(v, pkg);
+    verbs.set(v, providerPorts.get(pkg));
+  }
   console.log(`  provider: ${pkg} on ${providerPorts.get(pkg)}`);
   // Declaring a companion IS declaring a requirement — an app that does not
   // need one does not list one. So a declared companion whose file is absent
@@ -182,6 +192,12 @@ for (const [pkg, spec] of rail.providerRuns) {
     spawnChild(`${pkg}:${c.label ?? c.entry}`, cEntry, resolveArgs(c.args, pkg), cEnv);
     console.log(`  companion: ${pkg} — ${c.label ?? c.entry}`);
   }
+}
+if (verbConflicts.length) {
+  console.error("studio: two providers claim the same verb, so which backend answers depends on install order:");
+  for (const c of verbConflicts) console.error(`  ${c}`);
+  console.error("Refusing to start rather than route a verb by accident.");
+  process.exit(1);
 }
 if (missingCompanions.length) {
   console.error("studio: a declared companion process is missing, so verbs that enqueue for it would accept work nothing performs:");
