@@ -93,6 +93,35 @@ function validateManifest(raw, label = "", keep = null) {
   if (!Array.isArray(doc.surfaces)) {
     return { errors: [`${tag}surfaces.json must carry a top-level surfaces[] array`], warnings, valid, doc };
   }
+  // chatSeats is OPTIONAL, so its absence is silent — but a roster that is
+  // DECLARED and unusable must not be. Falling back to the shipped fixture
+  // without saying so is the same defect this file exists to prevent, one
+  // layer in: a plausible declaration that does nothing. The likeliest real
+  // mistake is copying the shape of surfaces.json and writing an object, or
+  // rows without a seat field.
+  // CONSUMER declarations only. The package ships a fixture roster on purpose
+  // as part of its demo, and warning about the SDK's own example on every boot
+  // would be noise — and would break the guarantee that an unconfigured
+  // runtime produces no warnings at all.
+  if (label === "consumer" && doc.chatSeats !== undefined) {
+    if (!Array.isArray(doc.chatSeats)) {
+      warnings.push(
+        `${tag}chatSeats must be an array of {seat, name} rows — got ${doc.chatSeats === null ? "null" : typeof doc.chatSeats}. ` +
+        `IGNORED, so the packaged roster is being served instead. A sidebar showing a fixture seat on a real box ` +
+        `is the same lie as a fixture rig on the floor.`
+      );
+    } else {
+      const bad = doc.chatSeats.filter((r) => !r || typeof r !== "object" || typeof r.seat !== "string" || !r.seat.trim());
+      if (bad.length === doc.chatSeats.length && doc.chatSeats.length) {
+        warnings.push(`${tag}chatSeats has ${bad.length} row(s) and NONE carries a usable "seat" — the roster will render empty.`);
+      } else if (bad.length) {
+        warnings.push(`${tag}chatSeats: ${bad.length} of ${doc.chatSeats.length} row(s) lack a usable "seat" and are ignored.`);
+      }
+      if (doc.chatSeats.length && doc.chatLocalPort === undefined) {
+        warnings.push(`${tag}chatSeats declared without chatLocalPort — seats will be listed but not attachable when served from loopback.`);
+      }
+    }
+  }
   let rows = doc.surfaces;
   if (keep) {
     rows = [];
