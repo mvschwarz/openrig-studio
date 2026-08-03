@@ -36,11 +36,12 @@
     .connection.live .pulse { background: var(--working); box-shadow: 0 0 0 4px #47d18c18; }
     .connection.polling .pulse { background: var(--idle); box-shadow: 0 0 0 4px #6d9eff18; }
 
-    .summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
-    .stat, .seat, .queue-item, .notice { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); border-radius: 12px; }
-    .stat { padding: 14px 16px; }
-    .stat b { display: block; font: 650 24px/1 system-ui, sans-serif; margin-bottom: 5px; }
-    .stat span, .meta, .empty { color: var(--muted); font-size: 12px; }
+    .metrics, .table-wrap, .notice { border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); border-radius: 8px; }
+    .metrics { display: flex; flex-wrap: wrap; align-items: center; margin-bottom: 20px; overflow: hidden; }
+    .metric { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-right: 1px solid var(--line); }
+    .metric:last-child { border-right: 0; }
+    .metric b { font: 650 17px/1 system-ui, sans-serif; }
+    .metric span, .empty { color: var(--muted); font-size: 11px; }
     section { margin-top: 24px; }
     h2 { margin: 0 0 10px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
     .welcome { border: 1px solid var(--edge2); border-radius: 3px; padding: 18px 20px; margin-bottom: 22px;
@@ -55,29 +56,30 @@
     .wagent:hover { border-color: rgba(255,255,255,.4); color: var(--bone); }
     .wagent b { font-size: 12.5px; }
     .wagent span { font-size: 11px; color: var(--faint); }
-    .seats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-    .seat { padding: 15px; position: relative; overflow: hidden; }
-    .seat::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--state); }
-    .seat-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
-    .seat-name { overflow-wrap: anywhere; font-weight: 650; }
-    .badge { color: var(--state); border: 1px solid color-mix(in srgb, var(--state) 45%, transparent); border-radius: 999px; padding: 2px 7px; font-size: 10px; text-transform: uppercase; }
-    .seat .meta { margin-top: 12px; display: flex; justify-content: space-between; gap: 8px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; min-width: 720px; border-collapse: collapse; text-align: left; }
+    th { padding: 8px 12px; border-bottom: 1px solid var(--line); color: var(--muted); background: rgba(255,255,255,.018); font-size: 9px; font-weight: 650; letter-spacing: .16em; text-transform: uppercase; white-space: nowrap; }
+    td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: #cbd1db; font-size: 11px; vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: 0; }
+    tbody tr:hover td { background: rgba(255,255,255,.018); }
+    .seat-name { color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+    .state-tag { --state: var(--down); display: inline-flex; align-items: center; gap: 7px; color: var(--state); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+    .state-pip { width: 7px; height: 7px; border-radius: 50%; background: var(--state); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state) 12%, transparent); }
+    .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .working { --state: var(--working); }
     .idle { --state: var(--idle); }
     .blocked { --state: var(--blocked); }
     .stalled { --state: var(--stalled); }
     .down { --state: var(--down); }
-    .queue { display: grid; gap: 8px; }
-    .queue-item { padding: 13px 15px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; }
-    .queue-title { font-weight: 600; }
-    .queue-state { color: var(--idle); font-size: 11px; text-transform: uppercase; }
-    .queue-route { grid-column: 1 / -1; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+    .queue-title { color: var(--text); font-weight: 600; }
+    .queue-state { color: var(--idle); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+    .route { color: var(--muted); overflow-wrap: anywhere; }
     .notice { padding: 18px; color: var(--blocked); }
     footer { margin-top: 22px; color: var(--muted); font-size: 11px; }
     @media (max-width: 600px) {
       main { padding: 18px; }
       header { align-items: start; flex-direction: column; }
-      .summary { grid-template-columns: 1fr; }
+      .metric { flex: 1 1 auto; }
     }
   </style>
 </head>
@@ -142,36 +144,43 @@
       const attention = state.seats.filter(seat => ['blocked', 'stalled', 'down'].includes(seat.state)).length;
       const pending = state.queue.length;
       const seats = state.seats.map(seat => `
-        <article class="seat ${escapeHtml(seat.state)}">
-          <div class="seat-top">
-            <div class="seat-name">${escapeHtml(seat.seat)}</div>
-            <span class="badge">${escapeHtml(seat.state)}</span>
-          </div>
-          <div class="meta">
-            <span>${escapeHtml(seat.pod)} / ${escapeHtml(seat.member)}</span>
-            <span>${seat.ageMinutes == null ? 'age unknown' : `${escapeHtml(seat.ageMinutes)}m`}</span>
-          </div>
-          <div class="meta">
-            <span>${escapeHtml(seat.lifecycle)}</span>
-            <span>${escapeHtml(seat.pendingWork)} pending</span>
-          </div>
-        </article>`).join('') || '<div class="empty">No seats reported.</div>';
+        <tr>
+          <td class="seat-name">${escapeHtml(seat.seat)}</td>
+          <td>${escapeHtml(seat.pod)} / ${escapeHtml(seat.member)}</td>
+          <td><span class="state-tag ${escapeHtml(seat.state)}"><span class="state-pip"></span>${escapeHtml(seat.state)}</span></td>
+          <td>${escapeHtml(seat.lifecycle)}</td>
+          <td class="numeric">${seat.ageMinutes == null ? 'unknown' : `${escapeHtml(seat.ageMinutes)}m`}</td>
+          <td class="numeric">${escapeHtml(seat.pendingWork)}</td>
+        </tr>`).join('') || '<tr><td class="empty" colspan="6">No seats reported.</td></tr>';
       const queue = state.queue.map(item => `
-        <article class="queue-item">
-          <div class="queue-title">${escapeHtml(item.title)}</div>
-          <div class="queue-state">${escapeHtml(item.state)}</div>
-          <div class="queue-route">${escapeHtml(item.source)} → ${escapeHtml(item.destination)}</div>
-        </article>`).join('') || '<div class="empty">Queue is clear.</div>';
+        <tr>
+          <td class="queue-title">${escapeHtml(item.title)}</td>
+          <td class="queue-state">${escapeHtml(item.state)}</td>
+          <td class="route">${escapeHtml(item.source)}</td>
+          <td class="route">${escapeHtml(item.destination)}</td>
+        </tr>`).join('') || '<tr><td class="empty" colspan="4">Queue is clear.</td></tr>';
 
       content.innerHTML = `
         ${welcomeHtml()}
-        <div class="summary">
-          <div class="stat"><b>${working}</b><span>working now</span></div>
-          <div class="stat"><b>${attention}</b><span>need attention</span></div>
-          <div class="stat"><b>${pending}</b><span>queue items</span></div>
+        <div class="metrics" aria-label="Rig summary">
+          <div class="metric"><b>${working}</b><span>working now</span></div>
+          <div class="metric"><b>${attention}</b><span>need attention</span></div>
+          <div class="metric"><b>${pending}</b><span>queue items</span></div>
         </div>
-        <section><h2>Seats · ${state.seats.length}</h2><div class="seats">${seats}</div></section>
-        <section><h2>Queue · ${state.queue.length}</h2><div class="queue">${queue}</div></section>`;
+        <section>
+          <h2>Seats · ${state.seats.length}</h2>
+          <div class="table-wrap"><table aria-label="Rig seats">
+            <thead><tr><th>Seat</th><th>Pod / member</th><th>State</th><th>Lifecycle</th><th class="numeric">Age</th><th class="numeric">Pending</th></tr></thead>
+            <tbody>${seats}</tbody>
+          </table></div>
+        </section>
+        <section>
+          <h2>Queue · ${state.queue.length}</h2>
+          <div class="table-wrap"><table aria-label="Rig queue">
+            <thead><tr><th>Work</th><th>State</th><th>Source</th><th>Destination</th></tr></thead>
+            <tbody>${queue}</tbody>
+          </table></div>
+        </section>`;
       updated.textContent = `Runtime snapshot · ${new Date(state.generatedAt).toLocaleString()}`;
     }
 
