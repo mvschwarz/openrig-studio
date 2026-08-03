@@ -68,6 +68,28 @@ about itself; an app may not override any of this.
 | `serves[]` | stable | **byte-route prefixes**, matched by prefix |
 | `verbs[]` | stable | the `/api/` verbs this provider ANSWERS |
 | `supplies[]` | provisional | binaries this package ships, so the host need not have them |
+| `seeds` | provisional | how to make an empty root usable on first run |
+
+### `seeds` — first-run scaffolding, declared by the package that knows how
+
+```json
+"seeds": { "root": "project", "marker": "timeline.json",
+           "entry": "video-new.mjs", "export": "scaffoldBundle" }
+```
+
+A fresh studio whose root does not exist answers ENOENT on every verb that reads
+it — honest, and not a usable app. Seeding it with a hand-written file would be
+worse: it would parse and then behave wrong, because a real project schema
+carries history and slot state behind it. So the provider that owns the root
+declares how to create one.
+
+`marker` is the file whose presence means "already seeded". Seeding runs **only
+into an absent or empty directory** — a directory with contents and no marker is
+somebody's data, and the box refuses rather than seeding over it.
+
+This was hardcoded in the boot tool as one provider's file name, module export
+and marker, which made first-run seeding a video-studio feature that no other
+kind of studio could ever use.
 
 **`serves` and `verbs` are two different routing tables and must not be merged.**
 `serves` entries are byte routes matched by prefix — `/media/` catches
@@ -342,9 +364,18 @@ defect this document was written to end.
 | the legacy path and its warning | **yes** |
 | `calls` with per-call `required` | **yes**, `compose-rail.mjs` |
 | all five reconciliation checks, including the ladder | **yes** |
+| provider-declared `seeds` | **yes**, `studio.mjs` — but see coverage below |
 | `app-manifest.schema.json` **enforced** against a manifest | **not yet** — no tool reads it |
 | `install-app.mjs --check` understanding `calls` / `provider.json` | **not yet** — it validates the older shape |
 | `manifest_version` checked on install | **not yet** — declared, never verified |
+
+**Test coverage is not uniform and the gap is named rather than left to be
+assumed.** `compose-rail.mjs` — composition, the provider-wins rule, the legacy
+path and the whole unmatched-call ladder — has direct tests. `studio.mjs` has
+none: it is a script with no exports, so its boot-level behaviour (port
+guarding, process spawning, proxying, and `seeds`) is only exercised by running
+a studio. `seeds` is therefore implemented and hand-verified, not regression-
+covered, and a reader should weigh those differently.
 
 Every row above was measured against the tools rather than remembered, after an
 earlier version of this table said three shipped rows were unimplemented. The

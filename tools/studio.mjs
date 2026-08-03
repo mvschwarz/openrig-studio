@@ -169,15 +169,75 @@ const ROOTS = {
 // Only ever into an EMPTY or absent directory. A directory with contents and
 // no timeline.json is somebody's data, and this refuses rather than seeding
 // over it.
-async function seedProject() {
+// A provider DECLARES how to seed the root it owns, in its own provider.json:
+//
+//   "seeds": { "root": "project", "marker": "timeline.json",
+//              "entry": "video-new.mjs", "export": "scaffoldBundle" }
+//
+// This used to name providers/studio-video/video-new.mjs, scaffoldBundle and
+// timeline.json literally, in the SDK's generic boot tool — the platform
+// carrying one app's internals, so a studio that was not about video had a
+// seeding path that could never fire. The provider is what knows how to make an
+// empty root usable; the box only knows it is empty.
+//
+// Seeding at all is deliberate: a fresh studio whose root does not exist answers
+// ENOENT on every project verb, which is honest and not a usable app. Seeding
+// with a hand-written file would be worse — it would parse and then behave
+// wrong, because the real schema carries history and slot state behind it.
+async function seedDeclaredRoots() {
+  let any = false;
+  for (const [pkg, spec] of rail.providerRuns) {
+    const seed = spec.run?.seeds ?? spec.seeds;
+    if (!seed?.root || !seed.entry) continue;
+    const root = ROOTS[seed.root];
+    if (!root) continue;
+    const marker = seed.marker ? path.join(root, seed.marker) : root;
+    if (fs.existsSync(marker)) continue;
+    // Only ever into an EMPTY or absent directory. A directory with contents
+    // and no marker is somebody's data, and this refuses rather than seeding
+    // over it.
+    if (fs.existsSync(root) && fs.readdirSync(root).length) {
+      console.error(`studio: ${root} has contents but no ${seed.marker ?? "marker"} — not seeding over it.`);
+      continue;
+    }
+    const scaffolder = path.join(appsRoot, "providers", path.basename(pkg), seed.entry);
+    if (!fs.existsSync(scaffolder)) {
+      console.error(`studio: ${pkg} declares a seeder (${seed.entry}) that is not there — root ${seed.root} left empty.`);
+      continue;
+    }
+    try {
+      if (fs.existsSync(root)) fs.rmdirSync(root);
+      fs.mkdirSync(path.dirname(root), { recursive: true });
+      const mod = await import(scaffolder);
+      const fn = mod[seed.export ?? "default"];
+      if (typeof fn !== "function") {
+        console.error(`studio: ${pkg} seeder exports no ${seed.export ?? "default"} — root ${seed.root} left empty.`);
+        continue;
+      }
+      await fn(path.basename(root), { parent: path.dirname(root), idea: "studio project", port });
+      console.log(`  seeded  : ${root} (declared by ${pkg})`);
+      any = true;
+    } catch (e) {
+      console.error(`studio: ${pkg} could not seed ${seed.root} — ${e.message}`);
+    }
+  }
+  return any;
+}
+// LEGACY, and it converges the same way every other lift in this format does.
+// Before providers declared themselves, this tool named one provider's seeder
+// literally. Removing that outright would stop seeding on every box until the
+// provider ships a declaration, so it still fires — once, warned, and only when
+// nothing declared a seeder for that root.
+async function seedLegacyProjectRoot() {
   const root = ROOTS.project;
   if (!root || fs.existsSync(path.join(root, "timeline.json"))) return;
-  if (fs.existsSync(root) && fs.readdirSync(root).length) {
-    console.error(`studio: ${root} has contents but no timeline.json — not seeding over it.`);
-    return;
-  }
+  if (fs.existsSync(root) && fs.readdirSync(root).length) return;
   const scaffolder = path.join(appsRoot, "providers", "studio-video", "video-new.mjs");
   if (!fs.existsSync(scaffolder)) return;
+  console.error(
+    "  warn    : seeding the project root from a hardcoded path — LEGACY. " +
+    "Declare seeds{} in providers/studio-video/provider.json; see contract/app-manifest.md"
+  );
   try {
     if (fs.existsSync(root)) fs.rmdirSync(root);
     fs.mkdirSync(path.dirname(root), { recursive: true });
@@ -188,7 +248,9 @@ async function seedProject() {
     console.error(`studio: could not seed the project — ${e.message}`);
   }
 }
-await seedProject();
+
+const seededAny = await seedDeclaredRoots();
+if (!seededAny) await seedLegacyProjectRoot();
 
 const children = [];
 const spawnChild = (label, file, args, env) => {
