@@ -187,7 +187,14 @@ const ROOTS = {
 async function seedDeclaredRoots() {
   let any = false;
   for (const [pkg, spec] of rail.providerRuns) {
-    const seed = spec.run?.seeds ?? spec.seeds;
+    // ONE shape: top-level, as contract/app-manifest.md documents it. This read
+    // `spec.run?.seeds ?? spec.seeds` — tolerant of two shapes, written without
+    // checking which one the composer could actually produce. Neither branch
+    // could fire, because the composer was dropping the field entirely. A
+    // permissive reader hid a broken writer: had it accepted only the
+    // documented shape, the gap would have surfaced the first time anyone
+    // declared one instead of on a migration weeks later.
+    const seed = spec.seeds;
     if (!seed?.root || !seed.entry) continue;
     const root = ROOTS[seed.root];
     if (!root) continue;

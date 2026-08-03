@@ -125,8 +125,13 @@ function checkRoutes(m) {
   if (!prov) { ok("ultralight — no provider to route to"); return; }
   if (!prov.package) fail("provider declared without a package name");
 
-  const verbs = m.verbs ?? [];
-  const serves = prov.serves ?? [];
+  // Routing facts live on the PROVIDER once it has migrated. Checking only the
+  // app manifest made this refuse every migrated app — the same false refusal
+  // as the supplies gate, and for the same reason: the field moved and the
+  // checker did not follow it.
+  const decl = prov.package ? readProviderDeclaration(prov.package) : null;
+  const verbs = decl?.verbs ?? m.verbs ?? [];
+  const serves = decl?.serves ?? prov.serves ?? [];
   if (!verbs.length && !serves.length) {
     fail("provider declared but neither verbs[] nor provider.serves[] is declared",
       "an installer cannot wire a backend whose routes are unknown");
@@ -145,6 +150,11 @@ function checkRoutes(m) {
 function checkRunnable(m) {
   const prov = m.provider;
   if (!prov) return;
+  // How to run is the PROVIDER's fact. An app that has migrated declares only a
+  // reference, so demanding provider.run.entry from the app manifest refuses
+  // exactly the shape the contract requires.
+  const decl = prov.package ? readProviderDeclaration(prov.package) : null;
+  if (decl?.run?.entry) { ok(`runnable — declared by ${prov.package} (provider.json)`); return; }
   if (!prov.run || !prov.run.entry) {
     fail("provider does not declare how to run (provider.run.entry)",
       "without it the box must hardcode this app, which is the opposite of installable");
@@ -193,6 +203,15 @@ function checkRoots(m) {
   }
 }
 
+// A provider's own declaration, when it has migrated to one. Read here rather
+// than imported from compose-rail because this tool runs BEFORE composition —
+// it is deciding whether an app can be installed at all.
+function readProviderDeclaration(pkg) {
+  const p = path.join(appsRoot, "providers", path.basename(pkg), "provider.json");
+  if (!fs.existsSync(p)) return null;
+  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
+}
+
 // DEFECT CLASS THIS CATCHES: ffmpeg/ffprobe are shelled out to by the video
 // provider and by cutdown's lane. Nothing declared them, so a box without them
 // installs "successfully" and fails at the moment of use.
@@ -209,8 +228,24 @@ function checkBinaries(m) {
   // Measured before fixing, with node on PATH and ffmpeg removed.
   //
   // `requires.binaries` still declares the NEED, because that stays true and is
-  // the honest thing to read. `provider.supplies` says who satisfies it.
-  const supplied = new Set(m.provider?.supplies ?? []);
+  // the honest thing to read. `supplies` says who satisfies it.
+  //
+  // AND IT IS READ FROM THE PROVIDER FIRST, because that is where the contract
+  // puts it. This read the APP manifest only, so the moment an app migrated its
+  // supplies onto provider.json — which contract/app-manifest.md requires — the
+  // set went empty and this refused a working install. It re-broke the exact
+  // false refusal the comment above records having already fixed once, by
+  // moving the field out of the one place the checker looked.
+  //
+  // The tool also contradicted itself in a single run: the ffmpeg FILTER checks
+  // below still passed, because they interrogate the real binary through the
+  // provider's own node_modules. A checker that reports a binary missing and
+  // then successfully asks that binary what filters it has is diagnosing the
+  // manifest, not the host.
+  //
+  // App-side supplies is still honoured while an app has not migrated.
+  const decl = m.provider?.package ? readProviderDeclaration(m.provider.package) : null;
+  const supplied = new Set([...(decl?.supplies ?? []), ...(m.provider?.supplies ?? [])]);
   const PATH = (process.env.PATH || "").split(":");
   for (const b of bins) {
     if (supplied.has(b)) { ok(`binary ${b} ships with ${m.provider.package}`); continue; }

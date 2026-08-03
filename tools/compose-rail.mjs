@@ -209,6 +209,14 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
     spec.run = { ...decl.run, companions: [...(decl.run?.companions ?? [])] };
     spec.serves = decl.serves ?? [];
     spec.verbs = [...(decl.verbs ?? [])];
+    // seeds and supplies are TOP-LEVEL provider fields, and they were being
+    // dropped here — copied nowhere, so a declaration the contract documents
+    // could not reach the code that reads it. Every field the contract gives a
+    // provider is carried explicitly rather than by spreading `decl`, so adding
+    // one to the contract without carrying it fails visibly here instead of
+    // silently one layer down.
+    spec.seeds = decl.seeds ?? null;
+    spec.supplies = decl.supplies ?? [];
     spec.declaredBy = `${pkg} (provider.json)`;
   }
 

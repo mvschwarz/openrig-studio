@@ -92,6 +92,40 @@ test("a provider's companions travel with the provider, not with whoever uses it
     "removing an app deleted a companion the PROVIDER declared — the exact defect this change removes");
 });
 
+test("EVERY contract field on a provider.json reaches the spec, not just the ones in use", () => {
+  // This existed and was broken: the composer copied run/serves/verbs and
+  // dropped `seeds` and `supplies`, so a field the contract documents could not
+  // reach the code that reads it. The reader in studio.mjs was permissive
+  // enough to accept two shapes, which hid the broken writer rather than
+  // exposing it — a declaration simply did nothing, silently, for every
+  // provider except the one the legacy fallback happened to name.
+  //
+  // Asserted field by field so that ADDING a field to the contract without
+  // carrying it here fails in this test, rather than on someone's box.
+  const t = tree({
+    apps: { alpha: { provider: { package: "@x/video" } } },
+    providers: {
+      video: {
+        package: "@x/video",
+        run: { entry: "v.mjs", companions: [{ label: "lane", entry: "w.mjs" }] },
+        serves: ["/media/"],
+        verbs: ["/api/clips"],
+        supplies: ["ffmpeg", "ffprobe"],
+        seeds: { root: "project", marker: "timeline.json", entry: "new.mjs", export: "scaffold" },
+      },
+    },
+  });
+  const spec = t.run(["alpha"]).providerRuns.get("@x/video");
+
+  assert.equal(spec.run.entry, "v.mjs");
+  assert.deepEqual(spec.run.companions.map((c) => c.entry), ["w.mjs"]);
+  assert.deepEqual(spec.serves, ["/media/"]);
+  assert.deepEqual(spec.verbs, ["/api/clips"]);
+  assert.deepEqual(spec.supplies, ["ffmpeg", "ffprobe"], "supplies was dropped — the install gate reads it");
+  assert.deepEqual(spec.seeds, { root: "project", marker: "timeline.json", entry: "new.mjs", export: "scaffold" },
+    "seeds was dropped, so a documented declaration could never reach the seeder");
+});
+
 // --------------------------------------------------- the unmatched-call ladder
 
 test("a REQUIRED cross-provider call starts the provider that declares it", () => {
