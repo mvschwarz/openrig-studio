@@ -161,9 +161,27 @@ function checkRunnable(m) {
 // without being told the key is "footageRoot" sends you looking for the wrong
 // thing in the right file.
 const ROOT_KEYS = { project: "sliceRoot", media: "mediaRoots[]", canvas: "canvasRoot", footage: "footageRoot" };
+// THE VOCABULARY IS OPEN. The four names above are the ORIGINAL spellings kept
+// working, not the set of kinds an app may declare — `roots{}` in studio.json
+// binds any kind by its own name.
+//
+// It used to be closed, and that made the format's own promise false: the
+// refusal below says "roots declare KINDS; the install binds them" while the
+// binder knew exactly four. An app needing any other kind of directory could
+// not be installed at all, and was told to add a binding to a file that had no
+// shape to accept one. Same class as host capabilities being a special case
+// instead of an ordinary provider — a mechanism that serves what was
+// enumerated when it was written and rots for everything after.
+//
+// Opening it does NOT weaken the check: a kind nobody bound is still a refusal
+// (test/root-kinds.test.mjs pins all three claims, including that one).
 function checkRoots(m) {
   const roots = m.roots ?? {};
-  const bound = { project: config.sliceRoot, media: config.mediaRoots?.[0], canvas: config.canvasRoot, footage: config.footageRoot };
+  const bound = {
+    project: config.sliceRoot, media: config.mediaRoots?.[0],
+    canvas: config.canvasRoot, footage: config.footageRoot,
+    ...(config.roots ?? {}),
+  };
   for (const [kind, spec] of Object.entries(roots)) {
     if (typeof spec === "string") {
       fail(`root "${kind}" is a path, not a kind: ${spec}`, "roots declare KINDS; the install binds them");
@@ -171,7 +189,7 @@ function checkRoots(m) {
     }
     bound[kind]
       ? ok(`root "${kind}" binds to ${bound[kind]}`)
-      : fail(`root "${kind}" has no binding on this box`, `add a binding for "${kind}" to ${path.basename(CONFIG_PATH)} (${ROOT_KEYS[kind] ?? "see the roots section"})`);
+      : fail(`root "${kind}" has no binding on this box`, `add a binding for "${kind}" to ${path.basename(CONFIG_PATH)} (${ROOT_KEYS[kind] ?? `roots.${kind}`})`);
   }
 }
 

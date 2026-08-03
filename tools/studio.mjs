@@ -130,9 +130,18 @@ for (const [pkg, p] of providerPorts) await guard(p, pkg);
 // ---- run the providers from their DECLARED specs ---------------------------
 const home = os.homedir();
 const exp = (p) => (typeof p === "string" && p.startsWith("~") ? path.join(home, p.slice(1)) : p);
+// Root kinds are an OPEN vocabulary — `roots{}` in studio.json binds any kind
+// by its own name. The four below are the ORIGINAL spellings, kept working.
+//
+// They used to be the entire set here and in the installer, so the format's
+// promise ("roots declare KINDS; the install binds them") was false for every
+// kind nobody had thought of. Spread LAST so an explicit roots{} entry wins
+// rather than being shadowed by a legacy key.
 const ROOTS = {
   project: exp(config.sliceRoot), media: (config.mediaRoots || []).map(exp),
   canvas: exp(config.canvasRoot), footage: exp(config.footageRoot),
+  ...Object.fromEntries(Object.entries(config.roots ?? {})
+    .map(([k, v]) => [k, Array.isArray(v) ? v.map(exp) : exp(v)])),
 };
 // FIRST RUN: seed the project with the PROVIDER'S OWN scaffolder.
 //
