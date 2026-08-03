@@ -99,38 +99,51 @@ git commit -m "feat: make the rig floor a dense table"
 - Delete: `apps/agents/app.json`
 - Delete: `apps/agents/app/agents.html`
 - Delete: `test/agents-no-rig.test.mjs`
+- Modify: `apps/mini-nle/app/mini-nle.html`
+- Modify: `test/mini-nle-contract.test.mjs`
 - Modify: `providers/studio-host/package.json`
 - Preserve: `providers/studio-host/**`
 - Preserve: `test/live-state.test.mjs`
 
-**Step 1: Remove the AGENTS app**
+**Step 1: Move the remaining user instruction to the sidebar**
+
+Change the existing MINI-NLE contract test first so its deliberately disabled
+review handoff points to the agent sidebar instead of the AGENTS surface. Run
+that focused test and observe the expected failure, then replace only the stale
+instructional copy in MINI-NLE. Do not enable the ruled-out handoff verbs.
+
+**Step 2: Remove the AGENTS app**
 
 Delete the app directory. Do not remove or rename `studio-host`, its endpoints,
 or its live-state implementation.
 
-**Step 2: Remove only the superseded test hook**
+**Step 3: Remove only the superseded test hook**
 
 Delete `agents-no-rig.test.mjs` only after Task 2 is green. Change the provider
 test script to run `../../test/live-state.test.mjs` and keep that state-generator
 coverage unchanged.
 
-**Step 3: Run the provider tests**
+**Step 4: Run the provider and MINI-NLE tests**
 
 Run: `npm test` from `providers/studio-host`.
 
 Expected: the two live-state tests pass and no test references the deleted app.
 
-**Step 4: Search for stale AGENTS app references**
+Run: `node --test test/mini-nle-contract.test.mjs`
+
+Expected: all MINI-NLE contract tests pass with the sidebar instruction pinned.
+
+**Step 5: Search for stale AGENTS app references**
 
 Run: `rg -n "apps/agents|agents-no-rig|id.*agents" .`
 
 Expected: no product or test reference still installs the retired app. References
 to seat/agent capabilities in `studio-host` remain.
 
-**Step 5: Commit the retirement**
+**Step 6: Commit the retirement**
 
 ```bash
-git add -A apps/agents test/agents-no-rig.test.mjs providers/studio-host/package.json
+git add -A apps/agents apps/mini-nle test/agents-no-rig.test.mjs test/mini-nle-contract.test.mjs providers/studio-host/package.json
 git commit -m "refactor: retire the agents surface after sidebar launch"
 ```
 
