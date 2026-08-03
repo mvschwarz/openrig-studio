@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mvschwarz/openrig-studio/contract/app-manifest.schema.json",
+  "title": "openrig studio — app manifest, app.json (contract v0.1)",
+  "description": "Declares an APP: a surface plus the backend it calls, the directories it needs, and the binaries it requires. Stability: fields marked x-stability 'stable' change only additively while the contract is 0.x; 'provisional' fields may change with a minor bump. Field semantics and the reconciliation rules are in app-manifest.md. A fact belongs to the thing that knows it — how to RUN a provider and which verbs it ANSWERS live in the provider's own provider.json, never here.",
+  "type": "object",
+  "required": ["manifest_version", "id", "name", "surface"],
+  "properties": {
+    "manifest_version": {
+      "const": 1,
+      "description": "Manifest format version. Bumped only for a breaking change to this shape.",
+      "x-stability": "stable"
+    },
+    "id": {
+      "type": "string", "minLength": 1, "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "description": "Unique app id. Becomes the surface row id, so it is also a deep-link target.",
+      "x-stability": "stable"
+    },
+    "name": {
+      "type": "string", "minLength": 1,
+      "description": "Rail label. Short, uppercase by convention.",
+      "x-stability": "stable"
+    },
+    "summary": {
+      "type": "string",
+      "description": "One line describing what the app is for. Shown in listings.",
+      "x-stability": "stable"
+    },
+    "category": {
+      "type": "string",
+      "description": "Grouping hint (create | build | grow | system by convention).",
+      "x-stability": "provisional"
+    },
+    "maker": {
+      "type": "object",
+      "description": "Attribution only. Never used to resolve or install anything.",
+      "properties": {
+        "name": { "type": "string" },
+        "url": { "type": "string" }
+      },
+      "x-stability": "provisional"
+    },
+    "surface": {
+      "type": "object",
+      "description": "The page. Exactly one of path or url — path means the shell serves this file, url means something else already does.",
+      "required": ["glyph"],
+      "oneOf": [
+        { "required": ["path", "entry"], "not": { "required": ["url"] } },
+        { "required": ["url"], "not": { "required": ["path"] } }
+      ],
+      "properties": {
+        "entry": {
+          "type": "string",
+          "description": "Where the file lives in YOUR repo. The composer copies it into the overlay. Required with path; meaningless with url.",
+          "x-stability": "stable"
+        },
+        "path": {
+          "type": "string", "pattern": "^/",
+          "description": "Where it is served on the rail. Different from entry, and conflating the two is the common slip.",
+          "x-stability": "stable"
+        },
+        "url": {
+          "type": "string", "pattern": "^https?://[^/?#\\s]+",
+          "description": "Absolute http(s) URL for an app that serves itself.",
+          "x-stability": "provisional"
+        },
+        "glyph": {
+          "type": "string",
+          "description": "One character. The rail is dense; an emoji looks wrong beside the others.",
+          "x-stability": "stable"
+        },
+        "hint": {
+          "type": "string",
+          "description": "One-line tooltip on the rail tab.",
+          "x-stability": "stable"
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "description": "A REFERENCE to the backend this app is a client of. Not a run spec — how to start it lives in that provider's provider.json. Singular on purpose: dependencies on OTHER backends are declared in calls.",
+      "required": ["package"],
+      "properties": {
+        "package": {
+          "type": "string", "minLength": 1,
+          "description": "The provider package name.",
+          "x-stability": "stable"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "true when the app is useless without it. Installing a surface whose provider is absent yields an HTML file that 502s.",
+          "x-stability": "stable"
+        }
+      },
+      "x-stability": "stable"
+    },
+    "roots": {
+      "type": "object",
+      "description": "The KINDS of directory this app needs — never paths. The box binds each kind to a real location in studio.json. Kind names are an OPEN vocabulary.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "required": {
+            "type": "boolean",
+            "description": "true when the app cannot work without this root bound.",
+            "x-stability": "stable"
+          }
+        }
+      },
+      "x-stability": "stable"
+    },
+    "calls": {
+      "type": "object",
+      "description": "The /api/ verbs this app calls, keyed by verb. Deliberately provider-agnostic: the box resolves which installed provider answers each one, so this must not name a package. This is how an app depends on a verb a DIFFERENT provider serves.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "required": {
+            "type": "boolean",
+            "description": "true when the app does not work without this verb. Declared rather than derived because only the author knows whether an unserved verb is a missing nicety or a dead product. A required unmatched call may start the provider that serves it; an optional one starts nothing.",
+            "x-stability": "stable"
+          }
+        }
+      },
+      "x-stability": "stable"
+    },
+    "vendor": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9._-]+$" },
+      "description": "Bare directory names under the app's vendor/ directory, shipped with the app so the box never calls a CDN. Prose in this field reads fine to a human and installs nothing.",
+      "x-stability": "stable"
+    },
+    "requires": {
+      "type": "object",
+      "description": "What the app needs from the host, whoever satisfies it. A provider may declare that it SHIPS a binary; that does not make the need untrue, so both stay legible.",
+      "properties": {
+        "binaries": {
+          "type": "array", "items": { "type": "string" },
+          "description": "Binaries the app needs on PATH or supplied by its provider.",
+          "x-stability": "stable"
+        },
+        "ffmpeg_filters": {
+          "type": "array", "items": { "type": "string" },
+          "description": "Filters without which the app cannot work. Absence is fatal to an install.",
+          "x-stability": "provisional"
+        },
+        "ffmpeg_filters_preferred": {
+          "type": "array", "items": { "type": "string" },
+          "description": "Filters that degrade a feature when absent. Must NOT block an install — losing a caption is not worth refusing a working studio.",
+          "x-stability": "provisional"
+        }
+      },
+      "x-stability": "stable"
+    },
+    "verbs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "deprecated": true,
+      "description": "LEGACY, superseded by calls. Was an app-authored list that the box also consumed as the provider routing table — two facts in one field, so an app's focus verb worked only while some other app happened to declare it. Honoured while the provider ships no provider.json, with a warning. Use calls.",
+      "x-stability": "provisional"
+    }
+  }
+}

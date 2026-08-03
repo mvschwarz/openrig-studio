@@ -7,21 +7,24 @@ you are a coding agent building one: read these four documents plus
 `surface-row.schema.json`, then build. Nothing outside this directory and the
 running runtime is required to write a surface that loads in the shell.
 
-**Installing and running an APP is a wider job than writing a surface, and it is
-not yet described here.** An app that brings its own backend also needs a way to
-declare that backend, the directories it reads, the long-running processes it
-depends on, and which verbs route to it. That surface exists — it is `app.json`,
-`studio.json` and the tools in `tools/` — but it is **not yet contract**: it is
-unversioned, carries no stability marks, and may change without a contract
-version bump. Read `tools/install-app.mjs` and `tools/studio.mjs` for what they
-require today, and treat their shape as provisional until it lands here.
+**Installing and running an APP is a wider job than writing a surface**, and it
+is described in `app-manifest.md` plus `app-manifest.schema.json`. An app that
+brings its own backend needs a way to declare that backend, the directories it
+reads, the processes it depends on and the verbs it calls; that shape is now
+contract, field by field, with stability marks like everything else here.
 
-Saying so is the point. This document previously claimed nothing outside it was
-required, which was true when the SDK only served surfaces and stopped being
-true once apps had backends. A contract that overstates its own coverage sends a
-developer down a path it cannot finish.
+**It is specified ahead of the tools in two places, and those are named rather
+than left to be discovered** — see *Conformance* at the bottom of
+`app-manifest.md` for exactly which parts `tools/` implements today and how the
+transition converges. A contract that overstates its own implementation is the
+defect this document was written to stop repeating: it previously claimed
+nothing outside this directory was required, which was true when the SDK only
+served surfaces and false the moment apps had backends.
 
-## The four documents
+## The documents
+
+Building a **surface** needs the first four. Shipping an **app** — a surface
+plus a backend — needs `app-manifest.md` as well.
 
 | Document | What it defines |
 |---|---|
@@ -29,6 +32,10 @@ developer down a path it cannot finish.
 | `manifest.md` | The surface manifest: how a surface registers |
 | `shell-protocol.md` | The shell runtime: lifecycle, URL rules, the postMessage API |
 | `runtime-api.md` | The HTTP verb set: routes, shapes, failure semantics |
+| `app-manifest.md` | Installing an app: `app.json`, `provider.json`, `studio.json` |
+
+Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
+`app-manifest.schema.json` for `app.json`.
 
 ## Discovering the contract at runtime
 
