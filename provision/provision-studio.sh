@@ -187,7 +187,7 @@ if loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes'; 
 elif [ -n "$SUDO" ] || [ "$(id -u)" -eq 0 ]; then
   run "$SUDO loginctl enable-linger $(id -un)"
 else
-  warn "LINGER NOT SET and no root. Studio will NOT survive logout/reboot. See GAPS.md G3."
+  warn "LINGER NOT SET and no root. Studio will NOT survive logout/reboot."
 fi
 
 # --- 7. verify BY EFFECT -----------------------------------------------------
