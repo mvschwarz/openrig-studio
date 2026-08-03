@@ -40,26 +40,45 @@
   #stage iframe.hidden { visibility: hidden; pointer-events: none; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: var(--faint); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; }
-  #agents { width: 320px; min-width: 320px; display: none; flex-direction: column;
-    border-left: 1px solid var(--edge); background: var(--panel); }
+  /* ---- the agent sidebar ----
+     Measurements ported from the shell this was extracted from, where they
+     survived a week of daily use. 400px is not arbitrary: a terminal at this
+     font size needs it to avoid wrapping an agent's output into noise, and the
+     earlier 320px guess is what made the pane feel cramped. */
+  #agents { width: 400px; min-width: 400px; display: none; flex-direction: column;
+    border-left: 1px solid var(--edge); background: var(--panel); backdrop-filter: blur(14px);
+    min-height: 0; }
   #agents.open { display: flex; }
-  #agents-head { display: flex; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--edge); }
-  #agents-head .word { color: var(--bone); font-size: 9.5px; letter-spacing: .22em; font-weight: 700; cursor: pointer; }
-  #agents-head select { background: transparent; color: var(--body); border: 1px solid var(--edge2);
-    border-radius: 2px; font: inherit; font-size: 10px; padding: 1px 4px; margin-left: 10px; }
+  #agents-head { display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+    border-bottom: 1px solid var(--edge); flex: 0 0 auto; }
+  #agents-head .word { color: var(--bone); font-size: 9.5px; letter-spacing: .22em;
+    font-weight: 700; cursor: pointer; }
+  #agents-head .word:hover { color: var(--dim); }
+  #chatRigSel { background: rgba(255,255,255,.04); color: var(--dim); border: 1px solid var(--edge);
+    border-radius: 2px; font: 9px var(--sans); letter-spacing: .14em; text-transform: uppercase;
+    padding: 3px 6px; cursor: pointer; appearance: none; }
+  #chatRigSel:hover { color: var(--bone); border-color: var(--edge2); }
   #seatName { flex: 1; color: var(--faint); font-size: 10px; letter-spacing: .04em;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; padding-left: 8px; }
-  /* the launcher: a rig's whole team as tiles */
-  #seatTiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 10px 12px; }
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+  #seatTiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+    padding: 6px 8px 8px; border-bottom: 1px solid var(--edge); flex: 0 0 auto; }
   #seatTiles:empty { display: none; }
-  .seatTile { background: rgba(255,255,255,.04); border: 1px solid var(--edge2); border-radius: 2px;
-    color: var(--body); font: inherit; font-size: 10px; padding: 5px 4px; cursor: pointer;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .seatTile { background: rgba(255,255,255,.04); border: 1px solid var(--edge2);
+    border-radius: 2px; color: var(--body); font: inherit; font-size: 9px;
+    letter-spacing: .1em; padding: 7px 2px; cursor: pointer; text-align: center;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-transform: uppercase; }
   .seatTile:hover { color: var(--bone); border-color: rgba(255,255,255,.35); }
-  .seatTile.active { color: #111; background: var(--bone); border-color: var(--bone); }
-  #chatframe { flex: 1; width: 100%; border: 0; background: var(--ink); min-height: 0; }
+  .seatTile.active { color: #111; background: var(--bone); border-color: var(--bone);
+    font-weight: 600; }
+  /* flex:1 with min-height:0 is what actually bounds the terminal. Without the
+     min-height a flex child refuses to shrink below its content, so the iframe
+     grew to whatever height xterm asked for and pushed the prompt off-screen —
+     the pane looked pinned tall and the input was unreachable. */
+  #chatframe { flex: 1 1 auto; min-height: 0; width: 100%; border: 0; background: #0a0a0c; }
   #chatframe:not([src]) { display: none; }
-  #agents-body { padding: 14px; color: var(--body); font-size: 12px; line-height: 1.6; }
+  #agents-body { padding: 14px; color: var(--body); font-size: 12px; line-height: 1.6;
+    overflow: auto; flex: 0 1 auto; }
   #agents-body:empty { display: none; }
   #agents-body .seatrow { padding: 8px 10px; border: 1px solid var(--edge2); border-radius: 2px; margin-bottom: 6px; }
   #agents-body .honest { color: var(--faint); font-size: 10.5px; margin-top: 10px; }
@@ -219,6 +238,10 @@
   try { seat = localStorage.getItem("shell.chatSeat") || seat; } catch {}
   if (!seats.some((s) => s.seat === seat)) seat = seats.length ? seats[0].seat : null;
   const rigs = [...new Set(seats.map((s) => rigOf(s.seat)))].filter(Boolean);
+  // The team that builds things goes first. On a box with an infrastructure rig
+  // and a product rig, the product rig is what someone opens the launcher for;
+  // alphabetical order buries it behind the plumbing.
+  if (rigs.includes("product-team")) rigs.sort((a, b) => (a === "product-team" ? -1 : b === "product-team" ? 1 : 0));
   let chatRig = rigOf(seat) || rigs[0];
 
   function renderTiles() {
@@ -239,7 +262,10 @@
       chatRig = sel.value;
       const first = seats.find((s) => rigOf(s.seat) === chatRig);
       if (first) seat = first.seat;
-      sync();
+      // RE-RENDER the tiles, then sync. Syncing alone only re-marks which tile
+      // is active — it leaves the previous rig's team on screen, so switching
+      // rigs appeared to do nothing.
+      renderTiles(); sync();
     };
   }
 

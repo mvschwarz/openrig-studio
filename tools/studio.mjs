@@ -267,6 +267,7 @@ if (missingCompanions.length) {
   console.error("Refusing to start rather than serve a studio whose write verbs silently do nothing.");
   process.exit(1);
 }
+const THEME = '{"background":"#121214","foreground":"rgba(255,255,255,0.9)","cursor":"rgba(255,255,255,0.85)","cursorAccent":"#121214","selectionBackground":"rgba(255,255,255,0.2)","black":"#121214","red":"#ff6b5a","green":"#7ea36f","yellow":"#d9c58a","blue":"#8b93ff","magenta":"#c79bd9","cyan":"#7fb8c9","white":"rgba(255,255,255,0.75)","brightBlack":"rgba(255,255,255,0.35)","brightRed":"#ff8a7a","brightGreen":"#94bd83","brightYellow":"#e8d7a3","brightBlue":"#a5abff","brightMagenta":"#d9b3ec","brightCyan":"#9cd0e0","brightWhite":"rgba(255,255,255,0.95)"}';
 // The seat terminals. Loopback by IP rather than by interface name, which is
 // the portable form — reaching a studio remotely stays a separate, deliberate
 // act. -a is what passes ?arg=<seat> through to the attach script, so the seat
@@ -278,7 +279,14 @@ if (seatPort) {
   // is what lets a proxy in front carry one rule instead of one per service.
   spawnRaw("seat terminals", "ttyd", [
     "-W", "-a", "-p", String(seatPort), "-i", "127.0.0.1", "-b", "/chat",
-    "-t", "fontSize=10", "-t", "lineHeight=1.35",
+    // Typography and palette ported rather than guessed. These were tuned
+    // against real agent output over a week: 9px with this line height is what
+    // fits an agent's wrapped output in the sidebar without it turning to
+    // noise, and the palette is the house value ladder so a terminal beside an
+    // app does not look like a foreign window pasted onto it.
+    "-t", "fontSize=9", "-t", "lineHeight=1.35",
+    "-t", "fontFamily=SF Mono, Menlo, ui-monospace, monospace",
+    "-t", `theme=${THEME}`,
     "bash", script,
   ]);
   console.log(`  terminal: seats attachable on ${seatPort}`);
