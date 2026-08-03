@@ -44,6 +44,22 @@ const rail = composeRail({
   log: (m) => console.log(`  app     : ${m}`),
 });
 for (const m of rail.missing) console.error(`  MISSING : ${m}`);
+for (const w of rail.warnings ?? []) console.error(`  warn    : ${w}`);
+
+// A declared CALL that nothing answers. The third rung of the ladder in
+// contract/app-manifest.md: an app that cannot work without a verb must not
+// come up looking healthy, for the same reason a missing companion refuses —
+// the surface loads, the verb 404s, and only the product is broken.
+//
+// Refusals are collected rather than thrown one at a time so an operator fixing
+// an install sees every problem in one run instead of peeling them off across
+// five restarts.
+if ((rail.refusals ?? []).length) {
+  console.error("studio: a required dependency is unsatisfiable on this box:");
+  for (const r of rail.refusals) console.error(`  ${r}`);
+  console.error("Refusing to start rather than serve apps whose required verbs 404.");
+  process.exit(1);
+}
 
 // A door is not an app: declared-but-absent is a BROKEN INSTALL, not an empty
 // studio, and it must not come up looking healthy.

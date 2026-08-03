@@ -36,6 +36,50 @@ const insideRepo = (p) => {
 
 const readJson = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
 
+// A PROVIDER declares how to start itself and which verbs it answers, in its own
+// provider.json. That is contract (contract/app-manifest.md): a fact belongs to
+// the thing that knows it, and the package containing live-state.mjs is what
+// knows live-state.mjs must run.
+//
+// It used to live in app.json, which meant one backend's start command was
+// hand-copied into every app that used it. Two copies drifted — AGENTS carried a
+// companion FILES did not — so retiring AGENTS deleted the generator for real
+// observe-state and a box with 11 real seats served an invented rig under a
+// green live signal. Nobody authored that bug; the format placed the fact where
+// a deletion could take it.
+const providerDir = (appsRoot, pkg) => path.join(appsRoot, "providers", path.basename(pkg));
+function readProviderDeclaration(appsRoot, pkg) {
+  const p = path.join(providerDir(appsRoot, pkg), "provider.json");
+  if (!fs.existsSync(p)) return null;
+  try { return readJson(p); }
+  catch (e) { return { __error: `provider.json for ${pkg} is not valid JSON: ${e.message}` }; }
+}
+
+// Every provider PRESENT on the box, whether or not an enabled app references
+// one. This is what lets an unmatched call be answered with "studio-video
+// declares it" rather than only "nothing serves it" — derived from the
+// declarations, so it cannot go stale when a verb moves between providers.
+function availableProviders(appsRoot) {
+  const root = path.join(appsRoot, "providers");
+  const out = new Map();
+  let names = [];
+  try { names = fs.readdirSync(root); } catch { return out; }
+  for (const name of names) {
+    const p = path.join(root, name, "provider.json");
+    if (!fs.existsSync(p)) continue;
+    try {
+      const d = readJson(p);
+      if (d.package) out.set(d.package, d);
+    } catch { /* a malformed declaration is reported where it is used */ }
+  }
+  return out;
+}
+
+// A verb ending in "/" is a PREFIX, the same rule byte routes already use, so
+// /api/export-status/ matches its children and /api/health matches only itself.
+export const verbMatches = (declared, wanted) =>
+  declared === wanted || (declared.endsWith("/") && wanted.startsWith(declared));
+
 export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioRoot, log = () => {} }) {
   if (studioRoot) STUDIO_ROOT = studioRoot;
   const surfacesOut = insideRepo(path.join(runtimeDir, "surfaces"));
@@ -54,6 +98,12 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
   const providers = new Set();
   const providerRuns = new Map();
   const missing = [];
+  const warnings = [];
+  const refusals = [];
+  // verb -> { required, by: [appId] }. Provider-agnostic by design: an app says
+  // WHAT it needs, the box works out WHO answers it.
+  const calls = new Map();
+  const available = availableProviders(appsRoot);
 
   for (const id of enabled) {
     const appDir = path.join(appsRoot, "apps", id);
@@ -89,6 +139,24 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
     // Several apps share one provider; first declaration wins and the rest are
     // checked against it, because two apps disagreeing about how to start the
     // same backend is a real conflict and not something to resolve silently.
+    // `calls` is what this app USES. Collected from every app first; resolved
+    // against provider declarations once, after the loop.
+    for (const [verb, spec] of Object.entries(m.calls ?? {})) {
+      const prior = calls.get(verb);
+      // required is a UNION: if any app cannot work without the verb, the box
+      // cannot come up without it, regardless of who else treats it as optional.
+      calls.set(verb, {
+        required: Boolean(prior?.required) || Boolean(spec?.required),
+        by: [...(prior?.by ?? []), m.id],
+      });
+    }
+    if (m.verbs?.length && !readProviderDeclaration(appsRoot, m.provider?.package ?? "")) {
+      warnings.push(
+        `${m.id}: declares verbs[] — LEGACY, superseded by calls{}. Honoured while ` +
+        `${m.provider?.package ?? "its provider"} ships no provider.json; see contract/app-manifest.md`
+      );
+    }
+
     if (m.provider?.package) {
       const pkg = m.provider.package;
       providers.add(pkg);
@@ -123,11 +191,85 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
     log(`${m.id} — ${m.provider?.package ?? "ultralight, no provider"}`);
   }
 
+  // ---- the provider's own declaration WINS -----------------------------------
+  // Converge rather than fork: an app-declared run spec is honoured only while
+  // its provider ships no provider.json. Once the provider declares, the
+  // provider is authoritative and any app copy is ignored WITH BOTH NAMED —
+  // there is never a moment when two things claim to say how one process starts.
+  for (const [pkg, spec] of providerRuns) {
+    const decl = available.get(pkg) ?? readProviderDeclaration(appsRoot, pkg);
+    if (!decl) continue;
+    if (decl.__error) { refusals.push(decl.__error); continue; }
+    if (spec.run?.entry && decl.run?.entry) {
+      warnings.push(
+        `${pkg}: run spec declared BOTH by its provider.json and by app "${spec.declaredBy}" — ` +
+        `the provider wins and the app's copy is ignored. Remove run/serves/verbs from that app.json`
+      );
+    }
+    spec.run = { ...decl.run, companions: [...(decl.run?.companions ?? [])] };
+    spec.serves = decl.serves ?? [];
+    spec.verbs = [...(decl.verbs ?? [])];
+    spec.declaredBy = `${pkg} (provider.json)`;
+  }
+
+  // ---- the unmatched-call ladder ---------------------------------------------
+  // 1. a started provider declares it            -> routed, nothing to do
+  // 2. a provider PRESENT but not started does   -> required STARTS it; optional warns
+  // 3. nothing present declares it               -> required refuses; optional warns
+  //
+  // Rung 2 is the authority that makes a cross-provider dependency SATISFIABLE
+  // rather than merely sayable: files calls /api/focus, studio-video implements
+  // it, and files' own provider is studio-host — so without this, a required
+  // call could be declared and never fulfilled.
+  //
+  // Which provider answers is DERIVED here from the declarations, never carried
+  // in the app manifest, so it cannot go stale when a verb moves packages.
+  //
+  // An OPTIONAL call never starts anything. Only `required: true` grants the
+  // authority, so this cannot quietly inflate what a box runs.
+  //
+  // Rung 3 names the app and the verb, NOT a package to install: the box cannot
+  // name something it does not have, and promising that refusal would need a
+  // registry that does not exist. See contract/app-manifest.md.
+  const servedBy = (verb) => {
+    for (const [pkg, spec] of providerRuns) {
+      if ((spec.verbs ?? []).some((d) => verbMatches(d, verb))) return pkg;
+    }
+    return null;
+  };
+  for (const [verb, want] of calls) {
+    if (servedBy(verb)) continue;
+    const elsewhere = [...available.entries()]
+      .find(([pkg, d]) => !providerRuns.has(pkg) && (d.verbs ?? []).some((x) => verbMatches(x, verb)));
+    const who = want.by.join(", ");
+    if (elsewhere && want.required) {
+      const [pkg, decl] = elsewhere;
+      providerRuns.set(pkg, {
+        package: pkg,
+        run: { ...decl.run, companions: [...(decl.run?.companions ?? [])] },
+        serves: decl.serves ?? [],
+        verbs: [...(decl.verbs ?? [])],
+        declaredBy: `${pkg} (required by ${who})`,
+      });
+      providers.add(pkg);
+      log(`${pkg} — started for ${verb}, required by ${who}`);
+    } else if (elsewhere) {
+      warnings.push(`${who}: calls ${verb} (optional); ${elsewhere[0]} declares it but is not started`);
+    } else if (want.required) {
+      refusals.push(
+        `${who}: calls ${verb} and it is REQUIRED, but no installed provider declares it. ` +
+        `Nothing on this box answers that verb`
+      );
+    } else {
+      warnings.push(`${who}: calls ${verb} (optional) and nothing installed declares it`);
+    }
+  }
+
   // External doors are BOX composition, not apps: services the box does not own
   // and does not install, hung on the rail by absolute URL. Vault-shaped.
   for (const d of doors) rows.push({ ...d });
 
-  return { rows, providers, providerRuns, missing, surfacesOut, vendorOut };
+  return { rows, providers, providerRuns, missing, warnings, refusals, calls, surfacesOut, vendorOut };
 }
 
 // Write the overlay manifest the SDK reads. chatSeats is RUNTIME state — a live

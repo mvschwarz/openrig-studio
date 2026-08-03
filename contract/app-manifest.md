@@ -302,20 +302,29 @@ For each entry in an app's `calls`:
 
 | situation | outcome |
 |---|---|
-| some installed provider declares the verb | routed, and if that provider is not otherwise started, `required: true` **starts it** |
-| nothing installed declares it, but an available package does | `required: true` **refuses, naming that package**; `required: false` warns |
-| nothing anywhere declares it | refuses if required, warns if not |
+| a provider **already started** declares the verb | routed; nothing further needed |
+| a provider **present on the box** declares it but is not started | `required: true` **starts it**; `required: false` warns and starts nothing |
+| **nothing present** declares it | `required: true` refuses, naming the app and the verb; `required: false` warns |
 
-The naming is **derived** from provider declarations, not carried in the app
-manifest — so it cannot go stale when a verb moves between providers.
+Which provider answers is **derived** from provider declarations, never carried
+in the app manifest — so it cannot go stale when a verb moves between providers.
 
 **Optional calls start nothing.** Only `required: true` grants the authority to
 start a provider no app names as its own.
 
-**Out of scope for v0.1, stated so it is not discovered:** the box does not
-*fetch* a provider that is not installed. Rung 2 refuses with a name; acquiring
-the package is the operator's step. Automatic transitive install is
-package-manager territory and is not part of this contract.
+**Out of scope for v0.1, stated so it is not discovered:** the box cannot name a
+package it does not have. A refusal at the third rung says *nothing on this box
+answers that verb* — it does not say *install `@openrig/studio-video`*, because
+that would require a registry of packages the box has never seen. Acquiring a
+package is the operator's step, and automatic transitive install is
+package-manager territory, not this contract.
+
+An earlier draft of this ladder had a fourth outcome that named an
+available-but-uninstalled package. It was written before the implementation and
+was not implementable: "present on the box" and "installed" are the same
+condition here, and there is no registry behind them. It is recorded rather than
+quietly dropped, because a specification that promises a refusal it cannot
+produce is the failure this document exists to end.
 
 ---
 
