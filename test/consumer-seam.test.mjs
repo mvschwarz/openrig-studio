@@ -563,28 +563,28 @@ test("the SDK's declared ROWS deep-equal what the package actually ships", () =>
 
 test("reusing a DECLARED id with different content does not make a row authoritative", async (t) => {
   //  With an id-only authority, an injected row reusing the
-  // declared id served attacker content under a trusted name.
+  // declared id served a page the SDK never shipped, under a trusted name.
   const { dir, consumer, appDir } = scaffold();
   const doc = JSON.parse(fs.readFileSync(path.join(appDir, "surfaces.json"), "utf8"));
-  doc.surfaces.unshift({ id: "floor", name: "HIJACKED FLOOR", glyph: "X", path: "/surfaces/hijack.html" });
+  doc.surfaces.unshift({ id: "floor", name: "STALE FLOOR", glyph: "X", path: "/surfaces/stale.html" });
   fs.writeFileSync(path.join(appDir, "surfaces.json"), JSON.stringify(doc, null, 2));
-  fs.writeFileSync(path.join(appDir, "surfaces", "hijack.html"), "HIJACK-PAGE");
+  fs.writeFileSync(path.join(appDir, "surfaces", "stale.html"), "STALE-PAGE");
 
   const srv = await start(dir, ["--surfaces", consumer]);
   t.after(() => srv.stop());
 
   // BOTH halves, because asserting only rejection is what let the next defect
-  // through: a PREPENDED forged row got the genuine FLOOR
-  // rejected as its duplicate before the authority filter ran, so the forged
+  // through: a PREPENDED stray row got the genuine FLOOR
+  // rejected as its duplicate before the authority filter ran, so the stray
   // bytes were refused AND the authoritative surface vanished. The guarantee is
   // that the served set IS the declared set — a declared surface must SURVIVE
   // contamination, not merely fail to be replaced by it.
-  assert.equal(await srv.status("/surfaces/hijack.html"), 404, "an injected row reusing a declared id was served");
+  assert.equal(await srv.status("/surfaces/stale.html"), 404, "a stray row reusing a declared id was served");
 
   const rows = await srv.rows();
-  assert.ok(!rows.some((r) => r.name === "HIJACKED FLOOR"), "the hijacked row reached the rail");
+  assert.ok(!rows.some((r) => r.name === "STALE FLOOR"), "the stale row reached the rail");
   assert.ok(rows.some((r) => r.id === "floor" && r.name === "FLOOR"),
-    "the GENUINE FLOOR row was suppressed by the forged one — contamination must not remove a declared surface");
+    "the GENUINE FLOOR row was suppressed by the stray one — contamination must not remove a declared surface");
 
   const floor = await srv.text("/surfaces/floor.html");
   assert.match(floor, /<!doctype html>/i, "the genuine FLOOR page must still be served");
@@ -609,7 +609,7 @@ test("a consumer row may not steal a package-owned PATH with a different id", as
   t.after(() => srv.stop());
 
   const body = await srv.text("/surfaces/floor.html");
-  assert.doesNotMatch(body, /CONSUMER-BYTES/, "a different-id consumer row hijacked the package path");
+  assert.doesNotMatch(body, /CONSUMER-BYTES/, "a different-id consumer row took over the package path");
   assert.match(body, /<!doctype html>/i, "the package FLOOR page must still be served");
 
   const m = await srv.contract();

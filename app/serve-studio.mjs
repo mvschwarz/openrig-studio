@@ -79,11 +79,16 @@ const ROW_OPTIONAL = { glyph: "string", hint: "string", category: "string", same
 // opted in. Changing an error contract is listed as BREAKING in contract-meta;
 // this keeps the unconfigured path genuinely untouched rather than nearly so.
 // `keep` filters rows BEFORE validation. Order matters: contamination must be
-// removed before the duplicate-id check, or a forged row PREPENDED to the
+// removed before the duplicate-id check, or a stray row PREPENDED to the
 // manifest gets the genuine row rejected as its duplicate and then gets dropped
 // itself as undeclared — suppressing the authoritative surface entirely. The
 // guarantee is that the served set IS the declared set, so a declared surface
 // has to survive contamination, not merely fail to be replaced by it.
+//
+// "Stray" is meant literally and the ordinary cause is a copy: someone
+// duplicated a node_modules tree to skip a slow install, or a boot step
+// materialised rows into the package. It is an accident, not an act, and the
+// rule is the same either way — the runtime serves what the SDK declares.
 function validateManifest(raw, label = "", keep = null) {
   const tag = label ? `${label} ` : "";
   const errors = [], warnings = [], valid = [];
@@ -229,10 +234,12 @@ function makeSource(manifestPath, label) {
 // and a copied node_modules tree carries this source unmodified.
 //
 // The declaration is the WHOLE ROW, not the id. An id-only authority is
-// bypassable by reusing a declared id with a different path or label: an
-// injected { id: "floor", name: "HIJACKED FLOOR", path: "/surfaces/hijack.html" }
-// would be accepted as the SDK's own and serve attacker content under a trusted
-// name. Declaring the row means the SDK vouches for exactly what it ships.
+// bypassed by reusing a declared id with a different path or label: a stray
+// { id: "floor", name: "STALE FLOOR", path: "/surfaces/stale.html" } would be
+// accepted as the SDK's own and serve a page the SDK never shipped under a
+// trusted name. Declaring the row means the SDK vouches for exactly what it
+// ships — which is also what makes the failure legible, because the mismatch
+// names the field that differs rather than merely refusing.
 //
 // A hardcoded declaration is discipline, so a committed test asserts this set
 // deep-equals the rows the package actually ships — change FLOOR's path or name
@@ -330,7 +337,7 @@ function mergedSurfaces() {
   if (consumerSource) {
     // A declared package row OWNS its path. A consumer row may take that path
     // ONLY by shadowing at the ID level — the documented, warned way to replace
-    // a stock surface. Letting a different-id row claim it would hijack the
+    // a stock surface. Letting a different-id row claim it would take over the
     // package's page silently: both rail entries would load consumer bytes with
     // no shadow warning, and replacement would become a filename act rather
     // than an id act, which is exactly what the stable rule forbids.

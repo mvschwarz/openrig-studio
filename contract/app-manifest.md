@@ -338,10 +338,18 @@ defect this document was written to end.
 | `app.json` identity, `surface`, `roots`, `vendor`, `requires` | **yes** |
 | open root-kind vocabulary, `studio.json` `roots` | **yes** |
 | the template language, `{{state}}` | **yes** |
-| reconciliation checks 1, 2, 3, 5 | **yes** |
-| `provider.json` — provider-owned `run` / `serves` / `verbs` | **not yet** |
-| `calls` with per-call `required` | **not yet** |
-| the unmatched-call ladder (check 4) | **not yet** |
+| `provider.json` — provider-owned `run` / `serves` / `verbs` | **yes**, `compose-rail.mjs` |
+| the legacy path and its warning | **yes** |
+| `calls` with per-call `required` | **yes**, `compose-rail.mjs` |
+| all five reconciliation checks, including the ladder | **yes** |
+| `app-manifest.schema.json` **enforced** against a manifest | **not yet** — no tool reads it |
+| `install-app.mjs --check` understanding `calls` / `provider.json` | **not yet** — it validates the older shape |
+| `manifest_version` checked on install | **not yet** — declared, never verified |
+
+Every row above was measured against the tools rather than remembered, after an
+earlier version of this table said three shipped rows were unimplemented. The
+last three are honest gaps: an author can write a manifest this document
+specifies and the installer will neither validate nor understand parts of it.
 
 **The transition converges rather than forking.** Until a provider ships a
 `provider.json`, an app-declared `provider.run` / `provider.serves` / `verbs` is

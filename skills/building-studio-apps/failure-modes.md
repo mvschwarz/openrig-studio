@@ -192,6 +192,6 @@ you look at the field that actually carries the answer.
 - Ask of every check: **what does this look like when it fails?** If that resembles success,
   the check proves nothing — run a negative control that makes it fail on purpose.
 - Assert that the **legitimate** operation still works, not only that the bad one is rejected.
-  A boundary that rejects everything passes every attack test and ships a dead feature.
+  A boundary that rejects everything passes every rejection test and ships a dead feature.
 - Install your manifest somewhere that has nothing.
 - Never let a failure borrow an empty state's appearance.
