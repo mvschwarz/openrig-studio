@@ -308,6 +308,47 @@ const proxy = (p) => (req, res) => {
   up.on("error", () => { res.writeHead(502, { "content-type": "application/json" }); res.end('{"ok":false,"error":"provider unavailable"}'); });
   req.pipe(up);
 };
+// The terminal frontend, with the clipboard shim spliced in.
+//
+// ttyd ships no OSC-52 handling, so a copy inside a terminal never reaches the
+// OS clipboard — it dies in the terminal emulator. The shim wraps WebSocket
+// before the bundle loads and writes decoded payloads out. It only works
+// alongside the iframe's clipboard grants; both halves are required.
+//
+// Injected here rather than vendored: splicing it into an extracted frontend
+// pins that copy to one ttyd version and has to be re-cut on every upgrade.
+// This studio already owns the origin the terminal is served through, so it
+// can splice on the way past and stay version-agnostic.
+const CLIP_SHIM = (() => {
+  try { return fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), "clipboard-shim.html"), "utf8"); }
+  catch { return ""; }
+})();
+const proxyTerminal = (req, res) => {
+  const headers = { ...req.headers };
+  // Ask for it uncompressed: splicing into a gzipped body produces a corrupt
+  // page, and the win from compressing one small HTML document is nil.
+  headers["accept-encoding"] = "identity";
+  const up = http.request({ host: "127.0.0.1", port: seatPort, path: req.url, method: req.method, headers }, (r) => {
+    const isHtml = String(r.headers["content-type"] || "").includes("text/html");
+    if (!isHtml || !CLIP_SHIM) { res.writeHead(r.statusCode || 502, r.headers); return r.pipe(res); }
+    const chunks = [];
+    r.on("data", (c) => chunks.push(c));
+    r.on("end", () => {
+      let html = Buffer.concat(chunks).toString("utf8");
+      const i = html.indexOf("<head>");
+      // No <head> means this is not the page we thought — pass it through
+      // untouched rather than corrupt it to force the feature in.
+      if (i > -1) html = html.slice(0, i + 6) + CLIP_SHIM + html.slice(i + 6);
+      const h = { ...r.headers };
+      delete h["content-length"]; delete h["content-encoding"];
+      h["content-length"] = Buffer.byteLength(html);
+      res.writeHead(r.statusCode || 200, h);
+      res.end(html);
+    });
+  });
+  up.on("error", () => { res.writeHead(502, { "content-type": "application/json" }); res.end('{"ok":false,"error":"terminal unavailable"}'); });
+  req.pipe(up);
+};
 const SDK_OWNED = new Set(["/api/contract", "/api/factory/state", "/api/events"]);
 // A provider is not only its /api/ verbs — byte routes are prefixes, declared
 // by the app. Leaving them out is why media listed and would not play.
@@ -342,7 +383,7 @@ const studioServer = http.createServer((req, res) => {
   }
   // Seat terminals ride this origin like any other byte route. They are a
   // websocket upgrade as well as HTTP, handled below.
-  if (seatPort && (url.pathname === "/chat" || url.pathname.startsWith("/chat/"))) return proxy(seatPort)(req, res);
+  if (seatPort && (url.pathname === "/chat" || url.pathname.startsWith("/chat/"))) return proxyTerminal(req, res);
   for (const [prefix, p] of serves) if (url.pathname.startsWith(prefix)) return proxy(p)(req, res);
   if (url.pathname.startsWith("/api/") && !SDK_OWNED.has(url.pathname)) {
     const p = routeVerb(url.pathname) ?? soleProvider;

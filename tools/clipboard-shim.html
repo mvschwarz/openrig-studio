@@ -1,0 +1,64 @@
+<!-- OSC-52 clipboard shim.
+     ORIGIN: written by dev-driver3 for studio-box (provision/clipboard-shim.html),
+     found live during an account-switch drill on 2026-07-30. Ported verbatim —
+     the scanning logic is subtle and retyping it would lose the details.
+
+     WHY IT IS NEEDED: ttyd 1.7.7 ships NO OSC-52 handling, so tmux
+     set-clipboard emissions (mouse-release copy) die inside xterm.js and never
+     reach the OS clipboard. Copy-out of a terminal is simply broken without it.
+
+     WHY IT IS INJECTED AT THE PROXY rather than baked into a frontend: the
+     original shipped a 732KB extracted ttyd bundle with this spliced into its
+     head, which pins the frontend to one ttyd version and has to be re-cut on
+     every upgrade. The studio already proxies the terminal through its own
+     origin, so it can splice the shim into whatever index ttyd serves. Same
+     fix, nothing vendored, survives a ttyd upgrade.
+
+     PAIRED REQUIREMENT: the iframe must carry allow="clipboard-read;
+     clipboard-write" or the write is blocked. Both halves are required. -->
+<script>
+/* studio-box clip-shim v1: OSC 52 -> browser clipboard. ttyd 1.7.7 ships no
+   OSC 52 handling, so tmux set-clipboard emissions died in xterm.js — this
+   wraps WebSocket BEFORE the ttyd bundle loads and scans terminal OUTPUT
+   frames (0x30-prefixed) for ESC ] 52 ; sel ; BASE64 (BEL | ESC backslash),
+   writing the decoded text to the clipboard. Needs the iframe
+   clipboard-write grants added in the shell (studio-box 6ae07c2). */
+(() => {
+  const NativeWS = window.WebSocket;
+  const dec = new TextDecoder("utf-8", { fatal: false });
+  let buf = "";
+  const OSC = /\x1b\]52;[^;]*;([A-Za-z0-9+\/=]*)(?:\x07|\x1b\\)/g;
+  function scan(chunk) {
+    buf = (buf + chunk).slice(-131072);
+    let m, last = null;
+    OSC.lastIndex = 0;
+    while ((m = OSC.exec(buf)) !== null) last = m;
+    if (!last) return;
+    buf = buf.slice(OSC.lastIndex);
+    try {
+      const bytes = Uint8Array.from(atob(last[1]), (c) => c.charCodeAt(0));
+      const text = new TextDecoder().decode(bytes);
+      if (text) navigator.clipboard.writeText(text)
+        .then(() => console.log("[clip-shim] copied", text.length, "chars"))
+        .catch((e) => console.warn("[clip-shim] clipboard write blocked:", e));
+    } catch (e) { console.warn("[clip-shim] decode failed:", e); }
+  }
+  window.WebSocket = function (url, protocols) {
+    const ws = protocols === undefined ? new NativeWS(url) : new NativeWS(url, protocols);
+    ws.addEventListener("message", (ev) => {
+      try {
+        const d = ev.data;
+        if (typeof d === "string") { if (d.charCodeAt(0) === 0x30) scan(d.slice(1)); return; }
+        if (d instanceof ArrayBuffer) {
+          const u = new Uint8Array(d);
+          if (u.length && u[0] === 0x30) scan(dec.decode(u.subarray(1)));
+        }
+      } catch {}
+    });
+    return ws;
+  };
+  window.WebSocket.prototype = NativeWS.prototype;
+  window.WebSocket.CONNECTING = 0; window.WebSocket.OPEN = 1;
+  window.WebSocket.CLOSING = 2; window.WebSocket.CLOSED = 3;
+})();
+</script>
