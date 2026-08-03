@@ -5,11 +5,8 @@
 # has never run on a machine without node/npm/git — that is the one unproven
 # link. Nothing here has provisioned a VPS.
 #
-# The honest assessment — what is proven, inferred, or untested, and every step
-# still needing a human — is deliberately NOT in this repo. It names hosts and
-# internal confidence levels; it lives in the mission tree at
-# openrig-work/missions/openrig-cloud/GAPS-vps-provisioning.md.
-# The script ships; the assessment does not.
+# The full assessment of what is proven versus untested is tracked separately
+# and is not part of this repo. The script ships; the assessment does not.
 #
 # Design constraints this script is written to:
 #   * NON-INTERACTIVE. No prompts, ever. A Stripe webhook must be able to call
@@ -76,8 +73,8 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # --- 1. host bootstrap: node, npm, git ---------------------------------------
-# THE GENUINELY UNTESTED PART. Matti's box already had all three; a new one
-# will not. Two paths, because a rootless box is a real case (see GAPS.md G2).
+# THE GENUINELY UNTESTED PART. The box this was proven on already had all
+# three; a fresh one will not. Two paths, because a rootless box is real.
 note "host bootstrap (node >=${NODE_MAJOR}, npm, git)"
 have_node() { command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge "$NODE_MAJOR" ]; }
 
