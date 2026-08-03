@@ -196,14 +196,24 @@
   const agentsBody = document.getElementById("agents-body");
   const seats = (reg.chatSeats || []).filter((s) => s && s.seat);
   const termPort = reg.chatLocalPort;
-  const isLocal = ["127.0.0.1", "localhost"].includes(location.hostname);
   // The seat name IS the argument — a terminal is addressed by which seat it
   // is attached to, not by a separate id to keep in sync.
-  const chatUrl = (seat) => isLocal
-    ? `http://127.0.0.1:${termPort}/?arg=${encodeURIComponent(seat)}`
-    : `${location.origin}/chat/?arg=${encodeURIComponent(seat)}`;
+  //
+  // ALWAYS same-origin. This used to branch on whether the page was on
+  // loopback: direct to the terminal's own port locally, /chat through the
+  // origin otherwise. That worked on the machine it was written on and would
+  // have broken the moment a studio was reached through anything else, because
+  // nothing served /chat — the sidebar would have asked the studio for a
+  // terminal it does not host. One shape everywhere means the path that gets
+  // tested locally is the same path that runs remotely, and a proxy in front
+  // needs exactly one rule instead of one per port.
+  const chatUrl = (seat) => `${location.origin}/chat/?arg=${encodeURIComponent(seat)}`;
   const rigOf = (seat) => (String(seat).split("@")[1] || "");
-  const attachable = seats.length && (!isLocal || termPort);
+  // Attachable when a roster exists AND the studio advertised a terminal it is
+  // actually serving. No loopback special case: the route is the same
+  // everywhere now, so the only question is whether a terminal is being served
+  // at all.
+  const attachable = Boolean(seats.length && termPort);
 
   let seat = seats.length ? seats[0].seat : null;
   try { seat = localStorage.getItem("shell.chatSeat") || seat; } catch {}

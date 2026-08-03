@@ -273,8 +273,11 @@ if (missingCompanions.length) {
 // name is the argument and there is no second id to keep in sync.
 if (seatPort) {
   const script = path.join(path.dirname(new URL(import.meta.url).pathname), "seat-attach.sh");
+  // -b /chat so the terminal lives under the SAME path the shell asks for,
+  // through this origin. Nothing but this studio needs to be reachable, which
+  // is what lets a proxy in front carry one rule instead of one per service.
   spawnRaw("seat terminals", "ttyd", [
-    "-W", "-a", "-p", String(seatPort), "-i", "127.0.0.1",
+    "-W", "-a", "-p", String(seatPort), "-i", "127.0.0.1", "-b", "/chat",
     "-t", "fontSize=10", "-t", "lineHeight=1.35",
     "bash", script,
   ]);
@@ -319,7 +322,7 @@ const routeVerb = (pathname) => {
   return null;
 };
 
-http.createServer((req, res) => {
+const studioServer = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname.startsWith("/vendor/")) {
     const f = path.join(rail.vendorOut, url.pathname.slice("/vendor/".length));
@@ -329,6 +332,9 @@ http.createServer((req, res) => {
     }
     res.writeHead(404); return res.end();
   }
+  // Seat terminals ride this origin like any other byte route. They are a
+  // websocket upgrade as well as HTTP, handled below.
+  if (seatPort && (url.pathname === "/chat" || url.pathname.startsWith("/chat/"))) return proxy(seatPort)(req, res);
   for (const [prefix, p] of serves) if (url.pathname.startsWith(prefix)) return proxy(p)(req, res);
   if (url.pathname.startsWith("/api/") && !SDK_OWNED.has(url.pathname)) {
     const p = routeVerb(url.pathname) ?? soleProvider;
@@ -337,6 +343,29 @@ http.createServer((req, res) => {
   return proxy(sdkPort)(req, res);
 }).listen(port, "127.0.0.1", () => {
   console.log(`studio: http://127.0.0.1:${port}/  (runtime ${sdkPort}${serves.size ? ` · ${serves.size} byte route(s)` : ""})`);
+});
+
+// A terminal is a WEBSOCKET, and an HTTP-only proxy in front of one gives you
+// a page that loads and a terminal that never connects — renders-but-does-not-
+// work, wearing a 200. Upgrades have to be tunnelled explicitly: Node routes
+// them to 'upgrade', not to the request handler, so the route above would
+// never see them.
+studioServer.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url, "http://x");
+  if (!seatPort || !(url.pathname === "/chat" || url.pathname.startsWith("/chat/"))) return socket.destroy();
+  const up = http.request({ host: "127.0.0.1", port: seatPort, path: req.url, method: req.method,
+    headers: req.headers });
+  up.on("upgrade", (upRes, upSocket, upHead) => {
+    socket.write(`HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage}\r\n` +
+      Object.entries(upRes.headers).map(([k, v]) => `${k}: ${v}`).join("\r\n") + "\r\n\r\n");
+    if (upHead?.length) socket.unshift(upHead);
+    upSocket.pipe(socket).pipe(upSocket);
+    upSocket.on("error", () => socket.destroy());
+    socket.on("error", () => upSocket.destroy());
+  });
+  up.on("error", () => socket.destroy());
+  if (head?.length) up.write(head);
+  up.end();
 });
 
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { children.forEach((c) => c.kill(sig)); process.exit(0); });
