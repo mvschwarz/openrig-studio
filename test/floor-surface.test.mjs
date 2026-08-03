@@ -45,6 +45,15 @@ test("FLOOR keeps its declared welcome and delegated agent launcher", () => {
   assert.match(surface, /parent\.postMessage\(\{ t: 'open-agent', seat: b\.dataset\.seat \}/);
 });
 
+test("FLOOR defines every visual token used by the declared welcome", () => {
+  const root = surface.match(/:root\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+  assert.match(root, /--text\s*:/, "positive control: the root token block was not read");
+
+  for (const token of ["edge2", "body", "faint", "bone"]) {
+    assert.match(root, new RegExp(`--${token}\\s*:`), `welcome token --${token} is undefined`);
+  }
+});
+
 test("FLOOR keeps the all-rig caption and live-to-polling refresh path", () => {
   assert.match(surface, /rig\.textContent = state\.rig/);
   assert.match(surface, /new EventSource\('\/api\/events'\)/);
