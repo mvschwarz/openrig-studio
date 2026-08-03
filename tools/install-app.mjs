@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 // INSTALL AN APP INTO THIS STUDIO.
 //
-// WHY THIS EXISTS. Until now the installer was a person. Five apps were joined
-// to this box by hand — copy the surface, notice it needs a provider, run the
-// provider, guess its roots, add a row — and that hand-install produced six
-// defects that QA found by driving the apps: a vendored dependency never
-// copied, a provider still reaching for a file that had moved (one GET killed
-// the process), and a heavy app's byte routes never proxied, so its media
-// listed and would not play.
+// WHY THIS EXISTS. Joining an app to a studio by hand — copy the surface,
+// notice it needs a provider, run the provider, guess its roots, add a row —
+// fails in ways that only appear when the app is driven: a vendored dependency
+// never copied, a provider reaching for a file that has moved, a heavy app's
+// byte routes never proxied so its media lists and will not play.
 //
-// A careful operator with full context got the same join wrong six ways. That
+// A careful operator with full context can get the same join wrong six ways. That
 // is not carelessness — it is the evidence that **the manifest does not carry
 // enough to install from**. So this tool's real job is not to copy files. It is
 // to REFUSE an app whose manifest cannot describe a working install, and to say
@@ -348,8 +346,8 @@ const destRoot = path.join(appsRoot, "apps");
 fs.mkdirSync(destRoot, { recursive: true });
 const dest = path.join(destRoot, m.id);
 
-// SOURCE AND DEST CAN BE THE SAME DIRECTORY, and the first version of this
-// tool DELETED THE APP IT WAS ASKED TO INSTALL because of it: rmSync(dest) ran
+// SOURCE AND DEST CAN BE THE SAME DIRECTORY, and the destructive ordering is
+// the trap: rmSync(dest) ran
 // before cpSync, and dest WAS the source. Found by using the tool.
 //
 // Asked by INODE IDENTITY rather than by comparing resolved path strings.

@@ -1,14 +1,14 @@
-// Regression suite for the composer — the first tests tools/ has ever had.
+// Regression suite for the composer.
 //
 //   node --test 'test/*.test.mjs'
 //
-// tools/ is the highest-risk code in this repo: it spawns processes, proxies
-// traffic and guards ports, and it had zero coverage while the runtime had
-// eighty tests. This covers the composition rules that decide WHAT gets started,
-// because those are the ones whose failure looks like a working studio.
+// The composer decides WHAT a studio starts — which providers run, which
+// companions come with them, which declared calls are satisfiable. Those are
+// the rules whose failure looks like a working studio, so they are covered
+// here rather than left to a boot.
 //
 // Every case below is a rule from contract/app-manifest.md. If a rule changes,
-// this file should fail before anyone finds out from a box.
+// this file fails first.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

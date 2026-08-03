@@ -202,10 +202,9 @@
   });
 
   // --- agent sidebar: a real seat's session in a frame -------------------
-  // PORTED, not retyped, from the studio-box shell where this has a week of
-  // real use behind it. The multiplayer surface — a human and the agents that
-  // wrote the app, on the same screen — is the point of this SDK, so it lives
-  // here rather than in any one app's provider.
+  // The multiplayer surface — a human and the agents that wrote the app, on the
+  // same screen — is the point of this SDK, so it lives here in the shell
+  // rather than inside any one app's provider.
   //
   // Degrades honestly in three distinguishable ways, because "no seats" has
   // more than one cause and a surface can only act on the difference if it is
@@ -238,10 +237,14 @@
   try { seat = localStorage.getItem("shell.chatSeat") || seat; } catch {}
   if (!seats.some((s) => s.seat === seat)) seat = seats.length ? seats[0].seat : null;
   const rigs = [...new Set(seats.map((s) => rigOf(s.seat)))].filter(Boolean);
-  // The team that builds things goes first. On a box with an infrastructure rig
-  // and a product rig, the product rig is what someone opens the launcher for;
-  // alphabetical order buries it behind the plumbing.
-  if (rigs.includes("product-team")) rigs.sort((a, b) => (a === "product-team" ? -1 : b === "product-team" ? 1 : 0));
+  // A box may declare which rig the launcher opens on. Where one rig is the
+  // reason someone opens the launcher and the others are plumbing, discovery
+  // order buries it; `primaryRig` lets the box say so. Absent, order is left
+  // alone — no rig name is built into the shell.
+  const primary = reg.primaryRig;
+  if (primary && rigs.includes(primary)) {
+    rigs.sort((a, b) => (a === primary ? -1 : b === primary ? 1 : 0));
+  }
   let chatRig = rigOf(seat) || rigs[0];
 
   function renderTiles() {

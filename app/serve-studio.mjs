@@ -667,11 +667,11 @@ function filesSearch(q) {
 // startup cannot land in a temporal dead zone no matter what these functions
 // grow to touch later.
 //
-// The weaker arrangement (init partway down, "safe" because the current call
-// graph happens not to reach the later bindings) is what produced two TDZ
-// crashes in this file already. The second was found by QA after the first was
-// "fixed" by hoisting the single binding that tripped. Add new startup work
-// HERE, not next to the function it calls.
+// The weaker arrangement — init partway down, "safe" because the current call
+// graph happens not to reach the later bindings — is a temporal dead zone
+// waiting for the next edit. Hoisting the one binding that trips only moves the
+// tripwire; the position is what makes it safe. Add new startup work HERE, not
+// next to the function it calls.
 watchForChanges();
 loadManifest();
 

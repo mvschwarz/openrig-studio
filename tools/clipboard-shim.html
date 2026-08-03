@@ -1,28 +1,13 @@
 <!-- OSC-52 clipboard shim.
-     ORIGIN: written by dev-driver3 for studio-box (provision/clipboard-shim.html),
-     found live during an account-switch drill on 2026-07-30. Ported verbatim —
-     the scanning logic is subtle and retyping it would lose the details.
-
-     WHY IT IS NEEDED: ttyd 1.7.7 ships NO OSC-52 handling, so tmux
-     set-clipboard emissions (mouse-release copy) die inside xterm.js and never
-     reach the OS clipboard. Copy-out of a terminal is simply broken without it.
-
-     WHY IT IS INJECTED AT THE PROXY rather than baked into a frontend: the
-     original shipped a 732KB extracted ttyd bundle with this spliced into its
-     head, which pins the frontend to one ttyd version and has to be re-cut on
-     every upgrade. The studio already proxies the terminal through its own
-     origin, so it can splice the shim into whatever index ttyd serves. Same
-     fix, nothing vendored, survives a ttyd upgrade.
-
-     PAIRED REQUIREMENT: the iframe must carry allow="clipboard-read;
-     clipboard-write" or the write is blocked. Both halves are required. -->
+     Terminal emulators embedded in an iframe cannot reach the system clipboard
+     directly; OSC-52 is the escape sequence they use to ask the host page to do
+     it for them. This decodes that sequence and performs the write. -->
 <script>
-/* studio-box clip-shim v1: OSC 52 -> browser clipboard. ttyd 1.7.7 ships no
-   OSC 52 handling, so tmux set-clipboard emissions died in xterm.js — this
-   wraps WebSocket BEFORE the ttyd bundle loads and scans terminal OUTPUT
-   frames (0x30-prefixed) for ESC ] 52 ; sel ; BASE64 (BEL | ESC backslash),
-   writing the decoded text to the clipboard. Needs the iframe
-   clipboard-write grants added in the shell (studio-box 6ae07c2). */
+/* OSC 52 -> browser clipboard. ttyd 1.7.7 ships no OSC 52 handling, so tmux
+   set-clipboard emissions are dropped by xterm.js. This wraps WebSocket BEFORE
+   the ttyd bundle loads and scans terminal OUTPUT frames (0x30-prefixed) for
+   ESC ] 52 ; sel ; BASE64 (BEL | ESC backslash), writing the decoded text to
+   the clipboard. Requires the iframe to carry a clipboard-write grant. */
 (() => {
   const NativeWS = window.WebSocket;
   const dec = new TextDecoder("utf-8", { fatal: false });

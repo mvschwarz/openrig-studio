@@ -364,34 +364,22 @@ defect this document was written to end.
 | the legacy path and its warning | **yes** |
 | `calls` with per-call `required` | **yes**, `compose-rail.mjs` |
 | all five reconciliation checks, including the ladder | **yes** |
-| provider-declared `seeds` | **yes** — fixed after shipping broken; see below |
-| `supplies` read from `provider.json` by `install-app --check` | **yes** — same fix |
+| provider-declared `seeds` | **yes**, `studio.mjs` |
+| `supplies` read from `provider.json` by `install-app --check` | **yes** |
 | `app-manifest.schema.json` **enforced** against a manifest | **not yet** — no tool reads it |
 | `install-app.mjs --check` understanding `calls` / `provider.json` | **not yet** — it validates the older shape |
 | `manifest_version` checked on install | **not yet** — declared, never verified |
 
-**`seeds` shipped broken and this row said "yes" for a day.** The composer copied
-`run`, `serves` and `verbs` off a `provider.json` and dropped `seeds` and
-`supplies`, so a declaration this document specifies could not reach the code
-that reads it — and the reader accepted two shapes, which hid the broken writer
-instead of exposing it. Only the one provider the legacy fallback names by hand
-was unaffected, so it looked like it worked. Found by studio.impl migrating a
-different provider, fixed with a test that asserts every contract field reaches
-the spec. Recorded because "yes" in this table has now been wrong twice, and
-both times the coverage caveat below is what let it through.
+**Coverage behind this table is not uniform, and the difference is worth
+knowing.** `compose-rail.mjs` has direct tests: composition, the provider-wins
+rule, the legacy path, the unmatched-call ladder, and an assertion that every
+field a `provider.json` may carry reaches the code that consumes it. `studio.mjs`
+has none — it is a script with no exports, so its boot-level behaviour (port
+guarding, process spawning, proxying, seeding) is exercised only by running a
+studio. Treat a row backed by a test and a row backed by a manual run
+differently.
 
-**Test coverage is not uniform and the gap is named rather than left to be
-assumed.** `compose-rail.mjs` — composition, the provider-wins rule, the legacy
-path and the whole unmatched-call ladder — has direct tests. `studio.mjs` has
-none: it is a script with no exports, so its boot-level behaviour (port
-guarding, process spawning, proxying, and `seeds`) is only exercised by running
-a studio. `seeds` is therefore implemented and hand-verified, not regression-
-covered, and a reader should weigh those differently.
-
-Every row above was measured against the tools rather than remembered, after an
-earlier version of this table said three shipped rows were unimplemented. The
-last three are honest gaps: an author can write a manifest this document
-specifies and the installer will neither validate nor understand parts of it.
+Rows here are measured against the tools rather than recalled.
 
 **The transition converges rather than forking.** Until a provider ships a
 `provider.json`, an app-declared `provider.run` / `provider.serves` / `verbs` is

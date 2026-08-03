@@ -87,8 +87,8 @@ if (declared && !composed) {
 // FLEET-WIDE (-A) is required, not optional. Outside a managed session the CLI
 // has no current rig to default to and exits non-zero with "no target" — so a
 // bare invocation fails on precisely the boxes this runs on, while working on
-// a developer machine that happens to be inside a session. Found by deploying
-// to a box that was not the one it was written on.
+// a developer machine that happens to be inside a session — so the failure is
+// invisible where it is written and certain where it is deployed.
 function liveSeats() {
   try {
     const raw = execFileSync("rig", ["ps", "--nodes", "-A", "--json"], { encoding: "utf8", timeout: 6000, stdio: ["ignore", "pipe", "ignore"] });
@@ -118,6 +118,7 @@ writeOverlayManifest({
   chatSeats: seatRoster,
   ...(seatPort ? { chatLocalPort: seatPort } : {}),
   ...(config.welcome ? { welcome: config.welcome } : {}),
+  ...(config.primaryRig ? { primaryRig: config.primaryRig } : {}),
 });
 if (seatRoster.length) {
   console.log(`  seats   : ${seatRoster.length} live${seatPort ? ` · terminals on ${seatPort}` : " · NO ttyd on this box, so seats are listed but not attachable"}`);

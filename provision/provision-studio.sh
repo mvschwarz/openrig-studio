@@ -9,16 +9,14 @@
 # and is not part of this repo. The script ships; the assessment does not.
 #
 # Design constraints this script is written to:
-#   * NON-INTERACTIVE. No prompts, ever. A Stripe webhook must be able to call
-#     this. All input is env; all output is a machine-readable summary line.
+#   * NON-INTERACTIVE. No prompts, ever — it must be callable unattended from
+#     automation. All input is env; all output is a machine-readable summary line.
 #   * IDEMPOTENT. Re-running must converge, not duplicate. Safe to retry.
 #   * VERIFIES BY EFFECT, not by exit code. Counting surfaces is not an app
 #     check — a box with zero apps kept that count true.
-#   * INSTALLS FROM PUBLIC REPOS ONLY. No credentials ever land on the target.
-#     That is fleet hygiene expressed as architecture rather than as a gate:
-#     there is nothing to leak, so nothing has to remember not to leak it. The
-#     box's owner is not an adversary — only OTHER customers' boxes are separate
-#     concerns, and this design keeps them separate by construction.
+#   * INSTALLS FROM PUBLIC SOURCES ONLY. No credentials ever land on the target.
+#     That is hygiene expressed as architecture rather than as a gate: there is
+#     nothing to leak, so nothing has to remember not to leak it.
 #
 # Usage:
 #   ./provision-studio.sh                       # defaults

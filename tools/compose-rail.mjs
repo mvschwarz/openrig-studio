@@ -283,7 +283,7 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
 // Write the overlay manifest the SDK reads. chatSeats is RUNTIME state — a live
 // rig roster must never be written back into a source-controlled file — so it
 // only ever lands here, in the composed copy.
-export function writeOverlayManifest({ surfacesOut, rows, chatSeats, chatLocalPort, welcome }) {
+export function writeOverlayManifest({ surfacesOut, rows, chatSeats, chatLocalPort, welcome, primaryRig }) {
   const dir = insideRepo(surfacesOut);
   const doc = {
     _note: "COMPOSED AT BOOT from installed apps + box doors. Do not edit — edit the app's app.json or studio.config.json.",
@@ -294,6 +294,9 @@ export function writeOverlayManifest({ surfacesOut, rows, chatSeats, chatLocalPo
   // deliberately when no terminal can be served, so the shell reports
   // listed-but-not-attachable instead of failing on click.
   if (chatLocalPort != null) doc.chatLocalPort = chatLocalPort;
+  // Which rig the launcher opens on, when a box has more than one and one of
+  // them is the point. Declared by the box; the shell hardcodes no rig name.
+  if (primaryRig) doc.primaryRig = primaryRig;
   // A box may introduce itself. Declared, never hardcoded into a surface: the
   // shell ships to every box and knows none of their seat names, so a welcome
   // written into FLOOR would be exactly the bespoke lineage we keep removing.

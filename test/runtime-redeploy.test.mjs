@@ -480,9 +480,9 @@ test("startup runs after EVERY module binding, so the TDZ class cannot return", 
   // the comment. The earlier arrangement put init partway down the module and
   // was "safe" only because the current call graph happened not to reach the
   // later bindings — a property that silently expires the moment loadManifest
-  // or watchForChanges grows a new dependency. Two TDZ crashes came out of that
-  // file before this was made structural, the second after the first was
-  // "fixed" by hoisting the single binding that tripped.
+  // or watchForChanges grows a new dependency. Hoisting whichever binding
+  // trips only moves the tripwire, so the position is asserted rather than
+  // maintained by care.
   const src = fs.readFileSync(path.join(REPO, "app", "serve-studio.mjs"), "utf8").split("\n");
 
   const declarations = src

@@ -197,16 +197,16 @@ test("a PRE-CONTAMINATED package cannot inject — undeclared rows and pages are
   // package are ignored for serving AND warned, so contamination is visible
   // rather than silently masked.
   //
-  // This test has been wrong twice, in two different ways, and both are worth
-  // remembering:
-  //   1. it once wrote a phantom PAGE and claimed to write a page AND a row, so
-  //      the assertion could not fail — a test that cannot fail is not a test;
-  //   2. it once pinned the WEAK policy positively ("contaminated rows do
-  //      serve") as though that were the property. the prose
-  //      still said so after the assertions had been corrected. A passing suite
-  //      encoding a known-inadequate guarantee is worse than no test, because
-  //      it makes the inadequacy look ratified.
-  // The prose and the assertions now say the same thing, deliberately.
+  // Two failure modes this case is written against, because both produce a
+  // green suite:
+  //   1. setting up only half the condition — a phantom PAGE without its row —
+  //      leaves the assertion unable to fail, and a test that cannot fail is
+  //      not a test;
+  //   2. prose that describes a weaker policy than the assertions enforce makes
+  //      the weaker one look ratified, which is worse than having no test at
+  //      all.
+  // So the setup creates both halves, and the prose and the assertions state
+  // the same guarantee.
   const origin = scaffold();
 
   // contaminate the package the way materialisation used to: page AND row, in
@@ -365,7 +365,7 @@ test("a consumer row SHADOWS a package row of the same id — and says so", asyn
 
   const m = await srv.contract();
   assert.ok(m.warnings.some((w) => /SHADOWS the package surface/.test(w)),
-    "shadowing must be named — silently replacing a surface is a silent replacement gives an operator no way to learn something was displaced");
+    "shadowing must be named: a silent replacement gives an operator no way to learn something was displaced");
 });
 
 test("serving is REGISTRATION-aware: an unregistered consumer file never wins", async (t) => {
