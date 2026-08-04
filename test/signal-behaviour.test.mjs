@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { watchSignal, preserveAcross, deferWhileDirty } from "../app/signal.js";
+import { watchSignal, preserveAcross, deferWhileDirty, declaredKinds, preserveDeclared } from "../app/signal.js";
 
 // A scripted transport. Each entry is one response, consumed in order.
 function transport(script) {
@@ -168,6 +168,95 @@ test("the restore SAYS it happened, once", () => {
     assert.equal(said.length, 1, "a reload the user did not expect must still be legible as one");
     assert.match(said[0], /kept/);
   });
+});
+
+// ------------------------------------------------ the declaration, consumed
+
+const served = (rows) => ({
+  ok: true,
+  json: async () => ({ surfaces: rows }),
+});
+
+test("a surface reads its OWN declared kinds out of the served manifest", async () => {
+  // The link that turns a carried field into a consumed one. Asserted against
+  // the served document, because that is what a surface actually sees.
+  const r = await declaredKinds({
+    surfaceId: "mine",
+    fetchImpl: async () => served([
+      { id: "other", preserve: ["playhead"] },
+      { id: "mine", preserve: ["scroll", "selection"] },
+    ]),
+  });
+  assert.deepEqual(r.kinds, ["scroll", "selection"], "read the wrong row's declaration");
+  assert.equal(r.problem, null);
+});
+
+test("declaring nothing and having no row are DIFFERENT answers", async () => {
+  // Collapsing them to [] hides a registration failure behind a deliberate
+  // choice, and a surface can act on the difference.
+  const declaredNothing = await declaredKinds({
+    surfaceId: "mine", fetchImpl: async () => served([{ id: "mine" }]),
+  });
+  assert.deepEqual(declaredNothing.kinds, []);
+  assert.equal(declaredNothing.found, true);
+  assert.equal(declaredNothing.problem, null, "declaring nothing is not a problem");
+
+  const noRow = await declaredKinds({
+    surfaceId: "mine", fetchImpl: async () => served([{ id: "somebody-else" }]),
+  });
+  assert.equal(noRow.found, false, "a missing row read as a present one that declared nothing");
+  assert.match(noRow.problem, /no row with id/);
+});
+
+test("a DECLARED but unusable preserve is reported, not read as an empty list", async () => {
+  // The likeliest real mistake is a string instead of an array. Absence is
+  // silent because the field is optional; a declaration that does nothing is not.
+  const r = await declaredKinds({
+    surfaceId: "mine", fetchImpl: async () => served([{ id: "mine", preserve: "scroll" }]),
+  });
+  assert.deepEqual(r.kinds, []);
+  assert.match(r.problem, /must be an array/, "an unusable declaration passed as an empty one");
+});
+
+test("preserveDeclared captures exactly the declared kinds and restores them", () => {
+  withSessionStorage(() => {
+    const live = { scroll: 240, playhead: 12.5, untouched: "leave me" };
+    const adapter = { get: (k) => live[k], set: (k, v) => { live[k] = v; } };
+
+    preserveDeclared("demo", ["scroll", "playhead"], { adapter }).keep();
+    live.scroll = 0; live.playhead = 0;                    // the reload
+    preserveDeclared("demo", ["scroll", "playhead"], { adapter });
+
+    assert.equal(live.scroll, 240, "a declared kind was not restored");
+    assert.equal(live.playhead, 12.5);
+    assert.equal(live.untouched, "leave me", "an UNdeclared value was written — the list is the boundary");
+  });
+});
+
+test("a kind the adapter cannot handle is REPORTED, and the others still work", () => {
+  // The over-restrictive-guard hazard: refusing everything would satisfy a
+  // reporting test on its own. The positive half is what makes it meaningful.
+  withSessionStorage(() => {
+    const live = { scroll: 10 };
+    const reported = [];
+    const adapter = {
+      supports: (k) => k === "scroll",
+      get: (k) => live[k],
+      set: (k, v) => { live[k] = v; },
+    };
+    preserveDeclared("demo", ["scroll", "telepathy"], { adapter, onUnsupported: (u) => reported.push(...u) }).keep();
+    live.scroll = 0;
+    preserveDeclared("demo", ["scroll", "telepathy"], { adapter, onUnsupported: () => {} });
+
+    assert.deepEqual(reported, ["telepathy"], "an unkeepable declared kind was dropped silently");
+    assert.equal(live.scroll, 10, "reporting the unsupported kind broke the supported one");
+  });
+});
+
+test("preserveDeclared THROWS without an adapter rather than preserving nothing quietly", () => {
+  // A preserve helper that silently preserved nothing is the exact failure the
+  // declaration exists to avoid, so this fails loudly instead.
+  assert.throws(() => preserveDeclared("demo", ["scroll"], {}), /needs an adapter/);
 });
 
 // ------------------------------------------------------------ human wins

@@ -133,6 +133,66 @@ export function preserveAcross(key, { capture, restore, say = () => {} } = {}) {
   };
 }
 
+// ---- the declared list, read from the surface's OWN row ----------------------
+// This is the link that turns `preserve` from a field the manifest CARRIES into
+// one something CONSUMES. Without it the declaration is the shape that reads as
+// done and does nothing — the class this seam has removed repeatedly.
+//
+// Takes its fetch for the same reason watchSignal does: a consumer can test its
+// own adoption with no browser and no live provider.
+export async function declaredKinds({ surfaceId, fetchImpl = fetch, manifest = "/surfaces.json" } = {}) {
+  const res = await fetchImpl(manifest, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${manifest} responded ${res.status}`);
+  const rows = (await res.json())?.surfaces ?? [];
+  const row = rows.find((r) => r && r.id === surfaceId);
+
+  // "my row is missing" and "my row declares nothing" are different facts and a
+  // surface can act on the difference — the first is a registration problem, the
+  // second is a deliberate choice. Collapsing them to [] would hide the first.
+  if (!row) return { kinds: [], found: false, problem: `no row with id "${surfaceId}" in ${manifest}` };
+  if (row.preserve === undefined) return { kinds: [], found: true, problem: null };
+  if (!Array.isArray(row.preserve)) {
+    // Declared and unusable is NOT the same as undeclared, and it must not read
+    // as an empty list. Absence is silent because the field is optional; a
+    // declaration that does nothing is not.
+    return { kinds: [], found: true, problem: `preserve must be an array of kind names, got ${typeof row.preserve}` };
+  }
+  return { kinds: row.preserve, found: true, problem: null };
+}
+
+// Drive capture/restore from a declared list.
+//
+// THE ADAPTER IS REQUIRED AND HAS NO DEFAULT, deliberately. Binding the standard
+// kinds (scroll, selection, form, playhead) to real DOM is browser work that
+// cannot be honestly verified from node, and shipping an unverified default
+// would be asserting behaviour nothing here has run. A surface supplies its own
+// adapter today; the standard one lands with a browser pass behind it. See the
+// conformance table in contract/change-signal.md.
+export const STANDARD_KINDS = ["scroll", "selection", "form", "playhead"];
+
+export function preserveDeclared(key, kinds, { adapter, say, onUnsupported = () => {} } = {}) {
+  if (!adapter || typeof adapter.get !== "function" || typeof adapter.set !== "function") {
+    // Throw rather than no-op. A preserve helper that silently preserved nothing
+    // is the exact failure this whole declaration exists to avoid.
+    throw new Error("preserveDeclared needs an adapter: { get(kind), set(kind, value), supports?(kind) }");
+  }
+  const list = Array.isArray(kinds) ? kinds : [];
+  const supported = [], unsupported = [];
+  for (const k of list) (adapter.supports ? adapter.supports(k) : true) ? supported.push(k) : unsupported.push(k);
+  // Reported, never dropped quietly: a kind the surface declared and nothing can
+  // keep is a promise the user will notice being broken.
+  if (unsupported.length) onUnsupported(unsupported);
+
+  return preserveAcross(key, {
+    capture: () => Object.fromEntries(supported.map((k) => [k, adapter.get(k)])),
+    restore: (state) => {
+      if (!state || typeof state !== "object") return;
+      for (const k of supported) if (Object.hasOwn(state, k)) adapter.set(k, state[k]);
+    },
+    say,
+  });
+}
+
 // ---- human-wins --------------------------------------------------------------
 // Both reference codebases arrived at this independently — `if (st.dirty) return`,
 // and a poll that skips while dirty/saving/loading. Promoted to a rule: while a

@@ -217,8 +217,22 @@ import { watchSignal, preserveAcross, deferWhileDirty } from "/signal.js";
 | export | what it does |
 |---|---|
 | `watchSignal` | runs the loop: holds a cursor per verb, polls, reports DATA changes, reloads on a CODE change, and reports degraded transitions |
-| `preserveAcross` | captures declared state before a reload and restores it after, once, saying so |
+| `preserveAcross` | captures state before a reload and restores it after, once, saying so |
+| `declaredKinds` | reads a surface's OWN `preserve` list out of the served manifest |
+| `preserveDeclared` | drives capture and restore from that list through an adapter |
 | `deferWhileDirty` | holds a change while the surface reports itself dirty and applies it when clean |
+
+`declaredKinds` distinguishes three answers a surface can act on differently: the
+row declares kinds, the row declares nothing, or **there is no row** — the last
+being a registration failure that must not read as a deliberate empty list. A
+`preserve` that is present but not an array is reported for the same reason:
+absence is silent because the field is optional; a declaration that does nothing
+is not.
+
+`preserveDeclared` takes an **adapter** — `{ get(kind), set(kind, value),
+supports?(kind) }` — and has no default. A kind the adapter cannot handle is
+reported, never dropped quietly, and calling it without an adapter throws rather
+than preserving nothing silently.
 
 The helper is a convenience, not the contract. **A surface that implements the
 marker semantics itself is fully conformant** — the contract is the marker, the
@@ -252,7 +266,8 @@ defect this repository has already paid for twice.
 | `?since=` on an observe verb | **not yet** — the reference runtime's verbs are fixture-backed and mint no marker. The consumer half is shipped and tested against a scripted transport |
 | `signals` in `provider.json`, carried through composition | **not yet** |
 | `preserve` accepted as contract on a surface row and carried to the shell | **yes** — schema and runtime validation kept in step by a committed test |
-| the helper reading `preserve` from the row and driving capture/restore itself | **not yet** — a surface adopting this today reads its own row and passes the list to `preserveAcross`. The declaration is **carried, not yet consumed**, and that is stated rather than left to be discovered |
+| the helper reading `preserve` from the row and driving capture/restore from it | **yes** — `declaredKinds` + `preserveDeclared`, with controls |
+| the STANDARD KINDS (`scroll`, `selection`, `form`, `playhead`) bound to real DOM | **not yet, and deliberately not faked.** Binding these is browser work that cannot be honestly verified from a test runner, and a default adapter written without one would be asserting behaviour nothing has run. A surface supplies its own adapter today; the standard one ships with a browser pass behind it |
 
 Rows here are measured against the shipped tools rather than recalled. A row that
 moves to **yes** moves with the control that proves it.
