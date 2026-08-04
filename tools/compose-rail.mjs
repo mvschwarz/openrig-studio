@@ -218,7 +218,25 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
     // silently one layer down.
     spec.seeds = decl.seeds ?? null;
     spec.supplies = decl.supplies ?? [];
+    // Which verbs answer ?since=, and whether this provider mints a process
+    // identity (contract/change-signal.md). Carried explicitly like every other
+    // provider-owned field, so adding one to the contract without carrying it
+    // here fails the composer's field-by-field test rather than going quiet.
+    spec.signals = decl.signals ?? null;
     spec.declaredBy = `${pkg} (provider.json)`;
+
+    // A signal verb this provider does not actually answer is a declaration that
+    // does nothing: a consumer would poll ?since= against a route this backend
+    // never serves. Warned rather than refused, because the provider still works
+    // and the rest of the studio should not be held up by it.
+    for (const v of decl.signals?.verbs ?? []) {
+      if (!(spec.verbs ?? []).some((d) => verbMatches(d, v))) {
+        warnings.push(
+          `${pkg}: signals.verbs names ${v}, which this provider does not declare in verbs[] — ` +
+          `a consumer polling it would be polling a route this backend does not answer`
+        );
+      }
+    }
   }
 
   // ---- the unmatched-call ladder ---------------------------------------------

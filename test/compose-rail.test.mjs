@@ -112,6 +112,7 @@ test("EVERY contract field on a provider.json reaches the spec, not just the one
         verbs: ["/api/clips"],
         supplies: ["ffmpeg", "ffprobe"],
         seeds: { root: "project", marker: "timeline.json", entry: "new.mjs", export: "scaffold" },
+        signals: { verbs: ["/api/clips"], boot: true },
       },
     },
   });
@@ -124,6 +125,49 @@ test("EVERY contract field on a provider.json reaches the spec, not just the one
   assert.deepEqual(spec.supplies, ["ffmpeg", "ffprobe"], "supplies was dropped — the install gate reads it");
   assert.deepEqual(spec.seeds, { root: "project", marker: "timeline.json", entry: "new.mjs", export: "scaffold" },
     "seeds was dropped, so a documented declaration could never reach the seeder");
+  assert.deepEqual(spec.signals, { verbs: ["/api/clips"], boot: true },
+    "signals was dropped, so a consumer could never learn which verbs answer ?since=");
+});
+
+test("a signals verb the provider does not answer is WARNED, not carried silently", () => {
+  // A declaration that quietly does nothing: a consumer would poll ?since=
+  // against a route this backend never serves. The same class the seam has
+  // removed repeatedly, arriving through a new field.
+  const t = tree({
+    apps: { alpha: { provider: { package: "@x/video" } } },
+    providers: {
+      video: {
+        package: "@x/video", run: { entry: "v.mjs" },
+        verbs: ["/api/clips"],
+        signals: { verbs: ["/api/clips", "/api/nothing-answers-this"], boot: true },
+      },
+    },
+  });
+  const r = t.run(["alpha"]);
+  assert.ok(r.warnings.some((w) => /nothing-answers-this/.test(w)),
+    `an unanswerable signal verb was carried without a word: ${JSON.stringify(r.warnings)}`);
+  // The positive half: the verb that IS answered must not be warned about, or
+  // the check is just noise that gets ignored.
+  assert.ok(!r.warnings.some((w) => /signals\.verbs names \/api\/clips\b/.test(w)),
+    "a correctly declared signal verb was warned about");
+});
+
+test("a prefix-declared verb satisfies a signals declaration for its children", () => {
+  // The trailing-slash rule already used by byte routes and calls. Without this
+  // a provider declaring /api/export-status/ would be warned for signalling on
+  // it, which is exactly the false alarm that teaches people to ignore warnings.
+  const t = tree({
+    apps: { alpha: { provider: { package: "@x/video" } } },
+    providers: {
+      video: {
+        package: "@x/video", run: { entry: "v.mjs" },
+        verbs: ["/api/export-status/"],
+        signals: { verbs: ["/api/export-status/job7"], boot: false },
+      },
+    },
+  });
+  assert.deepEqual(t.run(["alpha"]).warnings.filter((w) => /signals\.verbs/.test(w)), [],
+    "a prefix declaration did not satisfy a signals entry for its child");
 });
 
 // --------------------------------------------------- the unmatched-call ladder

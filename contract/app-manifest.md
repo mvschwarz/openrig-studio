@@ -54,6 +54,7 @@ about itself; an app may not override any of this.
   },
   "serves": ["/media/", "/cutprev/", "/cuts/"],
   "verbs": ["/api/clips", "/api/cuts", "/api/export-status/"],
+  "signals": { "verbs": ["/api/clips"], "boot": true },
   "supplies": ["ffmpeg", "ffprobe"]
 }
 ```
@@ -67,8 +68,29 @@ about itself; an app may not override any of this.
 | `run.companions[]` | stable | long-running processes started **with** the provider |
 | `serves[]` | stable | **byte-route prefixes**, matched by prefix |
 | `verbs[]` | stable | the `/api/` verbs this provider ANSWERS |
+| `signals` | stable | which verbs answer `?since=<marker>`, and whether this provider mints a process identity. See `change-signal.md` |
 | `supplies[]` | provisional | binaries this package ships, so the host need not have them |
 | `seeds` | provisional | how to make an empty root usable on first run |
+
+### `signals` — what a consumer may poll, declared by the thing that knows
+
+```json
+"signals": { "verbs": ["/api/clips"], "boot": true }
+```
+
+`signals.verbs[]` are the observe verbs that honour `?since=<marker>` and answer
+`{ changed, marker, … }`. `signals.boot` says the provider mints a process
+identity, which is what makes a CODE change detectable at all. The semantics of
+both live in `change-signal.md`; this is only where a provider declares them.
+
+**It is a declaration and not a derivation for the reason everything else here
+is: only the provider knows.** A verb answering `?since=` is a property of the
+implementation, not of the route, so nothing can work it out by looking.
+
+A `signals.verbs` entry that names a verb this provider does not declare in
+`verbs[]` is **warned** — a consumer polling it would be polling something this
+backend never answers, which is a declaration that quietly does nothing rather
+than an error the operator can see.
 
 ### `seeds` — first-run scaffolding, declared by the package that knows how
 

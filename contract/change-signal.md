@@ -264,7 +264,7 @@ defect this repository has already paid for twice.
 | `/signal.js` serving `watchSignal` / `preserveAcross` / `deferWhileDirty` | **yes** |
 | latch-on-first-observation, marker-backwards-is-changed, degraded reporting | **yes**, with controls |
 | `?since=` on an observe verb | **not yet** — the reference runtime's verbs are fixture-backed and mint no marker. The consumer half is shipped and tested against a scripted transport |
-| `signals` in `provider.json`, carried through composition | **not yet** |
+| `signals` in `provider.json`, carried through composition | **yes** — documented in `app-manifest.md`, carried by the composer, and a `signals.verbs` entry the provider does not answer is warned |
 | `preserve` accepted as contract on a surface row and carried to the shell | **yes** — schema and runtime validation kept in step by a committed test |
 | the helper reading `preserve` from the row and driving capture/restore from it | **yes** — `declaredKinds` + `preserveDeclared`, with controls |
 | `standardAdapter` binding `scroll`, `form` and `playhead` to real DOM | **WRITTEN, NOT YET VERIFIED.** The code exists and its RULES are under control — which kinds it claims, and which fields it refuses. Its DOM behaviour has not been exercised in a browser, and a test runner cannot exercise it. **Do not cite the code as evidence it works; this row flips on a browser pass, not on the code landing.** |
