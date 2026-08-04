@@ -71,6 +71,14 @@
   .seatTile:hover { color: var(--bone); border-color: rgba(255,255,255,.35); }
   .seatTile.active { color: #111; background: var(--bone); border-color: var(--bone);
     font-weight: 600; }
+  /* Configured but not running. Dimmed and not-allowed rather than hidden: the
+     roster is what this box is CONFIGURED with, so a stopped member disappearing
+     would turn that into "who happens to be alive this second" and make the
+     panel shrink silently when something dies. It stays visible and says why. */
+  .seatTile.down { color: var(--faint); border-style: dashed; cursor: not-allowed; }
+  .seatTile.down:hover { color: var(--faint); border-color: var(--edge2); }
+  .seatTile .st { display: block; font-size: 7.5px; letter-spacing: .08em; opacity: .7;
+    margin-top: 3px; }
   /* flex:1 with min-height:0 is what actually bounds the terminal. Without the
      min-height a flex child refuses to shrink below its content, so the iframe
      grew to whatever height xterm asked for and pushed the prompt off-screen —
@@ -233,9 +241,15 @@
   // at all.
   const attachable = Boolean(seats.length && termPort);
 
-  let seat = seats.length ? seats[0].seat : null;
+  // Default onto something that can actually be attached. Picking seats[0] blind
+  // lands on a stopped member whenever the first one happens to be down, and the
+  // panel then opens on a tile that cannot be clicked.
+  const canAttach = (s) => s.status === undefined || s.status === "running";
+  const firstUp = seats.find(canAttach) || seats[0];
+  let seat = seats.length ? firstUp.seat : null;
   try { seat = localStorage.getItem("shell.chatSeat") || seat; } catch {}
-  if (!seats.some((s) => s.seat === seat)) seat = seats.length ? seats[0].seat : null;
+  const chosen = seats.find((s) => s.seat === seat);
+  if (!chosen || !canAttach(chosen)) seat = seats.length ? firstUp.seat : null;
   const rigs = [...new Set(seats.map((s) => rigOf(s.seat)))].filter(Boolean);
   // A box may declare which rig the launcher opens on. Where one rig is the
   // reason someone opens the launcher and the others are plumbing, discovery
@@ -256,9 +270,24 @@
     tiles.innerHTML = "";
     for (const s of seats.filter((s) => !chatRig || rigOf(s.seat) === chatRig)) {
       const b = document.createElement("button");
-      b.className = "seatTile" + (s.seat === seat ? " active" : "");
-      b.dataset.seat = s.seat; b.textContent = s.name || s.seat.split("@")[0]; b.title = s.seat;
-      b.onclick = () => { seat = s.seat; try { localStorage.setItem("shell.chatSeat", seat); } catch {} ; sync(); };
+      // A roster row may carry `status`. Absent means the source did not say, and
+      // an unknown status is treated as attachable — the alternative is greying
+      // out every seat a consumer declared by hand, which would make the honest
+      // path the broken-looking one.
+      const running = s.status === undefined || s.status === "running";
+      b.className = "seatTile" + (s.seat === seat ? " active" : "") + (running ? "" : " down");
+      b.dataset.seat = s.seat;
+      b.textContent = s.name || s.seat.split("@")[0];
+      if (!running) {
+        const st = document.createElement("span");
+        st.className = "st"; st.textContent = s.status;
+        b.appendChild(st);
+      }
+      b.title = running ? s.seat : `${s.seat} — ${s.status}, so there is no session to attach to`;
+      b.disabled = !running;
+      if (running) {
+        b.onclick = () => { seat = s.seat; try { localStorage.setItem("shell.chatSeat", seat); } catch {} ; sync(); };
+      }
       tiles.appendChild(b);
     }
     sel.onchange = () => {

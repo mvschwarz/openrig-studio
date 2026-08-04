@@ -60,3 +60,28 @@ test("FLOOR keeps the all-rig caption and live-to-polling refresh path", () => {
   assert.match(surface, /setConnection\('polling', 'polling fallback'\)/);
   assert.match(surface, /setInterval\(refresh, 15000\)/);
 });
+
+// ---- the agent panel renders a configured-but-stopped member honestly -------
+// The roster carries a per-seat `status`. The shell used to ignore it and render
+// every row as the same enabled, attachable button, so a member that was down
+// looked identical to one that was running until you clicked it.
+
+const SHELL = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
+
+test("a non-running seat is rendered as unattachable rather than dropped", () => {
+  assert.match(SHELL, /\.seatTile\.down/, "positive control: the down style was not found");
+  assert.match(SHELL, /b\.disabled = !running/, "a stopped member is still clickable");
+  assert.match(SHELL, /so there is no session to attach to/, "the tile does not say WHY it is unavailable");
+});
+
+test("an absent status is treated as attachable, so a hand-declared roster is not greyed out", () => {
+  // The over-correction to avoid: a consumer that declares {seat, name} rows by
+  // hand supplies no status, and treating unknown as down would grey out every
+  // seat on the honest path.
+  assert.match(SHELL, /s\.status === undefined \|\| s\.status === "running"/);
+});
+
+test("the panel does not default its selection onto a seat it cannot attach to", () => {
+  assert.match(SHELL, /const firstUp = seats\.find\(canAttach\)/,
+    "selection still takes seats[0] blind, which lands on a stopped member");
+});
