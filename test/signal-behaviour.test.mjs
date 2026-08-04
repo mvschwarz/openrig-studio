@@ -34,13 +34,27 @@ test("a change is detected via the SERVER marker, not a client-computed signatur
   // its signature omits fields. A server marker moves whenever the server says
   // it moved — including for a change the client cannot see in the payload.
   const seen = [];
+  // The two payloads MUST be byte-identical apart from the marker — that is the
+  // entire reason "a client-side signature would miss this" is true. Built from
+  // one source and asserted, because a reviewer found the case still passed when
+  // the two fixtures were edited to DIFFER: the discrimination was true today and
+  // protected by nothing, so a future fixture tweak would void it silently while
+  // the suite stayed green.
+  const PAYLOAD = { items: ["a"] };
+  const first = { changed: false, marker: "m1", ...PAYLOAD };
+  const second = { changed: true, marker: "m2", ...PAYLOAD };
+  const payloadOf = ({ changed, marker, ...rest }) => JSON.stringify(rest);
+  assert.equal(payloadOf(first), payloadOf(second),
+    "the two scripted responses differ outside the marker, so this case no longer proves a " +
+    "signature would miss the change — it would notice the payload difference");
+
   const t = transport([
     { body: { runtime: { boot: "b1" } } },
-    { body: { changed: false, marker: "m1", items: ["a"] } },
+    { body: first },
     { body: { runtime: { boot: "b1" } } },
     // Payload IDENTICAL. A client-side signature over `items` would compute the
     // same value and report nothing; the marker moved, so this is a change.
-    { body: { changed: true, marker: "m2", items: ["a"] } },
+    { body: second },
   ]);
   const w = watchSignal({ verbs: ["/api/x"], interval: 5, fetchImpl: t.fetchImpl, onData: (d) => seen.push(d.marker) });
   await settle(); await settle();

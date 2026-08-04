@@ -79,6 +79,11 @@
       border: 1px solid var(--warn); border-radius: 12px;
       padding: 15px; color: var(--warn); background: #ffb44a10;
     }
+    /* Degraded has to be VISIBLE in the UI and not only in the console
+       (contract/shell-protocol.md). A banner rather than a replaced view, so the
+       last good data stays readable while the surface says it is stale. */
+    #degraded { margin-bottom: 14px; }
+    #degraded[hidden] { display: none; }
 
     button {
       font: inherit; color: var(--text); cursor: pointer;
@@ -107,6 +112,8 @@
       <div class="status" id="status"><span class="dot"></span><span id="statusText">connecting</span></div>
     </header>
 
+    <div id="degraded" class="notice" hidden></div>
+
     <div id="content">
       <div class="notice">Reading the runtime contract&hellip;</div>
     </div>
@@ -118,7 +125,12 @@
     <footer id="footer">Targets contract v{{CONTRACT_VERSION}}.</footer>
   </main>
 
-  <script>
+  <script type="module">
+    // A MODULE, and deliberately: it is what lets this surface import the
+    // runtime's helper, and a module script is deferred, which is the call site
+    // the preserve contract requires if you later adopt state preservation.
+    import { watchSignal } from "/signal.js";
+
     // ---- what this surface needs from the runtime ---------------------------
     // Every namespace listed here is checked at boot. A runtime that cannot
     // serve one of them gets a visible failure, not a silent empty render.
@@ -263,6 +275,38 @@
     // The only surface -> shell channel. Message set is closed for v0.1.
     document.querySelector("#agents").addEventListener("click", () => {
       parent.postMessage({ t: "open-agent" }, "*");
+    });
+
+    // ---- the runtime helper -------------------------------------------------
+    // Two things the loop above cannot do for itself, both from
+    // contract/change-signal.md:
+    //
+    //   CODE changed — the runtime restarted, so the bytes being served are new
+    //   and the page must actually reload. Keyed on the runtime's process
+    //   identity, never a file mtime: a studio copies surfaces at boot, so
+    //   watching a file announces a change this page cannot yet see.
+    //
+    //   DEGRADED — a failed poll must LOOK failed. Every hand-rolled loop this
+    //   helper replaces swallowed its failure in a bare catch, which makes a dead
+    //   provider indistinguishable from a quiet one.
+    //
+    // Data refresh stays on the stream above: the verbs this runtime serves do
+    // not mint markers yet, so handing the helper a verb list would poll for
+    // changes it cannot report. The marker is normative and the transport is not
+    // — polling here would be equally conformant once a verb answers ?since=.
+    const degradedEl = document.querySelector("#degraded");
+    watchSignal({
+      interval: POLL_MS,
+      onCode: () => location.reload(),
+      onDegraded: ({ degraded, reason }) => {
+        degradedEl.hidden = !degraded;
+        if (degraded) {
+          degradedEl.textContent =
+            "Signal degraded — " + (reason || "the runtime is not answering") +
+            ". Showing the last data received.";
+          setStatus("polling", "degraded");
+        }
+      },
     });
 
     boot();

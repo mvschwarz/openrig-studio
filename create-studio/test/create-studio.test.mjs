@@ -104,6 +104,27 @@ test("emitted surface targets the contract version and only stable endpoints", (
   assert.doesNotMatch(html, /files\/(write|goto|roots)|sidebar-arrangement|oauth|credential/i);
 });
 
+test("the emitted surface ADOPTS the runtime helper and can show a degraded state", () => {
+  // A review found the SDK shipped the change-signal helper with ZERO surfaces
+  // using it — every reference outside the helper itself was in a test. The
+  // scaffolder is the highest-leverage place to fix that: every surface anyone
+  // generates from here gets the primitive, which is the whole thesis of
+  // shipping it. This asserts it stays adopted rather than trusting it to.
+  const dir = tmp();
+  assert.equal(run(["my-surface", "--dir", dir]).code, 0);
+  const { html } = emitted(dir, "my-surface");
+
+  assert.match(html, /import \{[^}]*watchSignal[^}]*\} from "\/signal\.js"/,
+    "the emitted surface no longer imports the runtime helper");
+  // An import only works from a module, so this is load-bearing rather than style.
+  assert.match(html, /<script type="module">/,
+    "the surface imports a module from a classic script, which cannot execute");
+  // Degraded must be visible in the UI, not only in the console
+  // (contract/shell-protocol.md), so there has to be somewhere to show it.
+  assert.match(html, /id="degraded"/, "the emitted surface has nowhere to render a degraded state");
+  assert.match(html, /onDegraded/, "the surface imports the helper but never asks to be told about failure");
+});
+
 // ------------------------------------------------------------------ escaping
 // The regression that produced this suite. Every user-controlled field crossed
 // with every metacharacter class that has a different meaning in JSON, HTML or
