@@ -19,6 +19,7 @@ Open http://127.0.0.1:8890/ — the shell. It starts with one surface on the rai
 | Path | What it is |
 |---|---|
 | `contract/` | **The contract — start here.** Four core documents, two more for apps and live refresh, plus the manifest row schema. |
+| `skills/building-studio-apps/` | **If you are a coding agent, load this first.** Orientation plus the failure modes, written for this job. |
 | `create-studio/` | The scaffolder: generates a working surface project. |
 | `app/serve-studio.mjs` | The reference runtime (zero-dependency Node HTTP server). |
 | `app/shell.html` | The shell: rail + stage + agent sidebar. |
@@ -42,11 +43,24 @@ then use the invocation above. See `create-studio/README.md`.
 
 ## Building a surface
 
+**If you are a coding agent, load `skills/building-studio-apps` first.** It is
+written for exactly this job and it leads with the decision that shapes
+everything — whether your app needs a server of its own — then the failure modes
+that are hard to diagnose from the contract alone: a surface that loads but whose
+panes stay empty, a tab that 404s or shows another project's data, an app that
+works on the machine that built it and fails on a fresh install.
+
+**The contract is the authority; the skill is the fast path into it.** Where they
+appear to disagree, the contract wins and the skill has a bug.
+
 Read `contract/contract-meta.md` first — it explains how to read the rest of
 the contract. Then: `contract/manifest.md` shows how a surface registers,
 `contract/shell-protocol.md` what the shell provides, and
-`contract/runtime-api.md` the HTTP verbs and their exact shapes. A running
-runtime self-describes at `GET /api/contract`.
+`contract/runtime-api.md` the HTTP verbs and their exact shapes. If you want the
+surface to stay fresh without losing the user's work, `contract/change-signal.md`
+covers markers, the difference between data changing and code changing, and state
+that survives a reload — it is opt-in, and a surface that skips it is unaffected.
+A running runtime self-describes at `GET /api/contract`.
 
 The reference runtime is fixture-backed: its API verbs serve data from
 `fixtures/`, so everything works on any machine with no external processes.
