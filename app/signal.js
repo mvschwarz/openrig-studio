@@ -170,6 +170,97 @@ export async function declaredKinds({ surfaceId, fetchImpl = fetch, manifest = "
 // conformance table in contract/change-signal.md.
 export const STANDARD_KINDS = ["scroll", "selection", "form", "playhead"];
 
+// ---- the standard adapter ----------------------------------------------------
+// ⚠️ THE DOM BINDINGS BELOW ARE NOT YET BROWSER-VERIFIED. They are written to be
+// handed to verification, not claimed as working — see the conformance table in
+// contract/change-signal.md, which carries them as unverified until a real
+// browser pass lands. Do not cite this code as evidence that the standard kinds
+// work; cite the pass.
+//
+// SELECTION IS DELIBERATELY NOT IMPLEMENTED, and that is a measured decision
+// rather than an omission. Across the surveyed applications `selection` means
+// asset NAMES, opaque canvas shape IDS, absolute file PATHS, and timeline SLOT
+// IDS — four different types sharing nothing but the word. A generic adapter
+// that picked one would be right for a single app and silently wrong for the
+// rest, which is worse than declining: the surface would declare `selection`,
+// see no error, and lose it on every reload. So `supports("selection")` is
+// FALSE, the declaring surface is told through onUnsupported, and a surface that
+// knows what its selection actually is composes its own adapter for it.
+export function standardAdapter({ win = globalThis, doc = globalThis.document } = {}) {
+  // Restoring these is either impossible or unwise: a file input cannot be set
+  // programmatically, and a password captured into sessionStorage is a
+  // credential written to disk-backed storage by a convenience feature.
+  const SKIP_INPUT = new Set(["password", "file"]);
+  const fieldKey = (el) => el.name || el.id || null;
+
+  const kinds = {
+    scroll: {
+      get: () => ({
+        win: { x: win.scrollX ?? 0, y: win.scrollY ?? 0 },
+        // Elements opt IN by attribute rather than being discovered, so this
+        // never guesses which of several scrollers the surface meant.
+        els: [...(doc?.querySelectorAll?.("[data-preserve-scroll]") ?? [])]
+          .map((el) => [fieldKey(el), el.scrollTop, el.scrollLeft])
+          .filter(([k]) => k),
+      }),
+      set: (v) => {
+        if (!v || typeof v !== "object") return;
+        if (v.win) win.scrollTo?.(v.win.x ?? 0, v.win.y ?? 0);
+        for (const [key, top, left] of v.els ?? []) {
+          const el = doc?.querySelector?.(`[data-preserve-scroll][name="${key}"], #${CSS?.escape?.(key) ?? key}`);
+          if (el) { el.scrollTop = top; el.scrollLeft = left; }
+        }
+      },
+    },
+
+    form: {
+      get: () => {
+        const out = {};
+        for (const el of doc?.querySelectorAll?.("input, select, textarea") ?? []) {
+          const key = fieldKey(el);
+          if (!key || SKIP_INPUT.has(el.type)) continue;
+          out[key] = el.type === "checkbox" || el.type === "radio" ? { checked: el.checked } : { value: el.value };
+        }
+        return out;
+      },
+      set: (v) => {
+        if (!v || typeof v !== "object") return;
+        for (const el of doc?.querySelectorAll?.("input, select, textarea") ?? []) {
+          const key = fieldKey(el);
+          if (!key || SKIP_INPUT.has(el.type) || !Object.hasOwn(v, key)) continue;
+          const saved = v[key];
+          if (Object.hasOwn(saved, "checked")) el.checked = saved.checked;
+          else el.value = saved.value;
+        }
+      },
+    },
+
+    playhead: {
+      get: () => [...(doc?.querySelectorAll?.("video, audio") ?? [])]
+        .map((el, i) => [fieldKey(el) || String(i), el.currentTime, !el.paused])
+        .filter(([k]) => k !== null),
+      set: (v) => {
+        const media = [...(doc?.querySelectorAll?.("video, audio") ?? [])];
+        for (const [key, time, playing] of Array.isArray(v) ? v : []) {
+          const el = media.find((m, i) => (fieldKey(m) || String(i)) === key);
+          if (!el) continue;
+          el.currentTime = time;
+          // Resuming playback is an ACTION, not a value, so it is attempted and
+          // its failure ignored: a browser may refuse programmatic play, and a
+          // rejected promise must not take the rest of the restore down with it.
+          if (playing) el.play?.()?.catch?.(() => {});
+        }
+      },
+    },
+  };
+
+  return {
+    supports: (kind) => Object.hasOwn(kinds, kind),
+    get: (kind) => kinds[kind]?.get(),
+    set: (kind, value) => kinds[kind]?.set(value),
+  };
+}
+
 export function preserveDeclared(key, kinds, { adapter, say, onUnsupported = () => {} } = {}) {
   if (!adapter || typeof adapter.get !== "function" || typeof adapter.set !== "function") {
     // Throw rather than no-op. A preserve helper that silently preserved nothing

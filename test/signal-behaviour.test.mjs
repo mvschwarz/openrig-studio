@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { watchSignal, preserveAcross, deferWhileDirty, declaredKinds, preserveDeclared } from "../app/signal.js";
+import { watchSignal, preserveAcross, deferWhileDirty, declaredKinds, preserveDeclared, standardAdapter } from "../app/signal.js";
 
 // A scripted transport. Each entry is one response, consumed in order.
 function transport(script) {
@@ -257,6 +257,73 @@ test("preserveDeclared THROWS without an adapter rather than preserving nothing 
   // A preserve helper that silently preserved nothing is the exact failure the
   // declaration exists to avoid, so this fails loudly instead.
   assert.throws(() => preserveDeclared("demo", ["scroll"], {}), /needs an adapter/);
+});
+
+// -------------------------------------------- the standard adapter's RULES
+//
+// ⚠️ SCOPE, STATED SO THESE ARE NOT MISREAD AS MORE THAN THEY ARE. The DOM
+// BEHAVIOUR of the standard adapter — that a scroll position actually restores
+// in a browser, that a playhead resumes — is NOT verified here and cannot be
+// from a test runner. An independent reviewer verifies that in a real browser,
+// and the conformance table stays marked unverified until it does.
+//
+// What IS tested below are the adapter's RULES, which are decisions rather than
+// browser behaviour: which kinds it claims to support, and which fields it
+// refuses to capture. Those hold regardless of what a DOM does.
+
+const stubDoc = (elements) => ({
+  querySelectorAll: (sel) =>
+    elements.filter((el) => sel.split(",").map((s) => s.trim()).includes(el.tag)),
+  querySelector: () => null,
+});
+
+test("the standard adapter DECLINES selection, rather than guessing one meaning of it", () => {
+  // The measured decision: across the surveyed apps `selection` is asset names,
+  // canvas shape ids, absolute paths and slot ids. Picking one would be right
+  // for one app and silently wrong for the rest — the surface would declare it,
+  // see no error, and lose it on every reload.
+  const a = standardAdapter({ win: {}, doc: stubDoc([]) });
+  assert.equal(a.supports("selection"), false,
+    "the adapter claims a selection semantics it cannot generically have");
+});
+
+test("supports() covers exactly the kinds it implements — no more, no less", () => {
+  // The positive half. An adapter that supported NOTHING would satisfy the
+  // decline-selection assertion above on its own.
+  const a = standardAdapter({ win: {}, doc: stubDoc([]) });
+  for (const kind of ["scroll", "form", "playhead"]) {
+    assert.equal(a.supports(kind), true, `${kind} is a standard kind and must be supported`);
+  }
+  assert.equal(a.supports("telepathy"), false, "an unknown kind must not be claimed");
+});
+
+test("a password is NEVER captured, so a convenience feature cannot write a credential to storage", () => {
+  // A rule, not a DOM behaviour: preserved state lands in sessionStorage, and a
+  // captured password would be a credential put there by a refresh helper.
+  const doc = stubDoc([
+    { tag: "input", type: "text", name: "who", value: "ada" },
+    { tag: "input", type: "password", name: "secret", value: "hunter2" },
+  ]);
+  const captured = standardAdapter({ win: {}, doc }).get("form");
+  assert.deepEqual(captured, { who: { value: "ada" } });
+  assert.ok(!Object.hasOwn(captured, "secret"), "a password field was captured into preserved state");
+  assert.doesNotMatch(JSON.stringify(captured), /hunter2/, "the password value reached the captured state");
+});
+
+test("a file input is never captured either — it cannot be restored, so keeping it would lie", () => {
+  const doc = stubDoc([
+    { tag: "input", type: "file", name: "upload", value: "C:/fake" },
+    { tag: "textarea", type: "textarea", name: "notes", value: "kept" },
+  ]);
+  assert.deepEqual(standardAdapter({ win: {}, doc }).get("form"), { notes: { value: "kept" } });
+});
+
+test("an unnamed field is skipped rather than colliding under a made-up key", () => {
+  const doc = stubDoc([
+    { tag: "input", type: "text", name: "", id: "", value: "anonymous" },
+    { tag: "input", type: "text", name: "named", value: "keep" },
+  ]);
+  assert.deepEqual(standardAdapter({ win: {}, doc }).get("form"), { named: { value: "keep" } });
 });
 
 // ------------------------------------------------------------ human wins

@@ -267,7 +267,8 @@ defect this repository has already paid for twice.
 | `signals` in `provider.json`, carried through composition | **not yet** |
 | `preserve` accepted as contract on a surface row and carried to the shell | **yes** — schema and runtime validation kept in step by a committed test |
 | the helper reading `preserve` from the row and driving capture/restore from it | **yes** — `declaredKinds` + `preserveDeclared`, with controls |
-| the STANDARD KINDS (`scroll`, `selection`, `form`, `playhead`) bound to real DOM | **not yet, and deliberately not faked.** Binding these is browser work that cannot be honestly verified from a test runner, and a default adapter written without one would be asserting behaviour nothing has run. A surface supplies its own adapter today; the standard one ships with a browser pass behind it |
+| `standardAdapter` binding `scroll`, `form` and `playhead` to real DOM | **WRITTEN, NOT YET VERIFIED.** The code exists and its RULES are under control — which kinds it claims, and which fields it refuses. Its DOM behaviour has not been exercised in a browser, and a test runner cannot exercise it. **Do not cite the code as evidence it works; this row flips on a browser pass, not on the code landing.** |
+| `standardAdapter` handling `selection` | **no, by decision.** Across the surveyed applications `selection` means asset names, opaque canvas shape ids, absolute file paths and timeline slot ids — four types sharing only the word. A generic adapter picking one would be right for a single app and silently wrong for the rest, so `supports("selection")` is false, the declaring surface is told, and a surface that knows what its selection IS supplies that kind itself |
 
 Rows here are measured against the shipped tools rather than recalled. A row that
 moves to **yes** moves with the control that proves it.
