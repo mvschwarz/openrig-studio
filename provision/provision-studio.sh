@@ -244,9 +244,60 @@ fi
 # persistence is NOT configured rather than letting a green run imply it is.
 HAVE_SYSTEMD=0
 command -v systemctl >/dev/null 2>&1 && HAVE_SYSTEMD=1
+
+# WHO OWNS THE PORT — asked once, used by both branches below.
+#
+# Three outcomes, not two, because "nothing is listening" and "someone else's
+# studio is listening" call for OPPOSITE actions and collapsing them is how a
+# stranger's studio gets adopted. The old check asked only whether something
+# answered /api/contract: a server returning a body that is not a studio
+# satisfied it, and two genuine studios on a box are indistinguishable by
+# contractVersion/runtime/capabilities alone. The discriminator is
+# manifest.consumer.dir — documented contract as of this slice, not a field that
+# happened to be there. The decision itself lives in studio-identity.mjs so its
+# cases are testable without standing up two studios.
+IDENT_MJS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/studio-identity.mjs"
+[ -f "$IDENT_MJS" ] || IDENT_MJS="$STUDIO_DIR/sdk/provision/studio-identity.mjs"
+OVERLAY_DIR="$STUDIO_DIR/.runtime/surfaces"
+PORT_STATE=nothing        # nothing | ours | foreign
+PORT_WHY=""
+if [ "$DRY_RUN" = 0 ]; then
+  if PORT_BODY="$(curl -fsS "http://127.0.0.1:${STUDIO_PORT}/api/contract" 2>/dev/null)"; then
+    if PORT_WHY="$(printf '%s' "$PORT_BODY" | "$NODE_BIN" "$IDENT_MJS" "$OVERLAY_DIR")"; then
+      PORT_STATE=ours
+    else
+      PORT_STATE=foreign
+    fi
+  fi
+fi
+
+# A port held by something that is not this studio is fatal on EVERY branch, and
+# it has to be fatal BEFORE the verifier runs. Reusing it would hand a green run
+# to the wrong studio; launching into it dies on EADDRINUSE; and verifying
+# against it passes on somebody else's surfaces. Refuse by name instead.
+if [ "$PORT_STATE" = foreign ]; then
+  warn "PORT ${STUDIO_PORT} IS NOT THIS STUDIO: ${PORT_WHY}"
+  warn "Refusing to reuse it, launch into it, or verify against it. The install is complete;"
+  warn "free the port or set STUDIO_PORT, then re-run — this run stops here deliberately."
+  exit 5
+fi
+
 if [ "$HAVE_SYSTEMD" = 1 ]; then
   run "systemctl --user daemon-reload"
-  run "systemctl --user enable --now openrig-studio.service"
+  # An occupied port used to abort the whole run HERE, through run()'s bare eval,
+  # AFTER the install had fully succeeded: apps installed, studio.json rewritten,
+  # service down, nothing reported. Throwing that away over the way a studio gets
+  # restarted helps nobody, so the conflict is reported and verification still
+  # happens. NOTE WHAT IS NOT CLAIMED: the running studio was NOT restarted, so
+  # it is serving the rail it composed at its own boot, not necessarily this
+  # run's studio.json.
+  if [ "$PORT_STATE" = ours ]; then
+    warn "port ${STUDIO_PORT} already served by this studio — NOT restarting it."
+    warn "The running process keeps the rail it composed at ITS boot; this run's studio.json"
+    warn "takes effect on the next restart. Continuing to verify what is actually running."
+  else
+    run "systemctl --user enable --now openrig-studio.service"
+  fi
 else
   warn "NO INIT SYSTEM on this host (no systemctl). The studio will NOT survive a reboot."
   warn "Starting it directly so the box is usable; persistence is NOT configured."
@@ -254,8 +305,8 @@ else
     # Reuse what is already there. A blind relaunch dies on EADDRINUSE while the
     # survivor reloads the manifest this run just replaced, so the verifier below
     # races a reload it caused and reports a false FAIL on a healthy box.
-    if curl -fsS "http://127.0.0.1:${STUDIO_PORT}/api/contract" >/dev/null 2>&1; then
-      printf '  studio already serving on %s — reusing it\n' "$STUDIO_PORT"
+    if [ "$PORT_STATE" = ours ]; then
+      printf '  %s\n' "$PORT_WHY"
     else
       ( cd "$STUDIO_DIR/sdk" && OPENRIG_STUDIO_DIR="$STUDIO_DIR" \
           nohup "$NODE_BIN" tools/studio.mjs --port "$STUDIO_PORT" > "$STUDIO_DIR/studio.log" 2>&1 & )

@@ -67,6 +67,32 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
   `surfaces` is the count of valid rows currently served; it changes as the
   manifest changes.
 
+`manifest.consumer` is `null` above because that example is a zero-config
+runtime. With an overlay configured, `manifest.consumer` is populated:
+
+```json
+{
+  "dir": "<the overlay directory this runtime resolved, absolute>",
+  "surfaces": 1,
+  "state": "ok",
+  "lastLoadedAt": "<ISO timestamp of the last successful load>",
+  "reloads": 1,
+  "recoveries": 0,
+  "lastRecoveryAt": null,
+  "integrityReloads": 0,
+  "lastIntegrityReloadAt": null
+}
+```
+
+Field semantics are in `manifest.md`. The block is shown here as well as
+described there because the shape is what a caller matches on, and a shape
+documented only in prose is a shape nothing can check: this example is asserted
+against a live overlay-configured runtime by the suite, so a field added to or
+removed from that block fails a test rather than shipping unpromised. That is not
+hypothetical — `dir` shipped, was asserted by two tests, and was documented
+nowhere, because the drift guard compared only the TOP-LEVEL `manifest` keys
+against an example whose `consumer` was `null`.
+
 This endpoint is the first thing to read against a live runtime.
 
 ## Stability classes

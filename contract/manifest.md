@@ -119,10 +119,31 @@ overlay configured, errors and warnings are prefixed with which manifest they
 came from (`package` / `consumer`), because a bare `surfaces[0]` no longer says
 enough. Without an overlay the messages are unchanged.
 
-**Per-source health** appears at `GET /api/contract` under `manifest.consumer`
-— its own `state`, `reloads`, `recoveries` and `integrityReloads`, with the same
-meanings as the top-level fields (which describe the SDK's own manifest). It is
-`null` when no overlay is configured.
+**Per-source health** appears at `GET /api/contract` under `manifest.consumer`.
+It is `null` when no overlay is configured; otherwise it carries, field by field:
+
+| field | stability | meaning |
+|---|---|---|
+| `dir` | stable | the overlay directory this runtime resolved, absolute. **This is the field that tells one studio from another** — every runtime returns the same `runtime` block, so it is the only thing in this response that distinguishes two studios on one box. |
+| `surfaces` | stable | count of valid rows currently served from the overlay |
+| `state` | stable | `init` / `ok` / `invalid` / `unreadable`, for the overlay manifest |
+| `lastLoadedAt` | stable | ISO timestamp of the last successful load, `null` until one happens |
+| `reloads` | stable | how many times the overlay manifest has been read |
+| `recoveries` | stable | transitions INTO health; booting healthy reports `0` |
+| `lastRecoveryAt` | stable | ISO timestamp of the last recovery, `null` if never |
+| `integrityReloads` | stable | reloads the watch did not cause — the file at the served path changed identity and no event fired. Non-zero means the fast path is not holding for this deployment shape |
+| `lastIntegrityReloadAt` | stable | ISO timestamp of the last integrity reload, `null` if never |
+
+Apart from `dir` and `surfaces`, these have the same meanings as the top-level
+fields, which describe the SDK's own manifest.
+
+**If you are checking whether a running studio is YOURS, match `dir`.** A
+liveness check does not answer that question: any server can return 200 on
+`/api/contract`, and two genuine studios on one box return identical
+`contractVersion`, `runtime` and `capabilities`. A provisioner that reuses a
+studio because something answered can adopt a sibling, never start the one it
+installed, and then verify successfully against the wrong studio's surfaces —
+wrong, and reported as success.
 
 **Why the seam exists, not just how.** The registration path above is inside the
 package. In a consumer install that is `node_modules/@openrig/studio/app/` —
