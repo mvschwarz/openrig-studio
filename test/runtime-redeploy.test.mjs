@@ -452,28 +452,17 @@ test("the SSE change-signal still fires on a manifest change", async (t) => {
   assert.equal(await got, true, "no SSE change-signal after a manifest change");
 });
 
-test("the documented /api/contract example lists exactly the fields the runtime serves", async (t) => {
-  // Drift-proofing. Shipping a field while the canonical example still shows
-  // its absence manufactures a lie in the document a cold agent reads FIRST —
-  // and that is a defect nobody notices, because docs do not fail loudly. This
-  // asserts the example against the live response so the two cannot separate
-  // silently: add a field without documenting it and this test fails.
-  const { dir } = instance(ONE);
-  const srv = await start(dir);
-  t.after(() => srv.stop());
-
-  const doc = fs.readFileSync(path.join(REPO, "contract", "contract-meta.md"), "utf8");
-  const block = doc.match(/`GET \/api\/contract` returns:\n\n```json\n([\s\S]*?)\n```/);
-  assert.ok(block, "contract-meta.md no longer contains a /api/contract example");
-  const documented = JSON.parse(block[1]);
-
-  const live = await srv.contract();
-  assert.deepEqual(
-    Object.keys(documented.manifest).sort(),
-    Object.keys(live).sort(),
-    "the documented manifest example and the served manifest have diverged"
-  );
-});
+// MOVED — doc/response parity now lives in ONE place: contract-response-parity.
+//
+// The assertion that stood here compared `documented.manifest` against the live
+// MANIFEST only, while its comment promised "add a field without documenting it
+// and this test fails". That was false for every level it did not check, and a
+// top-level field sailed past it — a guard whose message oversells its assertion
+// reads as coverage, which is worse than no guard.
+//
+// Two sibling guards had the same shape at other levels. Rather than add a
+// fourth, the comparison became structural and descends everywhere. Its controls
+// plant a field at all four levels and assert the path each is reported at.
 
 test("startup runs after EVERY module binding, so the TDZ class cannot return", () => {
   // This asserts the STRUCTURE the source comment claims, rather than trusting

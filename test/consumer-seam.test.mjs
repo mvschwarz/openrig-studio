@@ -535,39 +535,11 @@ test("with an overlay that declares NO seats, the report says the roster is the 
   assert.equal(report.attachable, false, "the package fixture declares no chatLocalPort");
 });
 
-test("the documented consumer block lists exactly the fields an overlay-configured runtime serves", async (t) => {
-  // THE GUARD HOLE THIS CLOSES. runtime-redeploy.test.mjs already pins the
-  // documented /api/contract example against the live response — but it compares
-  // `Object.keys(documented.manifest)`, TOP LEVEL ONLY, against an example whose
-  // `consumer` is null. So every field inside that block has always been
-  // unguarded, which is exactly how `dir` came to ship, be asserted by two tests
-  // in this very file, and be documented nowhere in contract/.
-  //
-  // Fixing only `dir` would fix the instance and leave the mechanism. This
-  // descends, so the NEXT field added to that block fails the suite instead of
-  // shipping unpromised.
-  //
-  // It needs an overlay-configured runtime: with none, `consumer` is null and
-  // there is nothing to compare, which is the blind spot itself.
-  const { dir, consumer } = scaffold();
-  const srv = await start(dir, ["--surfaces", consumer]);
-  t.after(() => srv.stop());
-
-  const doc = fs.readFileSync(path.join(REPO, "contract", "contract-meta.md"), "utf8");
-  const block = doc.match(/With an overlay configured, `manifest\.consumer` is populated:\n\n```json\n([\s\S]*?)\n```/);
-  assert.ok(block,
-    "contract-meta.md carries no populated `manifest.consumer` example, so the shape of that " +
-    "block is documented nowhere and nothing can guard it");
-  const documented = JSON.parse(block[1]);
-
-  const live = (await srv.contract()).consumer;
-  assert.ok(live, "positive control: the overlay-configured runtime must actually report a consumer block");
-  assert.deepEqual(
-    Object.keys(documented).sort(),
-    Object.keys(live).sort(),
-    "the documented consumer example and the served consumer block have diverged"
-  );
-});
+// MOVED — doc/response parity now lives in ONE place:
+// test/contract-response-parity.test.mjs. This file checked `manifest.consumer`,
+// siblings checked `runtime` and `manifest`, and NOBODY checked the top level —
+// so a field added beside contractVersion was invisible to all three. One
+// structural comparison now descends the whole response.
 
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));

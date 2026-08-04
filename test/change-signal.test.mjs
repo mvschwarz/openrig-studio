@@ -168,20 +168,10 @@ test("the runtime serves the change-signal helper at a stable path", async (t) =
   assert.match(body, /export function watchSignal/, "the helper does not export the documented entry point");
 });
 
-test("the documented /api/contract runtime block matches what is served", async (t) => {
-  // Same descent the consumer block already has. `runtime` gained a field, and
-  // the top-level guard compares manifest keys only — so without this, a field
-  // could ship there undocumented exactly as `consumer.dir` once did.
-  const s = await start();
-  t.after(() => s.stop());
-  const doc = fs.readFileSync(path.join(REPO, "contract", "contract-meta.md"), "utf8");
-  const block = doc.match(/`GET \/api\/contract` returns:\n\n```json\n([\s\S]*?)\n```/);
-  assert.ok(block, "the /api/contract example is gone");
-  const documented = JSON.parse(block[1]);
-  const live = (await (await s.get("/api/contract")).json()).runtime;
-  assert.deepEqual(Object.keys(documented.runtime).sort(), Object.keys(live).sort(),
-    "the documented runtime block and the served one have diverged");
-});
+// MOVED — see test/contract-response-parity.test.mjs, which owns doc/response
+// agreement at every level. This checked the `runtime` block only; two siblings
+// checked `manifest` and `manifest.consumer`; nobody checked the top level, and
+// a field added there was invisible to all three.
 
 test("a declared preserve list is ACCEPTED and reaches the served row", async (t) => {
   // The declaration half of "the app says WHAT to keep, not HOW". Before this,
