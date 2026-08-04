@@ -255,9 +255,16 @@ else
   warn "NO INIT SYSTEM on this host (no systemctl). The studio will NOT survive a reboot."
   warn "Starting it directly so the box is usable; persistence is NOT configured."
   if [ "$DRY_RUN" = 0 ]; then
-    ( cd "$STUDIO_DIR/sdk" && OPENRIG_STUDIO_DIR="$STUDIO_DIR" \
-        nohup "$NODE_BIN" tools/studio.mjs --port "$STUDIO_PORT" > "$STUDIO_DIR/studio.log" 2>&1 & )
-    printf '  started directly (pid in %s/studio.log); NOT persistent\n' "$STUDIO_DIR"
+    # Reuse what is already there. A blind relaunch dies on EADDRINUSE while the
+    # survivor reloads the manifest this run just replaced, so the verifier below
+    # races a reload it caused and reports a false FAIL on a healthy box.
+    if curl -fsS "http://127.0.0.1:${STUDIO_PORT}/api/contract" >/dev/null 2>&1; then
+      printf '  studio already serving on %s — reusing it\n' "$STUDIO_PORT"
+    else
+      ( cd "$STUDIO_DIR/sdk" && OPENRIG_STUDIO_DIR="$STUDIO_DIR" \
+          nohup "$NODE_BIN" tools/studio.mjs --port "$STUDIO_PORT" > "$STUDIO_DIR/studio.log" 2>&1 & )
+      printf '  started directly (pid in %s/studio.log); NOT persistent\n' "$STUDIO_DIR"
+    fi
   fi
 fi
 
@@ -279,7 +286,16 @@ fi
 note "verify by effect"
 [ "$DRY_RUN" = 1 ] && { printf '  (dry-run: skipping)\n'; exit 0; }
 BASE="http://127.0.0.1:${STUDIO_PORT}"
-for i in $(seq 1 30); do curl -fsS "$BASE/" >/dev/null 2>&1 && break; sleep 1; done
+# Wait for the surfaces themselves, not for "/". The front answers throughout a
+# manifest reload, so waiting on it means asserting mid-reload.
+for i in $(seq 1 60); do
+  ready=1
+  for a in "${APP_LIST[@]}"; do
+    curl -fsS "$BASE/surfaces/$a.html" >/dev/null 2>&1 || { ready=0; break; }
+  done
+  [ "$ready" = 1 ] && break
+  sleep 1
+done
 
 FAIL=0
 for a in "${APP_LIST[@]}"; do
