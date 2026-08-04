@@ -109,6 +109,40 @@ is single-process, loopback, and knows nothing about who is calling — so it
 records what it was told and this table says so. **Do not build a trust decision
 on `by` without knowing which kind of runtime produced it.**
 
+## Addressing state WITHIN a surface (stable)
+
+The same problem as focus, arriving from the other end. Focus lets an agent ask
+what the user is looking at; an address lets anyone **hand that to someone else**
+— a link a human pastes, a state a reload restores, a reference an agent is given
+rather than described.
+
+Across the surveyed applications there is not one use of `location.hash`,
+`URLSearchParams` or `pushState`. The shell's `?s=<id>` picks *which* surface is
+open and nothing addresses state *inside* one.
+
+**The shell owns the QUERY; the surface owns the HASH.**
+
+That split is the rule rather than a convention: `?s=` belongs to the shell, and a
+surface writing there would fight the thing hosting it. So a surface's own state
+goes in the hash, and the runtime helper's `readAddress` / `writeAddress` do
+exactly that and leave the query untouched.
+
+```js
+import { readAddress, writeAddress } from "/signal.js";
+
+const state = readAddress(location.href);            // {} when nothing is addressed
+history.replaceState(null, "", writeAddress(location.href, { page: "3" }));
+```
+
+The address is a **flat map of strings**, because a URL is something a human is
+expected to read and paste. A surface with structure to address flattens it; a
+blank value is dropped rather than written as `&k=`, and an empty state clears
+the hash rather than leaving a bare `#`.
+
+**Restoring on load is the half that matters.** An address that is produced but
+never read is decoration: it makes a URL that looks meaningful and restores
+nothing. A surface adopting this reads the address before its first render.
+
 ## Failure modes this design answers
 
 - **A consumer is not on the box.** It reads over HTTP. This is the whole point.
@@ -129,5 +163,7 @@ on `by` without knowing which kind of runtime produced it.**
 | `at` server-set on every write | **yes** |
 | `by` overridden from a real caller identity | **no, and it cannot be here.** The reference runtime is single-process and loopback and has no identity for its caller, so `by` is what the caller declared. A runtime that HAS one must override it |
 | a provider declaring the verb in `signals.verbs` | **specified**; the reference runtime is single-process and declares nothing |
+| `readAddress` / `writeAddress`, hash-owned and query-untouched | **yes**, with controls |
+| a SHIPPED surface that actually addresses its state | **no.** None of the surfaces in this repository has view state worth addressing — the shell hosts, and the starter renders a fixture. The helper and its rules are contract and tested; **the first application with a view is what will exercise them**, and adding UI here purely to demonstrate it would be inventing a feature to satisfy a document |
 
 Rows are measured against the shipped runtime rather than recalled.

@@ -17,6 +17,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readAddress, writeAddress } from "../app/signal.js";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -198,6 +199,75 @@ test("a malformed write is refused by name rather than silently ignored", async 
   const noKnownField = await s.write({ nonsense: 1 });
   assert.equal(noKnownField.ok, false);
   assert.match(noKnownField.error, /named no known field/);
+});
+
+// ------------------------------------------- addressing state within a surface
+
+test("state round-trips through an address, so a link RESTORES rather than only describes", () => {
+  // The half that matters. An address that is produced but never read is
+  // decoration: a URL that looks meaningful and restores nothing. Asserted as a
+  // round trip rather than as two separate shapes.
+  const href = "http://127.0.0.1:8890/surfaces/mine.html?s=mine";
+  const addressed = writeAddress(href, { page: "3", pane: "left" });
+  assert.deepEqual(readAddress(addressed), { page: "3", pane: "left" });
+});
+
+test("the surface owns the HASH and must not disturb the shell's QUERY", () => {
+  // `?s=` is the shell's; a surface writing there would fight the thing hosting
+  // it. This is the rule, so it gets an assertion rather than a comment.
+  const href = "http://127.0.0.1:8890/surfaces/mine.html?s=mine&other=keep";
+  const out = new URL(writeAddress(href, { page: "3" }));
+  assert.equal(out.searchParams.get("s"), "mine", "the shell's surface selector was disturbed");
+  assert.equal(out.searchParams.get("other"), "keep");
+  assert.equal(out.hash, "#page=3");
+});
+
+test("values survive the characters a URL would otherwise eat", () => {
+  const href = "http://x/y";
+  const state = { q: "a b&c=d", path: "/Users/someone/take 01.mov", uni: "café ▲" };
+  assert.deepEqual(readAddress(writeAddress(href, state)), state);
+});
+
+test("an empty address clears the hash rather than leaving a bare #", () => {
+  // A trailing "#" is a different string for no reason and shows up in anything
+  // comparing URLs.
+  const href = "http://x/y?s=mine";
+  const cleared = writeAddress(href, {});
+  assert.equal(cleared, "http://x/y?s=mine");
+  assert.deepEqual(readAddress(cleared), {});
+});
+
+test("a blank value is dropped, not written as an empty parameter", () => {
+  const out = writeAddress("http://x/y", { page: "3", empty: "", missing: null, undef: undefined });
+  assert.equal(new URL(out).hash, "#page=3");
+  assert.deepEqual(readAddress(out), { page: "3" });
+});
+
+test("an un-addressed URL reads as an empty state, not as a failure", () => {
+  // The positive control for the read side: a surface that has never addressed
+  // anything must get {} rather than an error, or adopting this would break
+  // every first load.
+  assert.deepEqual(readAddress("http://127.0.0.1:8890/surfaces/mine.html"), {});
+  assert.deepEqual(readAddress("http://127.0.0.1:8890/surfaces/mine.html?s=mine"), {});
+});
+
+// ------------------------------------------------------------- zero-config
+
+test("a runtime nobody reports focus to answers an EMPTY record, and the marker does not move", async (t) => {
+  // Item 7 at the focus verb: a surface that reports no focus must not make the
+  // runtime behave differently. Reporting nothing is not an error, and a marker
+  // that drifted on its own would make every consumer re-read forever.
+  const s = await start();
+  t.after(() => s.stop());
+
+  const first = await s.read();
+  assert.deepEqual(first.focus, {}, "an unreported focus is not empty");
+  assert.equal(first.ok, true);
+
+  await new Promise((r) => setTimeout(r, 250));
+  const second = await s.read(first.marker);
+  assert.equal(second.changed, false, "the marker moved with nothing reporting focus");
+  assert.equal(second.marker, first.marker);
 });
 
 test("positive control: this suite is capable of failing", () => {

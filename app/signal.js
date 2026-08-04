@@ -306,6 +306,42 @@ export function preserveDeclared(key, kinds, { adapter, say, onUnsupported = () 
   });
 }
 
+// ---- addressing state WITHIN a surface ---------------------------------------
+// The other end of the same problem as focus. The shell's `?s=<id>` picks WHICH
+// surface is open; across every surveyed application there is not one use of
+// location.hash, URLSearchParams or pushState, so nothing addresses state INSIDE
+// one. There is no way to link to, restore, or hand an agent "the thing I am
+// looking at" by reference.
+//
+// THE SHELL OWNS THE QUERY, THE SURFACE OWNS THE HASH. That split is why these
+// write to the hash and leave the query untouched: `?s=` belongs to the shell,
+// and a surface that wrote there would fight the thing hosting it.
+//
+// Pure functions on a URL STRING rather than on `location`, for the same reason
+// watchSignal takes its fetch: a consumer can test its own addressing without a
+// browser.
+
+export function readAddress(href) {
+  const hash = new URL(href).hash.replace(/^#/, "");
+  return hash ? Object.fromEntries(new URLSearchParams(hash)) : {};
+}
+
+export function writeAddress(href, state) {
+  const url = new URL(href);
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(state ?? {})) {
+    // A blank value addresses nothing, and carrying it would put `&k=` in a URL
+    // a human is expected to read and paste.
+    if (v === undefined || v === null || v === "") continue;
+    params.set(k, String(v));
+  }
+  const encoded = params.toString();
+  url.hash = encoded;
+  // Setting an empty hash can leave a bare trailing "#", which is a different
+  // string for no reason and shows up in anything comparing URLs.
+  return encoded ? url.toString() : url.toString().replace(/#$/, "");
+}
+
 // ---- human-wins --------------------------------------------------------------
 // Both reference codebases arrived at this independently — `if (st.dirty) return`,
 // and a poll that skips while dirty/saving/loading. Promoted to a rule: while a
