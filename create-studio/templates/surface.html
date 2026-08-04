@@ -305,6 +305,13 @@
             "Signal degraded — " + (reason || "the runtime is not answering") +
             ". Showing the last data received.";
           setStatus("polling", "degraded");
+        } else {
+          // Clear the SENTENCE, not just the visibility. Hiding an element that
+          // still reads "Signal degraded" leaves a stale status line waiting for
+          // the first future path that unhides without setting text — and a
+          // status line goes stale precisely when the thing it describes gets
+          // BETTER, which is when nobody is looking.
+          degradedEl.textContent = "";
         }
       },
     });
