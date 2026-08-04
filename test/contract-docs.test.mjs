@@ -35,18 +35,30 @@ test("positive control: the contract directory has documents to check", () => {
   assert.ok(docs.includes("contract-meta.md"), "contract-meta.md is the index; it must be here");
 });
 
-test("every contract document is listed in contract-meta's documents table", () => {
+test("every contract document is listed in contract-meta's documents TABLE", () => {
   // An unindexed document is one a reader never finds. The table is the only
   // place that claims to enumerate them, so it is the thing that has to stay
   // true when a document is added.
+  //
+  // ROWS ONLY, and that is a correction rather than a detail. This first read the
+  // whole SECTION, so a document merely NAMED in the prose above the table
+  // satisfied a check whose failure message says the table lists it. Caught by
+  // planting the removal of a row and watching it stay green — the prose
+  // introducing that same document was enough. A guard whose message and whose
+  // assertion disagree is worse than none, because the message is what a reader
+  // believes.
   const meta = fs.readFileSync(path.join(DIR, "contract-meta.md"), "utf8");
-  const table = meta.match(/## The documents\n([\s\S]*?)\n## /);
-  assert.ok(table, "contract-meta.md no longer has a `## The documents` section to check");
+  const section = meta.match(/## The documents\n([\s\S]*?)\n## /);
+  assert.ok(section, "contract-meta.md no longer has a `## The documents` section to check");
+
+  const rows = section[1].split("\n").filter((l) => l.trimStart().startsWith("|"));
+  assert.ok(rows.length >= 3, `the documents table parsed as ${rows.length} row(s) — the shape changed`);
 
   for (const doc of docs) {
-    assert.ok(table[1].includes(`\`${doc}\``),
+    assert.ok(rows.some((r) => r.includes(`\`${doc}\``)),
       `${doc} exists but contract-meta.md's documents table does not list it — ` +
-      `a document nobody is pointed at is a document nobody reads`);
+      `a document nobody is pointed at is a document nobody reads ` +
+      `(a mention in the surrounding prose does not count)`);
   }
 });
 

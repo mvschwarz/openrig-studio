@@ -625,6 +625,55 @@ setInterval(integrityCheck, 1000).unref?.();
 
 setInterval(() => { for (const res of sseClients) { try { res.write(`: heartbeat\n\n`); } catch {} } }, 25000).unref();
 
+// ---- focus: what the user is looking at ------------------------------------
+// Held in memory, not on disk, and that is the point rather than a shortcut: the
+// measured defect is a write verb with no matching read, which forces every
+// consumer onto the record's FILE and so excludes anything not on this machine.
+// With no file there is nothing to read but the verb.
+//
+// The marker carries the boot id because a counter alone cannot promise
+// monotonicity across a restart. A restarted runtime therefore issues a marker a
+// consumer has never seen, which change-signal.md already defines as changed —
+// it fails toward re-reading rather than toward silence.
+const FOCUS_FIELDS = ["surface", "selection", "view", "note"];
+let focusRecord = {};
+let focusSeq = 0;
+const focusMarker = () => `${BOOT_ID}.${focusSeq}`;
+
+// A write updates the fields it NAMES and leaves the rest. Whole-record
+// replacement is the measured defect: a second verb blanked `view` while writing
+// a selection, so pinning something destroyed the view context the focus
+// reporter had just written. Both writers were behaving reasonably; the format
+// made them collide.
+function writeFocus(patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+    return { ok: false, error: "focus write must be a JSON object naming the fields to update" };
+  }
+  const named = FOCUS_FIELDS.filter((f) => Object.hasOwn(patch, f));
+  if (!named.length) {
+    return { ok: false, error: `focus write named no known field — one of: ${FOCUS_FIELDS.join(", ")}` };
+  }
+  for (const f of named) focusRecord[f] = patch[f];   // explicit null clears; that is a statement
+  // `at` is server-set: a caller-supplied timestamp cannot be trusted to say when
+  // the record last genuinely changed. `by` is caller-declared and this runtime
+  // has no identity to override it with — see contract/focus.md.
+  focusRecord.at = new Date().toISOString();
+  focusRecord.by = typeof patch.by === "string" ? patch.by : null;
+  // ANY field change moves the marker, including a view change with an unchanged
+  // selection — the case the surveyed implementation misses entirely, because it
+  // dedupes on selection alone and a user who changed page has plainly changed
+  // what they are looking at.
+  focusSeq += 1;
+  return { ok: true, marker: focusMarker(), focus: focusRecord };
+}
+
+const readBody = (req) => new Promise((resolve) => {
+  let raw = "";
+  req.on("data", (c) => { raw += c; if (raw.length > 256 * 1024) req.destroy(); });
+  req.on("end", () => resolve(raw));
+  req.on("error", () => resolve(""));
+});
+
 // ---- files: read-only, root-pinned ----------------------------------------
 // Containment is enforced on the REAL path (symlinks fully resolved), not the
 // lexical one: a symlink under the root that resolves outside it is refused.
@@ -691,9 +740,24 @@ function filesSearch(q) {
 watchForChanges();
 loadManifest();
 
-http.createServer((req, res) => {
+http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
   try {
+    if (u.pathname === "/api/focus") {
+      if (req.method === "POST") {
+        const raw = await readBody(req);
+        let patch;
+        try { patch = JSON.parse(raw || "null"); }
+        catch (e) { return sendJson(res, 400, { ok: false, error: `focus write is not valid JSON: ${e.message}` }); }
+        const result = writeFocus(patch);
+        return sendJson(res, result.ok ? 200 : 400, result);
+      }
+      // The read the record never had. `?since=` is the change-signal contract,
+      // not a second polling mechanism — see contract/change-signal.md.
+      const since = u.searchParams.get("since");
+      const marker = focusMarker();
+      return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, focus: focusRecord });
+    }
     if (u.pathname === "/api/contract") {
       return sendJson(res, 200, {
         contractVersion: CONTRACT_VERSION,

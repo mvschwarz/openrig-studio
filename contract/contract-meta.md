@@ -23,10 +23,11 @@ served surfaces and false the moment apps had backends.
 
 ## The documents
 
-Building a **surface** needs the first four. The two after them are read when you
-need what they describe, and a surface that needs neither is not missing
-anything: shipping an **app** — a surface plus a backend — needs
-`app-manifest.md`, and adopting live refresh needs `change-signal.md`.
+Building a **surface** needs the first four. The rest are read when you need what
+they describe, and a surface that needs none of them is not missing anything:
+shipping an **app** — a surface plus a backend — needs `app-manifest.md`,
+adopting live refresh needs `change-signal.md`, and reporting what the user is
+looking at needs `focus.md`.
 
 | Document | What it defines |
 |---|---|
@@ -36,6 +37,7 @@ anything: shipping an **app** — a surface plus a backend — needs
 | `runtime-api.md` | The HTTP verb set: routes, shapes, failure semantics |
 | `app-manifest.md` | Installing an app: `app.json`, `provider.json`, `studio.json` |
 | `change-signal.md` | Markers, DATA-vs-CODE refresh, and state that survives a reload |
+| `focus.md` | What the user is looking at, and how an agent reads it |
 
 Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 `app-manifest.schema.json` for `app.json`.
