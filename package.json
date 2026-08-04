@@ -1,6 +1,6 @@
 {
   "name": "@openrig/studio",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "SDK for building agent-driven mini-apps: thin surfaces paired with agents, running in a shared shell.",
   "type": "module",
   "scripts": {

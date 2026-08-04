@@ -18,7 +18,7 @@ Open http://127.0.0.1:8890/ — the shell. It starts with one surface on the rai
 
 | Path | What it is |
 |---|---|
-| `contract/` | **The contract — start here.** Four core documents, two more for apps and live refresh, plus the manifest row schema. |
+| `contract/` | **The contract — start here.** `contract-meta.md` indexes the rest, including the three agent primitives and the manifest row schema. |
 | `skills/building-studio-apps/` | **If you are a coding agent, load this first.** Orientation plus the failure modes, written for this job. |
 | `create-studio/` | The scaffolder: generates a working surface project. |
 | `app/serve-studio.mjs` | The reference runtime (zero-dependency Node HTTP server). |
@@ -61,8 +61,10 @@ surface to stay fresh without losing the user's work, `contract/change-signal.md
 covers markers, the difference between data changing and code changing, and state
 that survives a reload. If you want an agent to know what the user is looking at,
 `contract/focus.md` covers the record, the verb that reads it, and addressing
-state inside a surface. Both are opt-in, and a surface that skips them is
-unaffected. A running runtime self-describes at `GET /api/contract`.
+state inside a surface. If you want an agent to **operate** your surface,
+`contract/drive.md` covers ops, the generation counter, and what a surface does
+with intent it has not seen. All three are opt-in, and a surface that skips them
+is unaffected. A running runtime self-describes at `GET /api/contract`.
 
 The reference runtime is fixture-backed: its API verbs serve data from
 `fixtures/`, so everything works on any machine with no external processes.
@@ -71,14 +73,37 @@ watch a live-updating surface work.
 
 ## Status
 
-Package 0.6.0. Contract v0.1 — unchanged, because everything below is additive
+Package 0.7.0. Contract v0.1 — unchanged, because everything below is additive
 or a behaviour fix, and the contract version only moves on a breaking change.
 Pre-release.
 
 **All three agent primitives are now in the SDK.** An agent can see what changed,
 see what the user is looking at, and operate the surface they have open.
 
-### What is new in 0.6.0
+### What is new in 0.7.0
+
+Someone built a small app against 0.6.0 from the documentation alone, and fixed
+what that turned up.
+
+**A drive op posted before a surface loaded is no longer replayed when it loads.**
+The runtime keeps the last op, so a page that had never seen one treated it as
+new — meaning a reload re-ran it and a second tab ran it again. Harmless for
+`select`; a side effect nobody asked for if the op is `play` or `export`. A
+surface now adopts the current generation as a baseline on its first poll, and
+`resumeLatestOnLoad: true` opts back in. This is a behaviour change to a shipped
+primitive, which is why it is a minor rather than a patch.
+
+**The way in was the real problem.** The skill an agent is told to load first
+never mentioned the three primitives at all — it now leads with them. The project
+the scaffolder generates documents them too, including the two already wired into
+the page it emits.
+
+**Docs no longer state the package version**, because a version in prose is wrong
+at the next release; they point at the package instead. A guard enforces it. Also
+noted where it belongs: `networkidle` never settles against a studio, because the
+event stream stays open for the life of the page.
+
+### What arrived in 0.6.0
 
 **Agent-drives-the-app.** The third primitive, and the one that changes what an
 agent is: it can now operate the surface the user already has open instead of
@@ -175,7 +200,7 @@ refuses a port held by anything else rather than verifying against a stranger,
 survives a host where `systemctl` exists but no user manager is reachable, and
 binds the root kinds an app actually declared.
 
-### What is NOT in 0.6.0
+### What is NOT in 0.7.0
 
 **A surface refusing an op it cannot honour, and saying why.** An agent will ask
 for things a surface cannot do right now — sound a browser will not grant without a
