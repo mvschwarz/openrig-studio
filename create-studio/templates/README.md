@@ -86,7 +86,7 @@ It uses **only stable-classified** contract items. Nothing marked
 
 ## Extend it
 
-Read these four documents — they are the whole contract, and they are enough:
+Read these four documents — they are enough to build a surface:
 
 | Document | What it defines |
 |---|---|
@@ -96,6 +96,11 @@ Read these four documents — they are the whole contract, and they are enough:
 | `contract/runtime-api.md` | The HTTP verbs, their shapes and failure semantics |
 
 Plus `contract/surface-row.schema.json` for the manifest row fields.
+
+When you want the surface to stay fresh without losing the user's work, read
+`contract/change-signal.md`: markers, the difference between DATA changing and
+CODE changing, and state that survives a reload. It is opt-in — the loop below
+already works without it.
 
 In `surface.html`, replace the body of `render()` with whatever your surface is
 for. The boot check, the change-signal loop and the failure handling around it

@@ -3,7 +3,7 @@
 contractVersion: 0.1
 
 This directory IS the openrig studio SDK contract **for building a surface**. If
-you are a coding agent building one: read these four documents plus
+you are a coding agent building one: read the four core documents below plus
 `surface-row.schema.json`, then build. Nothing outside this directory and the
 running runtime is required to write a surface that loads in the shell.
 
@@ -23,8 +23,10 @@ served surfaces and false the moment apps had backends.
 
 ## The documents
 
-Building a **surface** needs the first four. Shipping an **app** — a surface
-plus a backend — needs `app-manifest.md` as well.
+Building a **surface** needs the first four. The two after them are read when you
+need what they describe, and a surface that needs neither is not missing
+anything: shipping an **app** — a surface plus a backend — needs
+`app-manifest.md`, and adopting live refresh needs `change-signal.md`.
 
 | Document | What it defines |
 |---|---|
@@ -33,6 +35,7 @@ plus a backend — needs `app-manifest.md` as well.
 | `shell-protocol.md` | The shell runtime: lifecycle, URL rules, the postMessage API |
 | `runtime-api.md` | The HTTP verb set: routes, shapes, failure semantics |
 | `app-manifest.md` | Installing an app: `app.json`, `provider.json`, `studio.json` |
+| `change-signal.md` | Markers, DATA-vs-CODE refresh, and state that survives a reload |
 
 Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 `app-manifest.schema.json` for `app.json`.

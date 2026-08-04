@@ -18,7 +18,7 @@ Open http://127.0.0.1:8890/ — the shell. It starts with one surface on the rai
 
 | Path | What it is |
 |---|---|
-| `contract/` | **The contract — start here.** Four documents + the manifest row schema. |
+| `contract/` | **The contract — start here.** Four core documents, two more for apps and live refresh, plus the manifest row schema. |
 | `create-studio/` | The scaffolder: generates a working surface project. |
 | `app/serve-studio.mjs` | The reference runtime (zero-dependency Node HTTP server). |
 | `app/shell.html` | The shell: rail + stage + agent sidebar. |
