@@ -31,13 +31,18 @@ STUDIO_DIR="${STUDIO_DIR:-$HOME/studio}"
 MEDIA_DIR="${MEDIA_DIR:-$HOME/media}"
 STUDIO_PORT="${STUDIO_PORT:-8890}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
-APPS="${APPS:-files agents canvas media-manager cutdown mini-nle}"
+# Explicit APPS is an instruction; absent APPS is a question answered after the
+# clone (see "discover apps"). A hardcoded default list silently rots: the apps
+# repository moves on its own schedule, and a provisioner pinned to yesterday's
+# names fails on a box that did nothing wrong.
+APPS_EXPLICIT="${APPS:+yes}"
+APPS="${APPS:-}"
 # Split ONCE, explicitly, into an array. The obvious `for a in $APPS` relies on
 # unquoted word-splitting, which bash does and zsh does NOT — so the same line
 # yields six apps in a script and one fused string pasted into a zsh terminal,
 # producing a studio.json that is still VALID JSON and completely wrong. An
 # array removes the shell-dependency instead of documenting it.
-read -ra APP_LIST <<< "$APPS"
+read -ra APP_LIST <<< "$APPS"   # may be empty here; filled after the clone
 DRY_RUN=0
 # NOT `[ ... ] && DRY_RUN=1`: under `set -e` a failing test as the final command
 # of an && list can terminate the script, so the no-args invocation would exit
@@ -113,24 +118,75 @@ clone_or_update() { # $1 url  $2 dest
 clone_or_update "$SDK_REPO"  "$STUDIO_DIR/sdk"
 clone_or_update "$APPS_REPO" "$STUDIO_DIR/apps"
 
+# --- 2b. discover apps -------------------------------------------------------
+# Ask the repository what it ships rather than asserting what it shipped when
+# this script was written. An explicitly-requested app that is missing is an
+# ERROR (you asked for it by name); an app the repo simply no longer carries is
+# not this script's business to know about in advance.
+note "apps"
+if [ "$DRY_RUN" = 0 ]; then
+  if [ -z "$APPS_EXPLICIT" ]; then
+    APP_LIST=(); for d in "$STUDIO_DIR"/apps/apps/*/; do [ -d "$d" ] && APP_LIST+=("$(basename "$d")"); done
+    printf '  discovered %d app(s) from the repository: %s\n' "${#APP_LIST[@]}" "${APP_LIST[*]}"
+    [ "${#APP_LIST[@]}" -gt 0 ] || { warn "no apps found under $STUDIO_DIR/apps/apps — refusing to write an empty studio"; exit 3; }
+  else
+    printf '  using the requested app list: %s\n' "${APP_LIST[*]}"
+    for a in "${APP_LIST[@]}"; do
+      [ -d "$STUDIO_DIR/apps/apps/$a" ] || { warn "requested app '$a' is not in the apps repository — refusing to continue"; exit 3; }
+    done
+  fi
+fi
+
 # --- 3. studio.json ----------------------------------------------------------
 # One binding per root KIND. The four kinds are declared by the app manifests:
 # canvas, footage, media, project. Getting these wrong is a silent mis-wire.
 note "write studio.json"
+# Root KINDS come from the app manifests too. Hardcoding them has the same rot
+# as hardcoding the app list: an app added tomorrow can declare a kind this
+# script has never heard of, and the studio then refuses to start on a box that
+# did nothing wrong. Known kinds keep their conventional directory; anything new
+# gets $MEDIA_DIR/<kind>, created and reported as a GENERATED default so nobody
+# mistakes it for a considered choice.
 if [ "$DRY_RUN" = 0 ]; then
+  ROOT_KINDS="$("$NODE_BIN" -e '
+    const fs=require("fs"),path=require("path");
+    const base=process.argv[1], apps=process.argv.slice(2), kinds=new Set();
+    for (const a of apps) {
+      const f=path.join(base,a,"app.json");
+      if (!fs.existsSync(f)) continue;
+      const roots=(JSON.parse(fs.readFileSync(f,"utf8")).roots)||{};
+      for (const k of Object.keys(roots)) kinds.add(k);
+    }
+    process.stdout.write([...kinds].sort().join(" "));
+  ' "$STUDIO_DIR/apps/apps" "${APP_LIST[@]}")"
+  printf '  root kinds declared by these apps: %s\n' "${ROOT_KINDS:-<none>}"
+
+  ROOT_JSON=""
+  for k in $ROOT_KINDS; do
+    case "$k" in
+      media)   d="${MEDIA_DIR}" ;;
+      footage) d="${MEDIA_DIR}/footage" ;;
+      project) d="${MEDIA_DIR}/projects" ;;
+      canvas)  d="${MEDIA_DIR}/canvases" ;;
+      *)       d="${MEDIA_DIR}/${k}"; printf '  generated default binding for new root kind "%s" -> %s\n' "$k" "$d" ;;
+    esac
+    mkdir -p "$d"
+    ROOT_JSON="${ROOT_JSON}    \"${k}\": \"${d}\",\n"
+  done
+  ROOT_JSON="$(printf '%b' "$ROOT_JSON" | sed '$ s/,$//')"
+
   cat > "$STUDIO_DIR/studio.json" <<JSON
 {
   "port": ${STUDIO_PORT},
   "appsRoot": "${STUDIO_DIR}/apps",
   "apps": [$(printf '"%s",' "${APP_LIST[@]}" | sed 's/,$//')],
   "roots": {
-    "media":   "${MEDIA_DIR}",
-    "footage": "${MEDIA_DIR}/footage",
-    "project": "${MEDIA_DIR}/projects",
-    "canvas":  "${MEDIA_DIR}/canvases"
+${ROOT_JSON}
   }
 }
 JSON
+  "$NODE_BIN" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$STUDIO_DIR/studio.json" \
+    || { warn "generated studio.json is not valid JSON"; exit 4; }
   printf '  wrote %s\n' "$STUDIO_DIR/studio.json"
 fi
 
@@ -185,11 +241,30 @@ WantedBy=default.target
 UNIT
   printf '  wrote %s\n' "$UNIT_DIR/openrig-studio.service"
 fi
-run "systemctl --user daemon-reload"
-run "systemctl --user enable --now openrig-studio.service"
+# A host without an init system is a real case — containers, minimal images —
+# and the install has ALREADY SUCCEEDED by this point. Aborting here would throw
+# away a working studio over the way it gets restarted. Degrade loudly instead:
+# start it directly so the box is usable and verifiable, and say plainly that
+# persistence is NOT configured rather than letting a green run imply it is.
+HAVE_SYSTEMD=0
+command -v systemctl >/dev/null 2>&1 && HAVE_SYSTEMD=1
+if [ "$HAVE_SYSTEMD" = 1 ]; then
+  run "systemctl --user daemon-reload"
+  run "systemctl --user enable --now openrig-studio.service"
+else
+  warn "NO INIT SYSTEM on this host (no systemctl). The studio will NOT survive a reboot."
+  warn "Starting it directly so the box is usable; persistence is NOT configured."
+  if [ "$DRY_RUN" = 0 ]; then
+    ( cd "$STUDIO_DIR/sdk" && OPENRIG_STUDIO_DIR="$STUDIO_DIR" \
+        nohup "$NODE_BIN" tools/studio.mjs --port "$STUDIO_PORT" > "$STUDIO_DIR/studio.log" 2>&1 & )
+    printf '  started directly (pid in %s/studio.log); NOT persistent\n' "$STUDIO_DIR"
+  fi
+fi
 
 # linger: without it the user manager dies at logout and the studio with it.
-if loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
+if [ "$HAVE_SYSTEMD" = 0 ]; then
+  printf '  linger: not applicable without an init system\n'
+elif loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
   printf '  linger already enabled\n'
 elif [ -n "$SUDO" ] || [ "$(id -u)" -eq 0 ]; then
   run "$SUDO loginctl enable-linger $(id -un)"
