@@ -56,6 +56,17 @@ const OVERLAY_DIR = (() => {
 const OVERLAY_MANIFEST = OVERLAY_DIR ? path.join(OVERLAY_DIR, "surfaces.json") : null;
 
 const CONTRACT_VERSION = "0.1";
+// PROCESS IDENTITY — the answer to "the agent edited the page, when may I reload?"
+//
+// Minted once per process and never derived from a file. A studio COPIES surfaces
+// into its runtime directory at boot, so edited source does not reach a browser
+// until a restart: watching the file announces a change the page cannot yet see,
+// while watching the restart announces exactly the moment new code became
+// servable. A consumer latches this on its FIRST observation — successful or not —
+// and reloads when it CHANGES, so a surface opened after a restart does not
+// immediately reload itself, and a restart that straddles a consumer's startup is
+// still seen.
+const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 const CAPABILITIES = ["contract.meta", "observe.factory-state", "stream.events", "files.read", "shell.protocol"];
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json", ".css": "text/css",
@@ -681,7 +692,7 @@ http.createServer((req, res) => {
     if (u.pathname === "/api/contract") {
       return sendJson(res, 200, {
         contractVersion: CONTRACT_VERSION,
-        runtime: { name: "openrig-studio", flavor: "reference-fixture" },
+        runtime: { name: "openrig-studio", flavor: "reference-fixture", boot: BOOT_ID },
         capabilities: CAPABILITIES,
         manifest: manifestReport(),
       });

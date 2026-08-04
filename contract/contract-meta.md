@@ -44,7 +44,7 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 ```json
 {
   "contractVersion": "0.1",
-  "runtime": { "name": "openrig-studio", "flavor": "reference-fixture" },
+  "runtime": { "name": "openrig-studio", "flavor": "reference-fixture", "boot": "<opaque id, stable for this process>" },
   "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read", "shell.protocol"],
   "manifest": {
     "ok": true, "errors": [], "warnings": [], "surfaces": 1,
@@ -63,6 +63,13 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 
 - `contractVersion` — the version of this contract the runtime implements.
 - `capabilities` — which contract namespaces this runtime serves. Check before use.
+- `runtime.boot` — an opaque id, **stable for the life of this process and different
+  after a restart**. It is how a surface knows its own CODE changed: a studio copies
+  surfaces into its runtime directory at boot, so edited source only reaches the
+  browser after a restart. Watching a file announces a change the page cannot yet
+  see; watching this announces the moment new code became servable. Latch it on your
+  FIRST reading, successful or not, and reload when it CHANGES. See
+  `change-signal.md`.
 - `manifest` — the live validation report for `surfaces.json` (see `manifest.md`).
   `surfaces` is the count of valid rows currently served; it changes as the
   manifest changes.
