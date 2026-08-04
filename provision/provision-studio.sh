@@ -256,19 +256,34 @@ command -v systemctl >/dev/null 2>&1 && HAVE_SYSTEMD=1
 # manifest.consumer.dir — documented contract as of this slice, not a field that
 # happened to be there. The decision itself lives in studio-identity.mjs so its
 # cases are testable without standing up two studios.
+# THE SHELL DOES NOT CLASSIFY. It asks and reads an exit code — 0 ours, 3
+# foreign, 4 nothing-listening — because the first version of this classified in
+# shell and could not express the three states: `curl -f` reports a refused
+# connection and an HTTP 404 identically, so a foreign server answering 404 at
+# /api/contract read as an EMPTY PORT, was launched into, and was then verified
+# against with a green result. The model was right and the medium could not carry
+# it. The probe now does its own TCP check first, and only a missing listener may
+# be "nothing".
 IDENT_MJS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/studio-identity.mjs"
 [ -f "$IDENT_MJS" ] || IDENT_MJS="$STUDIO_DIR/sdk/provision/studio-identity.mjs"
 OVERLAY_DIR="$STUDIO_DIR/.runtime/surfaces"
 PORT_STATE=nothing        # nothing | ours | foreign
 PORT_WHY=""
 if [ "$DRY_RUN" = 0 ]; then
-  if PORT_BODY="$(curl -fsS "http://127.0.0.1:${STUDIO_PORT}/api/contract" 2>/dev/null)"; then
-    if PORT_WHY="$(printf '%s' "$PORT_BODY" | "$NODE_BIN" "$IDENT_MJS" "$OVERLAY_DIR")"; then
-      PORT_STATE=ours
-    else
-      PORT_STATE=foreign
-    fi
-  fi
+  set +e
+  PORT_WHY="$("$NODE_BIN" "$IDENT_MJS" "$STUDIO_PORT" "$OVERLAY_DIR")"
+  PORT_RC=$?
+  set -e
+  case "$PORT_RC" in
+    0) PORT_STATE=ours ;;
+    3) PORT_STATE=foreign ;;
+    4) PORT_STATE=nothing ;;
+    # A probe that failed for any other reason must NOT be read as "the port is
+    # free". Refusing is the recoverable direction; launching into an occupied
+    # port and verifying against a stranger is not.
+    *) PORT_STATE=foreign
+       PORT_WHY="the port probe itself failed (exit ${PORT_RC}) — refusing to assume the port is free" ;;
+  esac
 fi
 
 # A port held by something that is not this studio is fatal on EVERY branch, and
