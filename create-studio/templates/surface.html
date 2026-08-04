@@ -129,7 +129,7 @@
     // A MODULE, and deliberately: it is what lets this surface import the
     // runtime's helper, and a module script is deferred, which is the call site
     // the preserve contract requires if you later adopt state preservation.
-    import { watchSignal } from "/signal.js";
+    import { watchSignal, driveSurface } from "/signal.js";
 
     // ---- what this surface needs from the runtime ---------------------------
     // Every namespace listed here is checked at boot. A runtime that cannot
@@ -313,6 +313,28 @@
           // BETTER, which is when nobody is looking.
           degradedEl.textContent = "";
         }
+      },
+    });
+
+    // AGENT-DRIVABLE OUT OF THE BOX. An agent posts an op to /api/drive and this
+    // page follows — no wiring, no second mechanism. See contract/drive.md.
+    //
+    //   curl -X POST http://127.0.0.1:8890/api/drive \
+    //     -H 'content-type: application/json' \
+    //     -d '{"refresh":true,"say":"pulling the latest state"}'
+    //
+    // ONLY OPS THIS SURFACE CAN ACTUALLY HONOUR ARE HANDLED, and that is the point
+    // rather than a limitation: a starter that pretended to accept a richer
+    // vocabulary would report success for things it does not do, which is worse
+    // than not offering them. Add your own as the surface grows — an op is
+    // whatever YOUR surface understands, and the runtime never interprets it.
+    driveSurface({
+      apply: async (op) => {
+        // `say` first: a watcher should read WHY before the picture changes under
+        // them, so a driven surface reads as narrated rather than haunted.
+        if (op.say) showNotice(String(op.say));
+        if (op.refresh) await refresh();
+        if (op.reload) location.reload();
       },
     });
 

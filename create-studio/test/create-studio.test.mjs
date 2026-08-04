@@ -95,10 +95,14 @@ test("emitted surface targets the contract version and only stable endpoints", (
   const { html } = emitted(dir, "my-surface");
 
   assert.match(html, /const TARGET_CONTRACT = "0\.1"/);
+  // An ALLOWLIST, so a new endpoint has to be admitted deliberately rather than
+  // drifting into every scaffolded surface. `/api/drive` was added when the
+  // scaffolder became drivable: it is stable in contract/drive.md, and this guard
+  // correctly refused it until someone said so here.
+  const STABLE = ["/api/contract", "/api/factory/state", "/api/events", "/api/drive"];
   const endpoints = [...html.matchAll(/\/api\/[a-z/]+/g)].map((m) => m[0]);
   for (const e of new Set(endpoints)) {
-    assert.ok(["/api/contract", "/api/factory/state", "/api/events"].includes(e),
-      `emitted a non-stable endpoint: ${e}`);
+    assert.ok(STABLE.includes(e), `emitted a non-stable endpoint: ${e}`);
   }
   // runtime-internal surfaces named in contract/runtime-api.md must never appear
   assert.doesNotMatch(html, /files\/(write|goto|roots)|sidebar-arrangement|oauth|credential/i);
@@ -123,6 +127,32 @@ test("the emitted surface ADOPTS the runtime helper and can show a degraded stat
   // (contract/shell-protocol.md), so there has to be somewhere to show it.
   assert.match(html, /id="degraded"/, "the emitted surface has nowhere to render a degraded state");
   assert.match(html, /onDegraded/, "the surface imports the helper but never asks to be told about failure");
+});
+
+test("the emitted surface is AGENT-DRIVABLE out of the box", () => {
+  // Same argument as the helper above, one primitive along. A drive channel the
+  // SDK ships and no surface adopts is a channel every application reinvents
+  // differently — which is the state this primitive was written to end.
+  //
+  // Asserted on the emitted page rather than on the template, because the template
+  // is not what anyone runs.
+  const dir = tmp();
+  assert.equal(run(["my-surface", "--dir", dir]).code, 0);
+  const { html } = emitted(dir, "my-surface");
+
+  assert.match(html, /import \{[^}]*driveSurface[^}]*\} from "\/signal\.js"/,
+    "the emitted surface no longer imports the drive helper");
+  assert.match(html, /driveSurface\(\{/, "the surface imports the drive helper but never adopts it");
+  assert.match(html, /apply:/, "the drive adoption has no apply, so an op would land nowhere");
+
+  // The ops it claims to handle must be ones it CAN handle. A starter advertising
+  // a vocabulary it does not implement would report success for things it does not
+  // do — worse than offering less.
+  for (const [op, capability] of [["op.refresh", "refresh"], ["op.say", "showNotice"]]) {
+    assert.ok(html.includes(op), `the drive adoption does not handle ${op}`);
+    assert.ok(html.includes(capability + "("),
+      `${op} is handled but the surface has no ${capability}() to honour it with`);
+  }
 });
 
 // ------------------------------------------------------------------ escaping
