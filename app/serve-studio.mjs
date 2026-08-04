@@ -667,6 +667,38 @@ function writeFocus(patch) {
   return { ok: true, marker: focusMarker(), focus: focusRecord };
 }
 
+// ---- drive: the agent operating the surface ---------------------------------
+// The third primitive. Focus lets an agent see what the user is looking at; this
+// lets it change what the user is looking AT, in the page the user already has
+// open, rather than by handing back a description of what they should do.
+//
+// A GENERATION COUNTER, NOT A QUEUE, and this is the load-bearing choice. The
+// surface asks "is there anything newer than what I have?" and applies the LATEST
+// intent, skipping everything superseded. A queue lets a slow page fall behind and
+// then replay instructions that were true minutes ago — animating through states
+// nobody asked to see and acting on stale intent while looking perfectly healthy.
+// That is the stale-state-with-a-current-label failure, one layer up.
+//
+// THE OP IS OPAQUE TO THE RUNTIME. It carries INTENT — "show me take 3", "set the
+// grade warmer" — and the surface decides how to realise it. The runtime never
+// interprets it, so this cannot become a second renderer, and an op is never a
+// list of DOM operations: a driver that reached into a page's structure would
+// break on any re-layout, and every surface would have to freeze its markup to
+// stay drivable. Same decision, for the same reason, as `selection` being typed by
+// its surface rather than universally.
+let driveOp = null;
+let driveSeq = 0;
+const driveMarker = () => `${BOOT_ID}.${driveSeq}`;
+
+function writeDrive(op) {
+  if (!op || typeof op !== "object" || Array.isArray(op)) {
+    return { ok: false, error: "a drive op must be a JSON object carrying intent for the surface" };
+  }
+  driveSeq += 1;
+  driveOp = { ...op, gen: driveSeq, at: new Date().toISOString() };
+  return { ok: true, marker: driveMarker(), op: driveOp };
+}
+
 const readBody = (req) => new Promise((resolve) => {
   let raw = "";
   req.on("data", (c) => { raw += c; if (raw.length > 256 * 1024) req.destroy(); });
@@ -757,6 +789,22 @@ http.createServer(async (req, res) => {
       const since = u.searchParams.get("since");
       const marker = focusMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, focus: focusRecord });
+    }
+    if (u.pathname === "/api/drive") {
+      if (req.method === "POST") {
+        const raw = await readBody(req);
+        let op;
+        try { op = JSON.parse(raw || "null"); }
+        catch (e) { return sendJson(res, 400, { ok: false, error: `drive op is not valid JSON: ${e.message}` }); }
+        const result = writeDrive(op);
+        return sendJson(res, result.ok ? 200 : 400, result);
+      }
+      // The surface polls this. Same `?since=` shape as the change signal and
+      // focus, so a surface that already watches one is watching this with the
+      // primitive it has rather than a third mechanism of its own.
+      const since = u.searchParams.get("since");
+      const marker = driveMarker();
+      return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, op: driveOp });
     }
     if (u.pathname === "/api/contract") {
       return sendJson(res, 200, {

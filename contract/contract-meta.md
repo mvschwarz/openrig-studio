@@ -38,6 +38,7 @@ looking at needs `focus.md`.
 | `app-manifest.md` | Installing an app: `app.json`, `provider.json`, `studio.json` |
 | `change-signal.md` | Markers, DATA-vs-CODE refresh, and state that survives a reload |
 | `focus.md` | What the user is looking at, and how an agent reads it |
+| `drive.md` | How an agent operates a surface the user already has open |
 
 Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 `app-manifest.schema.json` for `app.json`.

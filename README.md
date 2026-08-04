@@ -150,25 +150,34 @@ refuses a port held by anything else rather than verifying against a stranger,
 survives a host where `systemctl` exists but no user manager is reachable, and
 binds the root kinds an app actually declared.
 
+**Agent-drives-the-app.** The third primitive, and the one that changes what an
+agent is: it can now operate the surface the user already has open instead of
+describing what should happen next. An agent `POST`s an **op** carrying intent,
+the open page follows, and a line of narration rides along so a watcher sees a
+narrated change rather than controls twitching by themselves.
+
+Two properties carry the design. It is a **generation counter, not a queue** — the
+surface applies the newest op and discards everything superseded, because a queue
+lets a slow page fall behind and then act on instructions that were true minutes
+ago, looking perfectly healthy the whole time. And an op is **opaque intent, never
+DOM operations**: "show take 3", not "click the third button". A driver that
+reached into markup would break on any re-layout and would force every drivable
+surface to freeze its DOM as an interface it never agreed to publish.
+
+See `contract/drive.md`.
+
 ### What is NOT in 0.5.0
 
-**agent-drives-the-app — the agent operating the surface — is not in the SDK, and
-it is deferred rather than missing.**
+**A surface refusing an op it cannot honour, and saying why.** An agent will ask
+for things a surface cannot do right now — sound a browser will not grant without a
+click, a file that has been moved. A bare rejection is useless to a driver; a
+refusal has to carry the current state so the agent can decide what to do instead.
+That shape is not specified yet, deliberately: invented before a real application
+needs one, it would be the wrong shape, and a half-specified refusal is harder to
+correct than an absent one because drivers build on it.
 
-The other two primitives were shippable because they are the same kind of thing: a
-value a consumer **reads**. A marker and a focus record travel over HTTP, mean the
-same to any consumer, and cost a surface nothing to ignore. Driving a surface is
-not that. It needs a live bidirectional channel into a running page, and the hard
-parts are the ones a hasty version gets wrong: what a surface answers when it is
-asked to do something it cannot do right now (a refusal that carries the current
-state is useful; a bare rejection is not), and how deep into a page a driver may
-reach before the channel is really just a promise about someone's DOM.
-
-Those are a different problem from reading a value, so bundling them with focus
-would have shipped the channel half-specified — and a half-specified channel is
-harder to correct than an absent one, because applications build on it. It is
-queued as its own slice.
-
-Working versions exist in applications built on this SDK, which is not the same as
-the SDK offering it. Until it lands here, an app that wants it builds its own, and
-two apps will do it differently. That is the gap this line exists to name.
+**A surface in this repository that is actually drivable.** The shell hosts and the
+starter renders a fixture; neither has anything worth driving. The helper and its
+rules are contract and tested, and the application that proved the mechanism lives
+outside this repository. The first real drivable surface here is what will exercise
+it.

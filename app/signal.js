@@ -362,3 +362,84 @@ export function deferWhileDirty(isDirty, apply) {
     get deferred() { return pending !== null; },
   };
 }
+
+// ---- drive: letting an agent operate this surface ----------------------------
+// The surface half of `/api/drive`. A surface adopts this and becomes drivable;
+// one that does not is unaffected, like everything else in this file.
+//
+// LATEST INTENT WINS, AND SUPERSEDED OPS ARE NEVER APPLIED. If three ops arrive
+// while one is still being realised, the surface applies the newest and DROPS the
+// two in between — it does not queue them. Replaying superseded intent animates
+// through states nobody asked to see and, worse, leaves a slow page acting on
+// instructions that were true minutes ago while looking perfectly healthy.
+//
+// APPLICATION IS SERIALISED. `apply` is awaited, and an op arriving mid-flight is
+// held as `next` rather than started concurrently — two overlapping applications
+// interleave their writes and land the surface in a state neither op described.
+// Whatever arrives during a flight, only the LAST one runs when it lands.
+export function driveSurface({
+  apply,
+  fetchImpl = fetch,
+  endpoint = "/api/drive",
+  intervalMs = 350,
+  onError = () => {},
+} = {}) {
+  if (typeof apply !== "function") throw new TypeError("driveSurface needs an apply(op) function");
+
+  let marker = null;      // last marker seen, so `?since=` can be honest
+  let seen = 0;           // highest generation already applied
+  let next = null;        // newest op that arrived while one was being applied
+  let flying = false;
+  let stopped = false;
+  let timer = null;
+
+  async function run(op) {
+    flying = true;
+    try {
+      while (op) {
+        // Re-read `next` AFTER the await, not before: anything that arrived
+        // during this application supersedes what we were about to do next.
+        await apply(op);
+        op = next;
+        next = null;
+      }
+    } finally {
+      flying = false;
+    }
+  }
+
+  // Exposed so a surface can hand an op straight in — a shell delivering by
+  // postMessage, or a test — without a transport in the way.
+  function offer(op) {
+    if (!op || typeof op.gen !== "number" || op.gen <= seen) return "superseded";
+    seen = op.gen;
+    if (flying) { next = op; return "queued-latest"; }
+    run(op).catch(onError);
+    return "applying";
+  }
+
+  async function poll() {
+    if (stopped) return;
+    try {
+      const url = marker === null ? endpoint : `${endpoint}?since=${encodeURIComponent(marker)}`;
+      const r = await (await fetchImpl(url, { cache: "no-store" })).json();
+      if (r && r.ok) {
+        marker = r.marker ?? marker;
+        if (r.changed && r.op) offer(r.op);
+      }
+    } catch (e) {
+      // The runtime going away must not kill the page. A surface that stopped
+      // polling on the first blip would need a manual reload to become drivable
+      // again, which is exactly the state this primitive exists to remove.
+      onError(e);
+    }
+    if (!stopped) timer = setTimeout(poll, intervalMs);
+  }
+
+  poll();
+  return {
+    offer,
+    stop() { stopped = true; if (timer) clearTimeout(timer); },
+    get applied() { return seen; },
+  };
+}
