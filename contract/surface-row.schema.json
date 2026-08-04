@@ -41,6 +41,7 @@
     "port": { "type": "number", "description": "Multi-process deployments only: the localhost port this surface's own server listens on. Single-runtime deployments use path.", "x-stability": "provisional" },
     "sub": { "type": "string", "description": "Multi-host deployments only: subdomain token for hosted resolution.", "x-stability": "provisional" },
     "samehost": { "type": "boolean", "description": "Resolve against the shell's own origin in hosted deployments.", "x-stability": "provisional" },
-    "hosts": { "type": "array", "items": { "type": "string" }, "description": "Restrict the row to named host classes; omitted = everywhere.", "x-stability": "provisional" }
+    "hosts": { "type": "array", "items": { "type": "string" }, "description": "Restrict the row to named host classes; omitted = everywhere.", "x-stability": "provisional" },
+    "preserve": { "type": "array", "items": { "type": "string" }, "description": "State kinds to keep across a CODE reload — scroll | selection | form | playhead by convention, and the vocabulary is open. The surface declares WHAT to keep; the capture and restore are performed by the runtime helper, so the surface does not implement them. Declaring this does not by itself start a signal loop: see change-signal.md for what the runtime does and does not do with it today.", "x-stability": "stable" }
   }
 }

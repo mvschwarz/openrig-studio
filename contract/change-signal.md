@@ -251,7 +251,8 @@ defect this repository has already paid for twice.
 | latch-on-first-observation, marker-backwards-is-changed, degraded reporting | **yes**, with controls |
 | `?since=` on an observe verb | **not yet** — the reference runtime's verbs are fixture-backed and mint no marker. The consumer half is shipped and tested against a scripted transport |
 | `signals` in `provider.json`, carried through composition | **not yet** |
-| `preserve` on a surface row, with runtime capture/restore | **partly** — the helper ships and is tested; the row declaration is not yet read |
+| `preserve` accepted as contract on a surface row and carried to the shell | **yes** — schema and runtime validation kept in step by a committed test |
+| the helper reading `preserve` from the row and driving capture/restore itself | **not yet** — a surface adopting this today reads its own row and passes the list to `preserveAcross`. The declaration is **carried, not yet consumed**, and that is stated rather than left to be discovered |
 
 Rows here are measured against the shipped tools rather than recalled. A row that
 moves to **yes** moves with the control that proves it.

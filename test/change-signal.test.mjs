@@ -54,14 +54,14 @@ async function start({ dir: existing, args = [] } = {}) {
 // beside a .runtime/ the composer copies INTO at boot. That copy is the whole
 // reason the code trigger is a restart rather than a file event, so a control for
 // it has to be built on the real composition rather than on a bare runtime.
-function studio(pageBody) {
+function studio(pageBody, rowExtra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "signal-studio-"));
   fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
   const root = path.join(dir, "studio");
   fs.mkdirSync(path.join(root, "apps"), { recursive: true });
   fs.writeFileSync(path.join(root, "surfaces.json"), JSON.stringify({
-    surfaces: [{ id: "mine", name: "MINE", glyph: "▲", path: "/surfaces/mine.html" }],
+    surfaces: [{ id: "mine", name: "MINE", glyph: "▲", path: "/surfaces/mine.html", ...rowExtra }],
   }, null, 2));
   fs.writeFileSync(path.join(root, "mine.html"), pageBody);
   return { dir, root };
@@ -181,6 +181,42 @@ test("the documented /api/contract runtime block matches what is served", async 
   const live = (await (await s.get("/api/contract")).json()).runtime;
   assert.deepEqual(Object.keys(documented.runtime).sort(), Object.keys(live).sort(),
     "the documented runtime block and the served one have diverged");
+});
+
+test("a declared preserve list is ACCEPTED and reaches the served row", async (t) => {
+  // The declaration half of "the app says WHAT to keep, not HOW". Before this,
+  // preserve was an unknown field: warned, and dropped from nothing but still
+  // never contracted. An author following the schema would have been told their
+  // documented field was unrecognised.
+  const kinds = ["scroll", "playhead"];
+  const { dir, root } = studio("<html>p</html>", { preserve: kinds });
+  const overlay = compose(root);
+  const s = await start({ dir, args: ["--surfaces", overlay] });
+  t.after(() => s.stop());
+
+  const m = (await (await s.get("/api/contract")).json()).manifest;
+  assert.equal(m.ok, true, JSON.stringify(m.errors));
+  assert.ok(!m.warnings.some((w) => /unknown field "preserve"/.test(w)),
+    `preserve is contract now, so it must not be reported as unknown: ${JSON.stringify(m.warnings)}`);
+
+  const row = (await (await s.get("/surfaces.json")).json()).surfaces.find((r) => r.id === "mine");
+  assert.deepEqual(row.preserve, kinds,
+    "the declared list did not survive into the served row, so nothing downstream could read it");
+});
+
+test("an unknown field STILL warns — so the clean read above is not a broken warning path", async (t) => {
+  // The discriminator. Without it, "preserve produced no unknown-field warning"
+  // passes just as happily against a runtime that stopped warning at all, which
+  // is the forward-compat behaviour the contract promises.
+  const { dir, root } = studio("<html>p</html>", { definitelyNotAField: "x" });
+  const overlay = compose(root);
+  const s = await start({ dir, args: ["--surfaces", overlay] });
+  t.after(() => s.stop());
+
+  const m = (await (await s.get("/api/contract")).json()).manifest;
+  assert.ok(m.warnings.some((w) => /unknown field "definitelyNotAField"/.test(w)),
+    `the unknown-field warning path is dead: ${JSON.stringify(m.warnings)}`);
+  assert.equal(m.ok, true, "an unknown field must stay a warning, never an error");
 });
 
 test("positive control: this suite is capable of failing", () => {

@@ -80,9 +80,14 @@ const sendJson = (res, code, obj) =>
 // Contract rule: a malformed manifest must LOOK wrong — named errors in the
 // startup log and in GET /api/contract's manifest block — but the runtime
 // keeps serving the valid rows. It never dies and never silently ignores.
+// Kept in step with contract/surface-row.schema.json by a committed test, not by
+// care: these are two places computing one property, and the failure when they
+// drift is silent in the misleading direction — the schema accepts a field the
+// runtime then reports as unknown.
 const ROW_OPTIONAL = { glyph: "string", hint: "string", category: "string", samehost: "boolean",
   port: "number", sub: "string", url: "string", hosts: "array", popout: "boolean",
-  hideAgents: "boolean", unmountOnBlur: "boolean", railMin: "boolean", project: "string" };
+  hideAgents: "boolean", unmountOnBlur: "boolean", railMin: "boolean", project: "string",
+  preserve: "array" };
 
 // `label` is "" for a single-manifest runtime, so a zero-config install emits
 // byte-identical error strings to before the seam existed — labelling only
