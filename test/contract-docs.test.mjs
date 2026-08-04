@@ -77,6 +77,44 @@ test("every .md a contract document points at actually exists", () => {
     `a contract document points at a file that does not exist: ${missing.join(", ")}`);
 });
 
+test("the README's stated package version is the version package.json ships", () => {
+  // A VERSION NUMBER IN PROSE IS A CLAIM ABOUT THE REPO, SO IT GOES STALE ON
+  // SUCCESS — the same shape as every status line this repository has been
+  // catching, and it fired here. The README said "Package 0.4.0" for two
+  // delivered slices after 0.4.0 was tagged. Nothing failed, because the two
+  // places that state the version had nothing comparing them.
+  //
+  // That is this repo's own recurring class: one property computed in two places
+  // with no check between them. The remedy is the cheap one — read both and
+  // compare — because the expensive part was never the check, it was noticing.
+  const readme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
+  const shipped = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8")).version;
+
+  const stated = readme.match(/^Package (\d+\.\d+\.\d+)\./m);
+  assert.ok(stated, "the README no longer states a package version in the form `Package X.Y.Z.`");
+  assert.equal(stated[1], shipped,
+    `the README says Package ${stated[1]} but package.json ships ${shipped} — ` +
+    `the front door is making a claim about the repo that the repo does not support`);
+});
+
+// NOT GUARDED, DELIBERATELY, AND THE ATTEMPT IS WORTH RECORDING. The other half
+// of the same staleness was the README advertising focus and the change signal as
+// "not in the SDK yet" after both shipped — the front door telling a reader the
+// truth backwards. A guard for it was written and then REMOVED, because it could
+// only ask whether the section MENTIONS a primitive, and the honest section
+// mentions focus while explaining why agent-drives-the-app was split from it. It
+// failed on correct content the first time it was run against it.
+//
+// That is a checker misfiring on the DESCRIPTION of the property it checks, which
+// this repository has already ruled is worse than no checker: it fails toward
+// looking-like-a-finding, and the fix a reader reaches for is to reword honest
+// prose until the tool stops complaining.
+//
+// The mechanical half — a version number stated in two places — is checked above
+// because it is structure. Whether a paragraph's claims are true is what a
+// reviewer is for, and pretending otherwise would be the kind of decoration that
+// gets counted as evidence.
+
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
 });

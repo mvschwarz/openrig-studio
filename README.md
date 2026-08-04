@@ -59,8 +59,10 @@ the contract. Then: `contract/manifest.md` shows how a surface registers,
 `contract/runtime-api.md` the HTTP verbs and their exact shapes. If you want the
 surface to stay fresh without losing the user's work, `contract/change-signal.md`
 covers markers, the difference between data changing and code changing, and state
-that survives a reload — it is opt-in, and a surface that skips it is unaffected.
-A running runtime self-describes at `GET /api/contract`.
+that survives a reload. If you want an agent to know what the user is looking at,
+`contract/focus.md` covers the record, the verb that reads it, and addressing
+state inside a surface. Both are opt-in, and a surface that skips them is
+unaffected. A running runtime self-describes at `GET /api/contract`.
 
 The reference runtime is fixture-backed: its API verbs serve data from
 `fixtures/`, so everything works on any machine with no external processes.
@@ -69,11 +71,62 @@ watch a live-updating surface work.
 
 ## Status
 
-Package 0.4.0. Contract v0.1 — unchanged, because everything below is additive
+Package 0.5.0. Contract v0.1 — unchanged, because everything below is additive
 or a behaviour fix, and the contract version only moves on a breaking change.
 Pre-release.
 
-### What is in 0.4.0
+### What is new in 0.5.0
+
+**The change signal.** A surface can stay fresh without losing what the user was
+doing. The runtime mints an opaque, monotonic **marker**; a consumer polls it with
+`?since=` and compares only for equality. The marker is the contract and the
+transport is not — `/api/events` is an optional accelerant and a surface that only
+polls is fully conformant. A **code** change is keyed on the runtime's process
+identity (`runtime.boot`) rather than a file timestamp, because a studio copies
+surfaces at boot and an edited source file has not reached the browser until a
+restart.
+
+State that survives the reload is **declared, not hand-rolled**: a surface row
+carries `preserve: [...]` naming what to keep, and the runtime's helper does the
+capturing and restoring. The app says what, not how. The standard adapter binds
+`scroll`, `form` and `playhead` to real DOM, verified in a browser by a reviewer
+who did not write it. When the signal is unhealthy the surface **says so** instead
+of showing stale data that still looks live. `create-studio` emits all of this, so
+a new surface inherits it rather than reimplementing it.
+
+**Focus — what the user is looking at.** `GET /api/focus` answers the same
+change-signal shape, so an agent polls it with the primitive it already has. The
+read is the point: the record existed before this release and nothing off the box
+could get at it, so consumers opened the file directly. A write updates the fields
+it **names** and leaves the rest, because whole-record replacement was a measured
+defect — one writer blanked the view context another had just set. `selection` is
+carried as its own surface means it, with no universal schema imposed, and the
+record names the surface so a consumer that does not understand a given selection
+can say so rather than misread it. `readAddress` / `writeAddress` put a surface's
+own state in the URL hash — the shell owns the query, the surface owns the hash —
+so a link restores a view instead of merely describing one.
+
+**What these two do NOT promise**, taken from the conformance tables rather than
+summarised more kindly:
+
+- **Playback `resume` is not guaranteed, and not on first visit.** Browsers gate
+  programmatic `play()` behind their autoplay policy. The position is restored and
+  the clip stays paused under the default policy. Muting to win the policy check is
+  explicitly not the answer — it trades one broken promise for another.
+- **Restoring before first paint holds only when the restore is called from a
+  deferred module script.** It is a property of the call site, not of the adapter.
+- **The standard adapter does not handle `selection`, by decision.** It means four
+  different things across real applications; a generic adapter would be right for
+  one and silently wrong for the rest, so the declaring surface supplies that kind.
+- **`by` is caller-declared here.** The reference runtime is single-process and
+  loopback and has no identity for its caller. A runtime that has one MUST override
+  it — do not build a trust decision on `by` without knowing which produced it.
+- **No surface in this repository addresses its own state yet.** None has view
+  state worth addressing; the shell hosts and the starter renders a fixture. The
+  helper is contract and tested, and the first real application is what will
+  exercise it.
+
+### What arrived in 0.4.0
 
 **The agent panel is real.** Its roster is the rig this studio belongs to, not
 every seat on the machine, and a studio may declare its own roster instead — an
@@ -97,15 +150,25 @@ refuses a port held by anything else rather than verifying against a stranger,
 survives a host where `systemctl` exists but no user manager is reachable, and
 binds the root kinds an app actually declared.
 
-### What is NOT in 0.4.0
+### What is NOT in 0.5.0
 
-**The three agent primitives are not in the SDK yet:**
+**agent-drives-the-app — the agent operating the surface — is not in the SDK, and
+it is deferred rather than missing.**
 
-- **focus** — the agent seeing what the user is looking at
-- **agent-drives-the-app** — the agent operating the surface
-- **minimal-refresh** — the surface updating without the user noticing
+The other two primitives were shippable because they are the same kind of thing: a
+value a consumer **reads**. A marker and a focus record travel over HTTP, mean the
+same to any consumer, and cost a surface nothing to ignore. Driving a surface is
+not that. It needs a live bidirectional channel into a running page, and the hard
+parts are the ones a hasty version gets wrong: what a surface answers when it is
+asked to do something it cannot do right now (a refusal that carries the current
+state is useful; a bare rejection is not), and how deep into a page a driver may
+reach before the channel is really just a promise about someone's DOM.
 
-Working versions of all three exist in applications built on this SDK, which is
-not the same as the SDK offering them. Until they land here, an app that wants
-them builds them itself, and two apps will do it differently. That is the gap
-this line exists to name.
+Those are a different problem from reading a value, so bundling them with focus
+would have shipped the channel half-specified — and a half-specified channel is
+harder to correct than an absent one, because applications build on it. It is
+queued as its own slice.
+
+Working versions exist in applications built on this SDK, which is not the same as
+the SDK offering it. Until it lands here, an app that wants it builds its own, and
+two apps will do it differently. That is the gap this line exists to name.
