@@ -83,7 +83,16 @@ else
     run "$SUDO apt-get update -qq"
     run "$SUDO apt-get install -y -qq curl ca-certificates git"
     # NodeSource: Ubuntu's own node is too old on every LTS that matters.
-    run "curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | $SUDO -E bash -"
+    # NOT `| $SUDO -E bash -`: as root SUDO is EMPTY, so that expands to
+    # `| -E bash -` and the shell tries to execute `-E`. This broke node
+    # installation on every fresh VPS, where root is the normal case — and the
+    # dry-run printed the broken line without anyone noticing, because reading
+    # `|  -E bash -` does not look wrong until you run it.
+    if [ -n "$SUDO" ]; then
+      run "curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | $SUDO -E bash -"
+    else
+      run "curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash -"
+    fi
     run "$SUDO apt-get install -y -qq nodejs"
   else
     # Rootless fallback. Leaves node only in this user's shell — the systemd
