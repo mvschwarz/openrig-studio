@@ -145,6 +145,35 @@ test("a VIEW change with an UNCHANGED selection is reported as a change", async 
 test("an unchanged record reports changed:false — so the marker is not always-moving", async (t) => {
   // The positive control for the case above. A marker that changed on every read
   // would satisfy it while making the signal useless.
+  //
+  // ⚠️ THIS CASE IS A PAIR WITH THE ZERO-CONFIG ONE AT THE BOTTOM OF THIS FILE.
+  // DO NOT "SIMPLIFY" THEM DOWN TO ONE. The other case looks like a near-duplicate
+  // of this one and is not: it sleeps before its second read, and that sleep is
+  // load-bearing against a whole class of regression neither case names directly.
+  //
+  // Suppose the marker were rebuilt on WALL-CLOCK TIME instead of a sequence.
+  // Whether an unchanged-record case notices depends entirely on how much time
+  // passes between its two reads versus the clock's granularity — so this one,
+  // which reads twice back to back, is a WEAKER DETECTOR than one that waits
+  // first. Measured here against two clock granularities: at millisecond
+  // resolution both cases caught it on every run, because a read-to-read pair
+  // spans several milliseconds on this host; at second resolution THIS case never
+  // caught it and the sleeping one still did, part of the time.
+  //
+  // The numbers are host- and plant-specific and are deliberately not written
+  // down as a property. THE INVARIANT IS THE ORDERING: the case that waits is
+  // never a worse detector than the case that does not, and is sometimes strictly
+  // better. That is why the pair is kept and why dropping the sleeping one is the
+  // dangerous direction.
+  //
+  // None of this makes either case FLAKY. Against the marker this runtime actually
+  // ships — `${BOOT_ID}.${seq}`, which moves only when a write increments the
+  // sequence — neither has any timing dependence at all. The intermittency belongs
+  // to the hypothetical defect, not to the tests.
+  //
+  // They also cover different halves on their own terms: this one proves an
+  // unchanged record AFTER A REAL WRITE does not move the marker; the other proves
+  // a runtime nobody has ever written to does not drift on its own.
   const s = await start();
   t.after(() => s.stop());
 
@@ -186,6 +215,43 @@ test("at is server-set; a caller cannot dictate when focus last changed", async 
 
   assert.notEqual(at, "1999-01-01T00:00:00.000Z", "the caller's timestamp was accepted");
   assert.ok(Date.now() - Date.parse(at) < 60_000, `at is not a fresh server timestamp: ${at}`);
+});
+
+test("by is CALLER-DECLARED in this runtime — the documented downgrade, pinned", async (t) => {
+  // `by` had the most careful documentation in this slice and the least test
+  // protection: a review planted it as SERVER-SET and every focus test still
+  // passed. That is a claim with no control behind it, not a latent bug — and the
+  // distinction matters, because a server-set `by` is CORRECT for a runtime that
+  // has a real identity for its caller. focus.md says such a runtime MUST override
+  // it.
+  //
+  // THIS runtime is single-process and loopback and has no identity to override
+  // with, so it records what it was told, and the conformance table says so in
+  // those words. What this control pins is that honest downgrade: if the runtime
+  // ever starts inventing attribution, the contract's "caller-declared" row has
+  // silently become false and a consumer reading `by` is being misled about how
+  // much the value is worth.
+  //
+  // Asserted against DISTINCT declared values, which is what makes it fail against
+  // a constant. A single value could be satisfied by a runtime that hardcodes that
+  // same string, and a plant is exactly a hardcoded string.
+  const s = await start();
+  t.after(() => s.stop());
+
+  await s.write({ surface: "canvas", selection: ["shape-7"], by: "agent-alpha" });
+  assert.equal((await s.read()).focus.by, "agent-alpha",
+    "the caller's declared attribution was not recorded — this runtime has no identity to replace it with");
+
+  await s.write({ view: { page: 3 }, by: "human-at-the-keyboard" });
+  assert.equal((await s.read()).focus.by, "human-at-the-keyboard",
+    "a second writer's attribution did not land — `by` is not tracking the caller");
+
+  // ...and the absent case is NULL rather than an invented identity. A runtime
+  // that filled this in would be manufacturing attribution, which is worse than
+  // reporting none: a consumer cannot tell a fabricated actor from a real one.
+  await s.write({ note: "no by field on this write" });
+  assert.equal((await s.read()).focus.by, null,
+    "a write that declared no actor produced an actor anyway");
 });
 
 test("a malformed write is refused by name rather than silently ignored", async (t) => {
