@@ -242,8 +242,32 @@ fi
 # away a working studio over the way it gets restarted. Degrade loudly instead:
 # start it directly so the box is usable and verifiable, and say plainly that
 # persistence is NOT configured rather than letting a green run imply it is.
+# HAVE_SYSTEMD MEANS "A USER MANAGER IS REACHABLE", NOT "THE BINARY EXISTS".
+#
+# It used to mean the second, which is not the question anyone is asking. On a
+# host where systemctl is installed but nothing is running it — a container with
+# the package, or `systemctl --user` as root over SSH with no session bus, which
+# is review-r1's Nit 4 — every --user call fails with "Failed to connect to bus",
+# and the FIRST one on this branch is `daemon-reload` through a bare eval under
+# `set -euo pipefail`. So the run died after a fully successful install, which is
+# the failure this branch was rewritten to remove: the fix removed one abort and
+# left the one above it.
+#
+# Measured before changing it, in a container: stock image has no systemctl at
+# all; `apt-get install systemd` yields a systemctl whose every --user call exits
+# 1 on the bus. Two different hosts, one flag, opposite correct behaviour.
+#
+# show-environment is a read-only query that needs the bus, so it answers the
+# real question without touching anything.
+SYSTEMCTL_PRESENT=0
+SYSTEMD_WHY=""
+command -v systemctl >/dev/null 2>&1 && SYSTEMCTL_PRESENT=1
 HAVE_SYSTEMD=0
-command -v systemctl >/dev/null 2>&1 && HAVE_SYSTEMD=1
+if [ "$SYSTEMCTL_PRESENT" = 1 ]; then
+  if SYSTEMD_WHY="$(systemctl --user show-environment 2>&1 >/dev/null)"; then
+    HAVE_SYSTEMD=1
+  fi
+fi
 
 # WHO OWNS THE PORT — asked once, used by both branches below.
 #
@@ -314,7 +338,20 @@ if [ "$HAVE_SYSTEMD" = 1 ]; then
     run "systemctl --user enable --now openrig-studio.service"
   fi
 else
-  warn "NO INIT SYSTEM on this host (no systemctl). The studio will NOT survive a reboot."
+  # REPORT WHICH of the two conditions this is. They are different facts and an
+  # operator can act on the difference: a host with no init system is a container
+  # or a minimal image and there is nothing to fix, whereas systemctl-present-
+  # but-unreachable usually means no session bus or no linger, and IS fixable.
+  # Saying only "no init system" on the second would send someone to install
+  # something that is already installed.
+  if [ "$SYSTEMCTL_PRESENT" = 1 ]; then
+    warn "systemctl IS installed but NO USER MANAGER IS REACHABLE, so no unit can be enabled here."
+    warn "  reason: ${SYSTEMD_WHY:-systemctl --user could not be queried}"
+    warn "  usually a missing session bus (a --user call as root over SSH) or linger not enabled."
+    warn "The install has SUCCEEDED; this is not a reason to throw it away."
+  else
+    warn "NO INIT SYSTEM on this host (no systemctl). The studio will NOT survive a reboot."
+  fi
   warn "Starting it directly so the box is usable; persistence is NOT configured."
   if [ "$DRY_RUN" = 0 ]; then
     # Reuse what is already there. A blind relaunch dies on EADDRINUSE while the
@@ -332,7 +369,14 @@ fi
 
 # linger: without it the user manager dies at logout and the studio with it.
 if [ "$HAVE_SYSTEMD" = 0 ]; then
-  printf '  linger: not applicable without an init system\n'
+  # Two different reasons to skip, and the message says which. Enabling linger is
+  # one of the things that would FIX an unreachable manager, so reporting it as
+  # "not applicable" on that host would be wrong in the direction that hides a fix.
+  if [ "$SYSTEMCTL_PRESENT" = 1 ]; then
+    printf '  linger: skipped — no user manager is reachable, so there is nothing to keep alive\n'
+  else
+    printf '  linger: not applicable without an init system\n'
+  fi
 elif loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then
   printf '  linger already enabled\n'
 elif [ -n "$SUDO" ] || [ "$(id -u)" -eq 0 ]; then
