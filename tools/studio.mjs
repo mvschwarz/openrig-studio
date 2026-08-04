@@ -309,8 +309,8 @@ const STATE_DIR = path.join(path.dirname(rail.surfacesOut), "state");
 let stateClaimed = false;
 // Providers are node; a seat terminal is not. Same child tracking so it dies
 // with the studio rather than outliving it and holding a port.
-const spawnRaw = (label, cmd, args) => {
-  const c = spawn(cmd, args, { stdio: "inherit" });
+const spawnRaw = (label, cmd, args, env) => {
+  const c = spawn(cmd, args, { stdio: "inherit", env: { ...process.env, ...env } });
   c.on("error", (e) => console.error(`studio: ${label} could not start — ${e.message}`));
   c.on("exit", (code) => { if (code) console.error(`studio: ${label} exited ${code}`); });
   children.push(c);
@@ -417,7 +417,13 @@ if (seatPort) {
     "-t", "fontFamily=SF Mono, Menlo, ui-monospace, monospace",
     "-t", `theme=${THEME}`,
     "bash", script,
-  ]);
+  ], {
+    // The attach script authorizes against THIS FILE — the same composed
+    // manifest the shell is served from, not a second query that ought to
+    // agree with it. ?arg is caller-controlled, so the sidebar narrowing is a
+    // suggestion and this is the boundary.
+    OPENRIG_STUDIO_SEATS: path.join(rail.surfacesOut, "surfaces.json"),
+  });
   console.log(`  terminal: seats attachable on ${seatPort}`);
 }
 

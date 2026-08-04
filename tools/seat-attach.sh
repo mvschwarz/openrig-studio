@@ -19,34 +19,47 @@
 # SIZING: attach through a per-connection GROUPED session so each viewer gets
 # its own size. A single small attached client otherwise clamps everyone.
 #
-# WHAT CHANGED IN THE PORT, and it is the fix the original asked for: the
-# allowlist was a hardcoded list of seat names, which made the file
-# box-specific and had to be kept in sync by hand with the roster the sidebar
-# renders. Two places deriving one property drift silently — you get a tile
-# for a seat that refuses to attach. The allowlist is now DERIVED from the
-# live rig, so the roster and the allowlist cannot disagree: if it is not a
-# seat on this box right now, it does not attach.
+# THE ALLOWLIST IS THE ROSTER — THE SAME FILE, NOT A SECOND DERIVATION.
+#
+# It was a hardcoded list once, then `rig ps --nodes -A`, i.e. every seat on the
+# machine. Both were wrong in the same way, and the second was worse because it
+# LOOKED derived: once the launcher narrowed the sidebar to one rig, this file
+# still authorized against the whole box, so a caller could ask for
+# /chat/?arg=<seat-in-another-rig> and pass the check. The browser only SUGGESTS
+# a roster; ?arg is caller-controlled. A UI filter is not an authorization
+# boundary, and the comment that used to sit here claimed the two could not
+# disagree — which stopped being true the moment the sidebar was scoped and
+# nothing here changed.
+#
+# So authorization now reads the COMPOSED OVERLAY MANIFEST that the shell is
+# served from. Not a parallel query that ought to agree — the same artifact.
+# Fails closed: no path, no file, no roster, no attach.
 set -u
 SEAT="${1:-}"
 [ -n "$SEAT" ] || { echo "no seat requested"; exit 1; }
 
-# Derived allowlist. Never an arbitrary tmux attach: the seat must be a live
-# node on this box's rig. Failing closed is deliberate — if the rig cannot be
-# asked, nothing attaches.
-if ! command -v rig >/dev/null 2>&1; then
-  echo "no rig on this box, so there is no roster to attach to"; exit 1
+# The studio tells us where its composed roster is. Unset means this script was
+# invoked outside a studio, which is not a case to be permissive about.
+ROSTER="${OPENRIG_STUDIO_SEATS:-}"
+if [ -z "$ROSTER" ] || [ ! -f "$ROSTER" ]; then
+  echo "no composed roster available, so nothing is authorized to attach"; exit 1
 fi
-if ! rig ps --nodes -A --json 2>/dev/null \
-  | python3 -c '
+if ! python3 -c '
 import json,sys
-want = sys.argv[1]
-try: d = json.load(sys.stdin)
-except Exception: sys.exit(1)
-nodes = d if isinstance(d, list) else d.get("nodes", [])
-names = {n.get("canonicalSessionName") or f'"'"'{n.get("logicalId")}@{n.get("rigName")}'"'"' for n in nodes}
-sys.exit(0 if want in names else 1)
-' "$SEAT"; then
-  echo "seat is not on this box's live roster: $SEAT"; exit 1
+want, path = sys.argv[1], sys.argv[2]
+try:
+    seats = json.load(open(path)).get("chatSeats")
+except Exception:
+    sys.exit(1)
+# A roster that is missing or malformed authorizes NOTHING. An empty roster is a
+# valid declaration meaning this studio has no seats, and it authorizes nothing
+# either — both fail closed, for different reasons that do not need separating
+# here.
+if not isinstance(seats, list):
+    sys.exit(1)
+sys.exit(0 if want in {s.get("seat") for s in seats if isinstance(s, dict)} else 1)
+' "$SEAT" "$ROSTER"; then
+  echo "seat is not on this studio's roster: $SEAT"; exit 1
 fi
 
 # Prune orphaned viewer groups: a viewer session whose group no longer holds a
