@@ -129,6 +129,45 @@ test("the emitted surface ADOPTS the runtime helper and can show a degraded stat
   assert.match(html, /onDegraded/, "the surface imports the helper but never asks to be told about failure");
 });
 
+test("the emitted README documents the primitives the emitted PAGE already uses", () => {
+  // FOUND IN A COLD BUILD. The generated project's own README pointed at four
+  // contract documents and never mentioned focus.md or drive.md — while the page
+  // beside it already called driveSurface. A stranger reading their own generated
+  // code found a helper their own README did not document.
+  const dir = tmp();
+  assert.equal(run(["my-surface", "--dir", dir]).code, 0);
+  const { html, readme } = emitted(dir, "my-surface");
+
+  // Keyed on what the PAGE actually imports, so this cannot drift into a fixed
+  // list that stops matching the code it describes.
+  const imported = (html.match(/import \{([^}]*)\} from "\/signal\.js"/) || [, ""])[1]
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  assert.ok(imported.length >= 2, `positive control: parsed ${imported.length} imports from the page`);
+
+  for (const fn of imported) {
+    assert.ok(readme.includes(fn),
+      `the emitted page imports ${fn} but the emitted README never mentions it — ` +
+      `the code does something the shipped docs do not explain`);
+  }
+  for (const doc of ["change-signal.md", "focus.md", "drive.md"]) {
+    assert.ok(readme.includes(doc), `the emitted README does not point at contract/${doc}`);
+  }
+});
+
+test("the emitted README names the file that was actually emitted", () => {
+  // The template's own filename leaked into the docs of every generated project:
+  // the README said `surface.html` while the emitted file is <name>.html, in a
+  // document where every other reference is correctly interpolated.
+  const dir = tmp();
+  assert.equal(run(["my-surface", "--dir", dir]).code, 0);
+  const { readme } = emitted(dir, "my-surface");
+
+  assert.ok(readme.includes("my-surface.html"), "the README never names the emitted page");
+  assert.ok(!/`surface\.html`/.test(readme),
+    "the emitted README refers to `surface.html`, which is the TEMPLATE's name and does not exist here");
+  assert.ok(!readme.includes("{{"), "an unreplaced template token reached the emitted README");
+});
+
 test("the emitted surface is AGENT-DRIVABLE out of the box", () => {
   // Same argument as the helper above, one primitive along. A drive channel the
   // SDK ships and no surface adopts is a channel every application reinvents

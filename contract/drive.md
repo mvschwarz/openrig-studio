@@ -75,6 +75,32 @@ stale intent **while looking perfectly healthy**. A surface that is behind and a
 surface that is current are indistinguishable to someone watching, which is what
 makes the queue version survive review.
 
+### Ops posted BEFORE a surface loaded are history, not instructions (stable)
+
+A surface adopts whatever generation is already there as its **baseline** on its
+first poll, and applies nothing. Only ops posted after it started listening are
+applied.
+
+This is stated because the other behaviour is what you get for free, and it is the
+more surprising one. The runtime keeps the last op indefinitely, so without a
+baseline every page that has never seen an op treats it as new: a reload re-runs
+it, a second tab runs it again, and opening the surface an hour later runs it once
+more. For a `select` that is harmless. For `play`, `export` or `delete` it is a
+side effect nobody asked for, arriving unbidden and repeatedly.
+
+Both readings are defensible, which is exactly why the surprising one must not be
+the silent default.
+
+**`resumeLatestOnLoad: true`** opts back in, for a surface whose ops are pure view
+state and which genuinely wants a fresh page to catch up to the latest intent.
+
+**The one race, stated rather than hidden:** an op posted in the window between a
+surface loading and its first poll being answered is treated as pre-existing and
+skipped. The window is one poll interval. It is the unavoidable cost of the
+surface being unable to distinguish an op posted moments before it existed from
+one posted an hour before, and it fails toward doing nothing rather than toward
+acting on stale intent.
+
 ### Applications are serialised (stable)
 
 A surface must not begin applying an op while another is still being applied. Two
@@ -121,6 +147,7 @@ feels driven and one that feels haunted.
 | `POST` / `GET /api/drive`, opaque ops, server-assigned `gen` | **yes**, in the reference runtime |
 | the change-signal `?since=` shape on the read | **yes** |
 | `driveSurface` dropping superseded ops | **yes**, with a control that plants a queue and fails |
+| not replaying ops that predate the surface, and `resumeLatestOnLoad` opting back in | **yes**, with controls on both directions — including that a post-load op still applies, so the baseline cannot be satisfied by a surface that stopped listening |
 | `driveSurface` serialising applications | **yes**, with a control that measures overlap directly |
 | the poll surviving a runtime that has gone away | **yes**, with a control |
 | **a surface REFUSING an op it cannot honour, and saying why** | **no, not yet.** The hard case: an agent asks for something the surface cannot do right now — sound a browser will not grant without a click, a file that is gone. A bare rejection is useless to a driver; a refusal must carry the current state so the agent can decide what to do instead. Specified nowhere yet, because a refusal shape invented before a real application needs one would be the wrong shape |

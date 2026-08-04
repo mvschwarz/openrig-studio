@@ -97,6 +97,48 @@ test("the README's stated package version is the version package.json ships", ()
     `the front door is making a claim about the repo that the repo does not support`);
 });
 
+test("no shipped doc hardcodes a package version — they go stale on release", () => {
+  // FOUND IN A COLD BUILD: the skill said "@openrig/studio is at 0.4.0" while the
+  // shipped package was 0.6.0, and a second stale 0.4.0 was hiding in
+  // shell-contract.md. Both were true when written. A package number in prose is
+  // a claim about the repo, so it goes stale ON RELEASE — the same shape as the
+  // README version this suite already guards, in the docs an agent is told to
+  // read FIRST.
+  //
+  // The README is the ONE place allowed to state it, because a guard keeps it
+  // honest. Everywhere else the remedy is not to update the number but to stop
+  // stating it: reference-not-restate. Two-part contract versions (0.1) are
+  // deliberately not matched — the contract version is stable and stating it is
+  // the whole point.
+  const roots = [path.join(REPO, "skills"), DIR];
+  const files = [];
+  const walk = (d) => {
+    for (const name of fs.readdirSync(d)) {
+      const full = path.join(d, name);
+      if (fs.statSync(full).isDirectory()) walk(full);
+      else if (name.endsWith(".md")) files.push(full);
+    }
+  };
+  for (const r of roots) if (fs.existsSync(r)) walk(r);
+
+  assert.ok(files.length >= 5,
+    `positive control: only ${files.length} docs found, so this guard is checking almost nothing`);
+
+  const offenders = [];
+  for (const f of files) {
+    fs.readFileSync(f, "utf8").split("\n").forEach((line, i) => {
+      // Strip IPv4 first — 127.0.0.1 contains a three-part run and is not a version.
+      for (const m of line.replace(/\b\d+\.\d+\.\d+\.\d+\b/g, "").matchAll(/\b\d+\.\d+\.\d+\b/g)) {
+        offenders.push(`${path.relative(REPO, f)}:${i + 1} — ${m[0]}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [],
+    `a shipped doc states a package version that will be wrong at the next release; ` +
+    `reference it (\`require('@openrig/studio/package.json').version\`) instead of restating it: ` +
+    offenders.join(", "));
+});
+
 // NOT GUARDED, DELIBERATELY, AND THE ATTEMPT IS WORTH RECORDING. The other half
 // of the same staleness was the README advertising focus and the change signal as
 // "not in the SDK yet" after both shipped — the front door telling a reader the

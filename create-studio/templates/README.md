@@ -15,7 +15,7 @@ Built against **contract v{{CONTRACT_VERSION}}**.
 
 | File | What it is |
 |---|---|
-| `surface.html` | The surface itself. One self-contained page — no build step, no dependencies. |
+| `{{ID}}.html` | The surface itself. One self-contained page — no build step, no dependencies. |
 | `surfaces.row.json` | The manifest row that registers this surface with a studio. |
 
 ## Register it
@@ -30,7 +30,7 @@ not copy anything into the SDK.
    ```
    surfaces/
      surfaces.json      the row below, in a { "surfaces": [ … ] } array
-     {{ID}}.html        this project's surface.html, renamed
+     {{ID}}.html        this project's surface page
    ```
 
    ```json
@@ -97,12 +97,34 @@ Read these four documents — they are enough to build a surface:
 
 Plus `contract/surface-row.schema.json` for the manifest row fields.
 
-When you want the surface to stay fresh without losing the user's work, read
-`contract/change-signal.md`: markers, the difference between DATA changing and
-CODE changing, and state that survives a reload. It is opt-in — the loop below
-already works without it.
+## The three agent primitives
 
-In `surface.html`, replace the body of `render()` with whatever your surface is
+This is what makes a studio surface different from a web page. All three are
+opt-in, and **two of them are already wired into the page you just generated.**
+
+| | read | already in `{{ID}}.html`? |
+|---|---|---|
+| **stay fresh** without losing the user's work — markers, DATA vs CODE, state that survives a reload | `contract/change-signal.md` | **yes** — `watchSignal`, plus the degraded banner |
+| **an agent sees what the user is looking at** — the focus record, and addressing state in the URL | `contract/focus.md` | no — a few lines, and the highest-value thing to add |
+| **an agent operates this surface** — it posts an op, your page follows | `contract/drive.md` | **yes** — `driveSurface`, handling `say` / `refresh` / `reload` |
+
+The drive adoption near the bottom of the page is where you add your own ops. An
+op is whatever *your* surface understands; the runtime never interprets it. Handle
+only what you can actually honour — a surface that accepts an op it does not
+perform reports success for something that did not happen.
+
+Try it against the running studio:
+
+```sh
+curl -X POST http://127.0.0.1:8890/api/drive \
+  -H 'content-type: application/json' \
+  -d '{"say":"driven from a terminal","refresh":true}'
+```
+
+Reporting focus is the one you add yourself — it is what lets an agent answer
+"what am I looking at?" rather than guess. See `contract/focus.md`.
+
+In `{{ID}}.html`, replace the body of `render()` with whatever your surface is
 for. The boot check, the change-signal loop and the failure handling around it
 are already correct — a normal surface should not need to change them.
 

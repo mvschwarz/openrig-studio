@@ -201,6 +201,60 @@ test("positive control: the harness CAN observe an overlap", async (t) => {
   assert.equal(maxConcurrent, 2, "the overlap detector cannot see concurrency, so the test above proves nothing");
 });
 
+test("an op posted BEFORE the surface loaded is not replayed", async (t) => {
+  // MEASURED IN A COLD BUILD: a brand-new page with no prior state applied an op
+  // that had been posted before it existed, and showed that op's narration on
+  // boot. Harmless for `select`; a side effect nobody asked for if the op is
+  // `play`, `export` or `delete`, firing again in every new tab.
+  const applied = [];
+  const d = driveSurface({
+    apply: (op) => { applied.push(op.gen); },
+    intervalMs: 5,
+    // The runtime keeps the last op forever, so a fresh surface always sees one.
+    fetchImpl: async () => ({ json: async () => ({ ok: true, changed: true, marker: "m1", op: { gen: 9, select: "x" } }) }),
+  });
+  t.after(() => d.stop());
+
+  await new Promise((r) => setTimeout(r, 40));
+  assert.deepEqual(applied, [], `an op that predates the surface was applied: ${applied.join(",")}`);
+  assert.equal(d.applied, 9, "the baseline was not adopted, so a later op could not be told from this one");
+});
+
+test("...but an op posted AFTER it loaded still applies — the baseline is not a mute button", async (t) => {
+  // The discriminating half. Without it, "nothing was replayed" passes just as
+  // happily against a surface that has stopped listening altogether, which would
+  // break the primitive while looking like the fix.
+  const applied = [];
+  let current = { gen: 9, select: "old" };
+  const d = driveSurface({
+    apply: (op) => { applied.push(op.select); },
+    intervalMs: 5,
+    fetchImpl: async () => ({ json: async () => ({ ok: true, changed: true, marker: "m", op: current }) }),
+  });
+  t.after(() => d.stop());
+
+  await new Promise((r) => setTimeout(r, 40));
+  assert.deepEqual(applied, [], "precondition: the pre-existing op must not have applied");
+
+  current = { gen: 10, select: "new" };            // the agent drives it NOW
+  await new Promise((r) => setTimeout(r, 40));
+  assert.deepEqual(applied, ["new"], "an op posted after load did not apply — the surface is deaf");
+});
+
+test("resumeLatestOnLoad opts back IN to catching up, for surfaces that want it", async (t) => {
+  const applied = [];
+  const d = driveSurface({
+    apply: (op) => { applied.push(op.select); },
+    intervalMs: 5,
+    resumeLatestOnLoad: true,
+    fetchImpl: async () => ({ json: async () => ({ ok: true, changed: true, marker: "m", op: { gen: 9, select: "x" } }) }),
+  });
+  t.after(() => d.stop());
+
+  await new Promise((r) => setTimeout(r, 40));
+  assert.deepEqual(applied, ["x"], "the opt-in did not resume the latest intent");
+});
+
 test("the poll survives the runtime going away", async (t) => {
   // A surface that stopped polling on the first failed request would need a manual
   // reload to become drivable again — the exact state this primitive removes.
@@ -230,6 +284,15 @@ test("end to end: an agent POSTs and an adopting surface applies it", async (t) 
     intervalMs: 20,
   });
   t.after(() => d.stop());
+
+  // Let the surface take its baseline before driving it. THE RACE THIS AVOIDS IS
+  // REAL AND IS DOCUMENTED IN drive.md, not a test artifact: an op posted in the
+  // window between a surface loading and its first poll answering is treated as
+  // pre-existing and skipped. The window is one poll interval, and it is the
+  // unavoidable cost of a surface being unable to tell an op posted 2ms before it
+  // existed from one posted an hour before. Racing it here would make the test
+  // flaky about a property it is not trying to measure.
+  await new Promise((r) => setTimeout(r, 60));
 
   await s.drive({ show: "take-3" });
   const deadline = Date.now() + 5000;

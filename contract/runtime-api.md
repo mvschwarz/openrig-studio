@@ -76,6 +76,13 @@ contents are unspecified in v0.1 and must not be parsed or switched on.
 - Reconnection is EventSource-native. Delivery is at-least-once-ish with no
   replay guarantee: after any reconnect, re-fetch once rather than assuming
   you missed nothing.
+- **AUTOMATING A STUDIO: `networkidle` NEVER SETTLES.** This stream stays open
+  for the life of the page, so any browser-automation wait that requires an idle
+  network — Playwright's `waitForLoadState("networkidle")` and its equivalents —
+  times out on every single page load. It is the most common wait there is, and
+  the symptom reads as a slow or broken studio rather than as a wait that cannot
+  succeed here. **Wait for an element, or for `domcontentloaded`, instead.** The
+  same applies to headless captures that settle on network quiet.
 
 ## files (read-only)
 

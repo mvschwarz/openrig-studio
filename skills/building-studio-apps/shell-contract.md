@@ -45,10 +45,11 @@ visible one.
 **Show degraded states in the UI, not the console.** When something is wrong it must *look*
 wrong. This is the same rule as `failure-modes.md` #4, stated by the contract itself.
 
-**The agent-sidebar roster, as of package 0.4.0.** This section previously said a
-consumer had no way to supply one and that the SDK's own fixture seat reached every install. That
-was true and is now fixed; the old text is replaced rather than annotated because it described a
-mechanism that no longer exists.
+**The agent-sidebar roster.** This section previously said a consumer had no way to supply one and
+that the SDK's own fixture seat reached every install. That was true and is now fixed; the old text
+is replaced rather than annotated because it described a mechanism that no longer exists. Ask a
+running studio what it actually does — `GET /api/contract` → `manifest.seats` reports the roster's
+`source` — rather than trusting a package number written down here.
 
 **What you get without doing anything:** if the studio belongs to a rig, the panel shows that
 rig's seats — the one it belongs to, not every seat on the machine — each carrying a `status`, so

@@ -40,14 +40,42 @@ Consequence worth internalising: a heavy app just runs your service, adds a row,
 3. **Make it work**, which is a different claim from step 2 and is where the time goes.
    → `providers-and-roots.md`, `failure-modes.md`
 
+## The three agent primitives
+
+**This is what makes a studio app different from a web page, and it is opt-in —
+a surface that adopts none of it still works.** Each is one import from
+`/signal.js`, which the runtime serves.
+
+| you want | read | you use |
+|---|---|---|
+| the surface to stay fresh without losing what the user was doing | `contract/change-signal.md` | `watchSignal`, `preserveDeclared` |
+| an agent to see what the user is looking at | `contract/focus.md` | `GET`/`POST /api/focus`, `readAddress`/`writeAddress` |
+| an agent to **operate** the surface the user has open | `contract/drive.md` | `driveSurface`, `POST /api/drive` |
+
+```js
+import { watchSignal, driveSurface } from "/signal.js";
+```
+
+**The scaffolder already wires the first and the third**, so a surface generated
+by `create-studio` is drivable and stays fresh before you write anything. Reporting
+focus is the one you add yourself — it is a few lines, and it is what lets an agent
+answer "what am I looking at?" instead of guessing.
+
+**Do not build your own version of any of these.** All three existed in
+applications before they existed in the SDK, which is precisely why they are in the
+SDK now: two apps solving this privately solve it two incompatible ways.
+
 ## Read next
 
 | file | read it when |
 |---|---|
 | `app-manifest.md` | writing `app.json`; declaring a provider, roots, or vendored assets |
-| `shell-contract.md` | your surface needs to talk to the shell — focus, navigation, the agent sidebar |
+| `shell-contract.md` | your surface needs to talk to the shell — navigation, the agent sidebar, the postMessage API |
 | `providers-and-roots.md` | your app needs a backend, files on disk, or a binary like ffmpeg |
 | `failure-modes.md` | **read this before you ship, not after.** Every entry is a real failure with the symptom you will actually see |
+
+The three contract documents in the table above are the other half of this list —
+they are in `contract/`, not here, because they are contract rather than advice.
 
 ## The rule that saves the most time
 
@@ -62,10 +90,19 @@ app also produces.
 
 ## Versions: the package and the contract move separately
 
-`@openrig/studio` is at **0.4.0**; the **contract is 0.1**. Those are different numbers on
-purpose and you will trip on it once. Additive changes — new fields, new routes, the
-consumer-surface seam — bump the package and leave `contractVersion` alone. A surface built on
-stable items of contract 0.1 keeps working across package minors.
+The package version and the **contract version** are different numbers on purpose and you will
+trip on it once. The contract is **0.1**; the package is well past that and still moving.
+Additive changes — new fields, new routes, the consumer-surface seam, the agent primitives — bump
+the package and leave `contractVersion` alone. A surface built on stable items of contract 0.1
+keeps working across package minors.
+
+**The package number is deliberately not written here.** It moves every release, a number in prose
+goes stale the moment it ships, and a doc that is confidently wrong about a version teaches the
+reader to distrust the rest of it. Read it from the thing itself:
+
+```sh
+node -p "require('@openrig/studio/package.json').version"   # or: cat <sdk>/package.json
+```
 
 **Check compatibility the documented way:** capabilities present + same contract *major*. An
 exact-match check on `contractVersion` is safe but over-strict and will refuse runtimes that are

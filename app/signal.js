@@ -377,11 +377,25 @@ export function deferWhileDirty(isDirty, apply) {
 // held as `next` rather than started concurrently — two overlapping applications
 // interleave their writes and land the surface in a state neither op described.
 // Whatever arrives during a flight, only the LAST one runs when it lands.
+// OPS POSTED BEFORE THIS SURFACE LOADED ARE HISTORY, NOT INSTRUCTIONS. On its
+// first poll a surface adopts whatever generation is already there as a baseline
+// and applies nothing. Without this, the runtime keeps the last op forever and
+// every never-seen-it page treats it as new — so a reload, or a second tab, or
+// opening the surface an hour later, silently re-runs it.
+//
+// For `select` that is harmless and arguably nice. For `play`, `export` or
+// `delete` it is a side effect nobody asked for, firing unbidden in every new
+// tab. Both readings are defensible, which is exactly why the SURPRISING one must
+// not be the silent default.
+//
+// `resumeLatestOnLoad: true` opts into the other behaviour for surfaces whose ops
+// are pure view state and which genuinely want a fresh page to catch up.
 export function driveSurface({
   apply,
   fetchImpl = fetch,
   endpoint = "/api/drive",
   intervalMs = 350,
+  resumeLatestOnLoad = false,
   onError = () => {},
 } = {}) {
   if (typeof apply !== "function") throw new TypeError("driveSurface needs an apply(op) function");
@@ -389,6 +403,7 @@ export function driveSurface({
   let marker = null;      // last marker seen, so `?since=` can be honest
   let seen = 0;           // highest generation already applied
   let next = null;        // newest op that arrived while one was being applied
+  let baselined = false;  // has the first poll established what counts as "already there"?
   let flying = false;
   let stopped = false;
   let timer = null;
@@ -425,6 +440,11 @@ export function driveSurface({
       const r = await (await fetchImpl(url, { cache: "no-store" })).json();
       if (r && r.ok) {
         marker = r.marker ?? marker;
+        // The baseline is taken from the FIRST answer, before anything is applied.
+        if (!baselined) {
+          baselined = true;
+          if (!resumeLatestOnLoad && r.op && typeof r.op.gen === "number") seen = r.op.gen;
+        }
         if (r.changed && r.op) offer(r.op);
       }
     } catch (e) {
