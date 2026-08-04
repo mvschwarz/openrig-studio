@@ -2,14 +2,14 @@
 //
 //   node --test 'test/*.test.mjs'
 //
-// Slice 04's proof contract, items 3-5, plus the three MUST-FIX boundaries
-// sdk-qa reproduced against the first candidate. Two of those three were cases
-// my own controls could not have caught, and the reason is recorded on each:
+// The reuse/refusal cases, plus the three boundaries a review found in the first
+// version of this. Two of those three were cases the original controls could not
+// have caught, and the reason is recorded on each:
 //
-//   * every server in my first pass answered 200 at /api/contract, so a foreign
+//   * every server in the first pass answered 200 at /api/contract, so a foreign
 //     listener answering 404 — classified "nothing", launched into, verified
 //     against — was outside the shape of the whole harness;
-//   * every path in my first pass was already canonical, so the exact-string
+//   * every path in the first pass was already canonical, so the exact-string
 //     compare looked correct against four servers while trailing slashes,
 //     relative paths and symlinks all deterministically refused.
 //
@@ -85,10 +85,10 @@ test("a server answering with something that is not JSON at all is refused", () 
   assert.match(d.reason, /did not return JSON/);
 });
 
-// ---------------------------------------------- MUST-FIX 3: impostor shapes
+// ------------------------------------------------------- impostor shapes
 
 test("minimal JSON carrying the expected dir is NOT accepted as a studio", () => {
-  // sdk-qa's first impostor, reproduced verbatim. The earlier validator asked
+  // The first impostor, reproduced verbatim. The earlier validator asked
   // only for a string contractVersion and a truthy manifest, so three keys and
   // the right path were enough to be adopted.
   const d = reuseDecision({
@@ -125,10 +125,10 @@ test("a studio that does not advertise contract.meta is refused", () => {
   assert.match(d.reason, /contract\.meta/);
 });
 
-// -------------------------------------------- MUST-FIX 2: path equivalence
+// ------------------------------------------------------ path equivalence
 
 test("ordinary spellings of the SAME directory all reuse", (t) => {
-  // sdk-qa's table. `STUDIO_DIR=./studio` and a trailing slash are supported
+  // The alias table. `STUDIO_DIR=./studio` and a trailing slash are supported
   // input, not exotic — and each of them turned an idempotent rerun into exit 5
   // after a successful install. realpath proves the aliases really are the same
   // target, so a failure here is the comparison, not the fixture.
@@ -171,10 +171,10 @@ test("canonical() leaves a non-existent path comparable instead of throwing", ()
   assert.equal(canonical(p), path.resolve(p));
 });
 
-// ------------------------- MUST-FIX 1: only a missing listener is "nothing"
+// -------------------------------- only a missing listener is "nothing"
 
 test("a listener answering 404 at /api/contract is FOREIGN, never nothing", async (t) => {
-  // sdk-qa's live control, and the failure it caught: `curl -f` reports a
+  // The live control, and the failure it caught: `curl -f` reports a
   // refused connection and an HTTP 404 identically, so the shell classified an
   // occupied port as empty, launched into it, and the verifier then passed
   // against the foreign server. Every server in my own first pass answered 200,

@@ -88,8 +88,8 @@ if (declared && !composed) {
 // used to say the two "check the same live rig" and therefore a tile could
 // never exist for a seat that refuses to attach — retired mechanism, and false
 // twice over, because a configured member that is not running is on the roster
-// and cannot be attached to. Second stale comment sdk-qa has caught in this
-// pair; both were true when written and made false by an edit elsewhere.
+// and cannot be attached to. Second stale comment caught in this pair; both
+// were true when written and made false by an edit elsewhere.
 //
 // No rig is a normal state, not an error: the roster is simply absent and the
 // shell says so. A studio need not be attached to a rig; it must know whether

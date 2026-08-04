@@ -2,16 +2,16 @@
 // Decide whether a studio already answering on a port is THIS studio.
 //
 // The provisioner used to ask only whether something answered `/api/contract`
-// and treat any success as "mine". review-r1 measured that a server returning a
-// body which is not a studio contract satisfies that check, and that two genuine
-// studios are indistinguishable by contractVersion, runtime and capabilities.
+// and treat any success as "mine". Measured: a server returning a body which is
+// not a studio contract at all satisfies that check, and two genuine studios are
+// indistinguishable by contractVersion, runtime and capabilities alone.
 //
 // The failure that produces is not a broken install, it is a GREEN one: with a
 // sibling studio already on the port, the provisioner reuses it, never starts the
 // studio it just installed, and the verifier then passes against the sibling's
 // surfaces. Wrong, and reported as success.
 //
-// THE PROBE LIVES HERE TOO, and that is the correction from sdk-qa's first pass.
+// THE PROBE LIVES HERE TOO, and that is the correction from the first review pass.
 // The classification was written in shell, where `curl -f` reports a refused
 // connection and an HTTP 404 with the same failure — so a foreign listener that
 // answered 404 at `/api/contract` was classified "nothing", launched into, and
@@ -67,7 +67,7 @@ export function reuseDecision({ body, expectedDir }) {
   // ESTABLISH THAT THIS IS A STUDIO BEFORE ASKING WHICH STUDIO IT IS. The first
   // version checked only that `contractVersion` was a string and `manifest` was
   // truthy, so a hand-written object carrying nothing but the expected `dir` was
-  // accepted as a studio — sdk-qa reproduced it with two three-key impostors.
+  // accepted as a studio — reproduced with two three-key impostors.
   // The checks below are the ones contract-meta.md tells every consumer to make
   // (capability present + same major), plus the runtime identity: this caller
   // installed THIS SDK's runtime, so it may require that runtime by name rather
@@ -101,7 +101,7 @@ export function reuseDecision({ body, expectedDir }) {
 
 // TCP FIRST, and only a missing listener may be "nothing".
 //
-// This is the whole of sdk-qa's MUST-FIX 1: `curl -f` cannot tell a refused
+// This is the whole of it: `curl -f` cannot tell a refused
 // connection from an HTTP 404, so a foreign server answering 404 at
 // /api/contract read as an empty port. Anything holding the port that does not
 // prove itself is foreign, because launching into it fails and verifying against

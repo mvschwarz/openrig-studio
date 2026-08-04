@@ -3,7 +3,7 @@
 //   node --test 'test/*.test.mjs'
 //
 // `?arg=<seat>` is caller-controlled. The sidebar only SUGGESTS a roster, so
-// narrowing what the shell renders is not a boundary — sdk-qa demonstrated that
+// narrowing what the shell renders is not a boundary — a two-rig inventory showed that
 // after the launcher was scoped to one rig, the attach script still authorized
 // against `rig ps --nodes -A`, and a seat belonging to a DIFFERENT rig passed
 // the allowlist and failed only later at tmux resolution.
@@ -39,7 +39,7 @@ const attach = (seat, seatsPath) => spawnSync("bash", [SCRIPT, seat], {
 const ONE_RIG = { chatSeats: [{ seat: "a-impl@rig-one", name: "a.impl", status: "running" }] };
 
 test("a seat from ANOTHER rig is refused at the roster boundary", () => {
-  // sdk-qa's exact discriminator. Before this it passed the allowlist.
+  // The discriminating case. Before this it passed the allowlist.
   const r = attach("b-impl@rig-two", roster(ONE_RIG));
   assert.match(r.stdout, /not on this studio's roster/,
     `a foreign seat got past authorization: ${r.stdout}`);

@@ -13,7 +13,7 @@
 //     runtime fell through to the package document and a real box showed the
 //     SDK's invented `studio-lead@fixture` seat.
 //
-// Precedence is presence-based, per the founder ruling and sdk-qa's spike: an
+// Precedence is presence-based: an
 // explicit declaration wins entire, otherwise the rig the studio belongs to
 // supplies it, and there is NO fallback to the package fixture on a consumer
 // boot. An empty declaration is a declaration — "this app ships without seats" —

@@ -5,7 +5,7 @@
 // the defect it fixes could not be tested from in there, and the house rule is
 // that a fix of this class ships with a control that would have caught it.
 //
-// THE DEFECT (measured by review-r1, not hypothesised). The provisioner used to
+// THE DEFECT (measured, not hypothesised). The provisioner used to
 // collect kinds into a space-separated string and then loop over it UNQUOTED, so
 // the shell word-split AND pathname-globbed names that came out of somebody
 // else's manifest:

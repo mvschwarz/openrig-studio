@@ -2,7 +2,7 @@
 //
 //   node --test 'test/*.test.mjs'
 //
-// Every case below is one of review-r1's measured defeating inputs, or a
+// Every case below is one of the measured defeating inputs, or a
 // neighbour of one found while fixing them. They are PLANTED CONTROLS: each is
 // written so that the previous implementation — kinds collected into a
 // space-separated string and consumed by an unquoted `for k in $ROOT_KINDS` —

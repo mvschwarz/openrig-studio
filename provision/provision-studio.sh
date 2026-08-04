@@ -52,7 +52,7 @@ APPS="${APPS:-}"
 read -ra APP_LIST <<< "$APPS"   # may be empty here; filled after the clone
 DRY_RUN=0
 # NOT `[ ... ] && DRY_RUN=1` — but the reason is narrower than this comment used
-# to claim, and review-r1 measured it. A failing `&&`-tail does NOT trip `set -e`
+# to claim, and it was measured. A failing `&&`-tail does NOT trip `set -e`
 # mid-script; execution continues. It bites only in FINAL-COMMAND position, where
 # the list's status becomes the script's exit status. The `if` below is still the
 # right shape for a value the whole run depends on, and it costs nothing — but
@@ -247,7 +247,7 @@ fi
 # It used to mean the second, which is not the question anyone is asking. On a
 # host where systemctl is installed but nothing is running it — a container with
 # the package, or `systemctl --user` as root over SSH with no session bus, which
-# is review-r1's Nit 4 — every --user call fails with "Failed to connect to bus",
+# is the classic no-session-bus case — every --user call fails with "Failed to connect to bus",
 # and the FIRST one on this branch is `daemon-reload` through a bare eval under
 # `set -euo pipefail`. So the run died after a fully successful install, which is
 # the failure this branch was rewritten to remove: the fix removed one abort and
