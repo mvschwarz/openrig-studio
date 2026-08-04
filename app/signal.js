@@ -106,13 +106,35 @@ export function watchSignal({
 //
 // The bar, from the app that got it right: "a reload that loses your work is one
 // you learn to dread; this one should read as a flicker."
-export function preserveAcross(key, { capture, restore, say = () => {} } = {}) {
+// WHEN you call this is part of the contract, and it is the kind of requirement
+// that fails silently: a restore that lands AFTER first paint still restores, so
+// it passes every functional check while the user watches an empty view fill in
+// — the thing "smooth" is defined against. Measured in a browser: called from a
+// deferred module script the restore lands ~40ms before first contentful paint;
+// called from window.onload or after an await it lands after it.
+//
+// The helper cannot fix the call site, so it reports it. readyState "complete"
+// means the load event has fired and paint is definitely behind us. Warned, not
+// refused — the state still comes back, because a late restore beats none.
+//
+// HONEST LIMIT: this catches the definite case, not every late one. An await
+// inside a deferred script can land after a paint while readyState is still
+// "interactive", and nothing here sees that.
+const calledAfterPaint = () => globalThis.document?.readyState === "complete";
+
+export function preserveAcross(key, { capture, restore, say = () => {}, onLate } = {}) {
   const slot = `openrig.preserve.${key}`;
   let restored = false;
 
   try {
     const raw = sessionStorage.getItem(slot);
     if (raw !== null) {
+      if (calledAfterPaint()) {
+        const warn = "preserveAcross ran after the load event, so the restore lands AFTER first " +
+          "paint and the user sees the un-restored view first. Call it from a deferred module " +
+          "script — see contract/change-signal.md.";
+        if (onLate) onLate(warn); else globalThis.console?.warn?.(warn);
+      }
       sessionStorage.removeItem(slot);   // one-shot: a stale slot must not resurrect
       restore?.(JSON.parse(raw));
       restored = true;

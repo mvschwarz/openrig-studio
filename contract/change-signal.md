@@ -165,6 +165,26 @@ For a surface declaring `preserve`, a CODE reload must:
 3. **say the state was kept** — deliberately, once, and not as an error;
 4. discard nothing the human had uncommitted in order to achieve it.
 
+### Point 2 is a requirement on YOUR CALL SITE, not only on the helper (stable)
+
+**Call the restore from a deferred module script.** The helper restores
+synchronously at the moment it is called and schedules nothing, so *when* you
+call it decides whether point 2 holds.
+
+Measured in a browser: from a deferred module script the restore lands roughly
+40ms ahead of first contentful paint. From `window.onload`, or after an `await`,
+it lands **after** it — and a late restore still restores, so it passes every
+functional check while the user watches the un-restored view appear first. That
+is exactly the failure "smooth" is defined against, and nothing about it looks
+like a failure.
+
+The helper reports the definite case: if it runs once `document.readyState` is
+`complete`, it warns that the restore is late. It **warns rather than refuses**,
+because a late restore beats none. It cannot catch every case — an `await` inside
+a deferred script can land after a paint while `readyState` is still
+`interactive` — so the requirement above is the contract and the warning is a
+convenience.
+
 Point 3 is not decoration. A restore that silently succeeds after a reload the
 user did not expect makes the reload invisible, and an unexplained reload is
 exactly the thing a user learns to distrust. Saying it once keeps the reload
@@ -267,7 +287,10 @@ defect this repository has already paid for twice.
 | `signals` in `provider.json`, carried through composition | **yes** — documented in `app-manifest.md`, carried by the composer, and a `signals.verbs` entry the provider does not answer is warned |
 | `preserve` accepted as contract on a surface row and carried to the shell | **yes** — schema and runtime validation kept in step by a committed test |
 | the helper reading `preserve` from the row and driving capture/restore from it | **yes** — `declaredKinds` + `preserveDeclared`, with controls |
-| `standardAdapter` binding `scroll`, `form` and `playhead` to real DOM | **WRITTEN, NOT YET VERIFIED.** The code exists and its RULES are under control — which kinds it claims, and which fields it refuses. Its DOM behaviour has not been exercised in a browser, and a test runner cannot exercise it. **Do not cite the code as evidence it works; this row flips on a browser pass, not on the code landing.** |
+| `standardAdapter` binding `scroll` and `form` to real DOM | **yes** — verified in a browser by an independent reviewer, including that a password carrying a real value at capture appears nowhere in `sessionStorage`, and that the preserve slot is one-shot |
+| `standardAdapter` restoring a `playhead` POSITION | **yes** — verified in a browser, restored before first paint |
+| `standardAdapter` RESUMING playback | **not guaranteed, and not on first visit** — browsers gate programmatic `play()` behind their autoplay policy. Verified under both: with the policy relaxed the clip resumes and plays through; under the default it restores to the right frame and stays **paused**, with the rejected promise swallowed so the rest of the restore is unaffected. **This is a stated outcome, not a gap and not a TODO.** Chrome permits autoplay on engaged origins, so "never resumes" would be wrong — headless is the strictest case, and that nuance is READ rather than measured here. **Muting to win the policy check is explicitly not the answer**: it trades one broken promise for another |
+| the restore landing before first paint | **yes, WHEN CALLED FROM A DEFERRED MODULE SCRIPT** — measured at roughly 40ms of headroom. It is a property of the call site, not of the adapter; see the requirement above |
 | `standardAdapter` handling `selection` | **no, by decision.** Across the surveyed applications `selection` means asset names, opaque canvas shape ids, absolute file paths and timeline slot ids — four types sharing only the word. A generic adapter picking one would be right for a single app and silently wrong for the rest, so `supports("selection")` is false, the declaring surface is told, and a surface that knows what its selection IS supplies that kind itself |
 
 Rows here are measured against the shipped tools rather than recalled. A row that

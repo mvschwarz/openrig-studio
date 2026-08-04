@@ -259,6 +259,61 @@ test("preserveDeclared THROWS without an adapter rather than preserving nothing 
   assert.throws(() => preserveDeclared("demo", ["scroll"], {}), /needs an adapter/);
 });
 
+// ------------------------------------------------- the call-site requirement
+
+function withReadyState(state, fn) {
+  const had = Object.hasOwn(globalThis, "document");
+  const prev = globalThis.document;
+  globalThis.document = { readyState: state };
+  try { return fn(); } finally { if (had) globalThis.document = prev; else delete globalThis.document; }
+}
+
+test("restoring after the load event is REPORTED — the state still comes back, but late is named", () => {
+  // Measured in a browser: from a deferred module script the restore lands ~40ms
+  // before first contentful paint; from window.onload it lands after it. A late
+  // restore passes every functional check while the user watches the un-restored
+  // view first, which is precisely what "smooth" is defined against. The helper
+  // cannot fix the call site, so it says so.
+  withSessionStorage(() => {
+    withReadyState("complete", () => {
+      const late = [];
+      let got = null;
+      preserveAcross("demo", { capture: () => ({ n: 1 }) }).keep();
+      const r = preserveAcross("demo", { restore: (s) => { got = s; }, onLate: (m) => late.push(m) });
+
+      assert.equal(late.length, 1, "a restore after the load event was not reported");
+      assert.match(late[0], /after first paint|AFTER first paint/);
+      assert.equal(r.restored, true, "the warning must not cost the restore — warn, do not refuse");
+      assert.deepEqual(got, { n: 1 });
+    });
+  });
+});
+
+test("restoring from the DEFERRED window is not reported — or the warning would be noise", () => {
+  // The positive control. A check that fired on every call would satisfy the
+  // test above and train an author to ignore it, which is how a warning dies.
+  withSessionStorage(() => {
+    withReadyState("interactive", () => {
+      const late = [];
+      preserveAcross("demo", { capture: () => ({ n: 1 }) }).keep();
+      preserveAcross("demo", { restore: () => {}, onLate: (m) => late.push(m) });
+      assert.deepEqual(late, [], "the correct call site was warned at");
+    });
+  });
+});
+
+test("with no document at all the helper neither warns nor throws", () => {
+  // It runs in a test runner and in a browser; the timing check must not make
+  // the first one fail.
+  withSessionStorage(() => {
+    const late = [];
+    preserveAcross("demo", { capture: () => ({ n: 1 }) }).keep();
+    const r = preserveAcross("demo", { restore: () => {}, onLate: (m) => late.push(m) });
+    assert.deepEqual(late, []);
+    assert.equal(r.restored, true);
+  });
+});
+
 // -------------------------------------------- the standard adapter's RULES
 //
 // ⚠️ SCOPE, STATED SO THESE ARE NOT MISREAD AS MORE THAN THEY ARE. The DOM
