@@ -64,7 +64,14 @@ if ((rail.refusals ?? []).length) {
 // A door is not an app: declared-but-absent is a BROKEN INSTALL, not an empty
 // studio, and it must not come up looking healthy.
 const declared = (config.apps ?? []).length;
-const composed = rail.rows.filter((r) => !(config.doors ?? []).some((d) => d.id === r.id)).length;
+// Counts rows that came from an APP. A door is box composition and so are the
+// studio's own surfaces, so neither may satisfy this guard — otherwise a studio
+// with a surface of its own would come up looking healthy while every app it
+// declared failed to compose, which is the exact camouflage the check exists to
+// remove.
+const ownIds = new Set(rail.ownSurfaceIds ?? []);
+const composed = rail.rows.filter((r) =>
+  !(config.doors ?? []).some((d) => d.id === r.id) && !ownIds.has(r.id)).length;
 if (declared && !composed) {
   console.error(`studio: ${declared} app(s) enabled and NONE composed. Refusing to start and look healthy.`);
   process.exit(1);

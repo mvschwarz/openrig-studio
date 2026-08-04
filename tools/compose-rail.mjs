@@ -103,6 +103,7 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
   // verb -> { required, by: [appId] }. Provider-agnostic by design: an app says
   // WHAT it needs, the box works out WHO answers it.
   const calls = new Map();
+  const ownSurfaceIds = [];
   const available = availableProviders(appsRoot);
 
   for (const id of enabled) {
@@ -273,11 +274,42 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
     }
   }
 
+  // ---- the studio's OWN surfaces ---------------------------------------------
+  // A studio is allowed to have surfaces of its own, declared in its own
+  // surfaces.json beside its pages, without packaging them as installable apps.
+  // That is what `create-studio` scaffolds and what a developer writes first.
+  //
+  // Without this the composer built the rail from installed apps alone, so a
+  // freshly scaffolded studio booted through this path served an empty rail and
+  // 404'd the page it had just been given — while the same studio served it
+  // correctly when pointed at the runtime directly. Two documented paths, two
+  // different answers, and the one the scaffolder recommends for a fuller
+  // studio was the broken one.
+  const ownManifest = path.join(STUDIO_ROOT, "surfaces.json");
+  if (fs.existsSync(ownManifest)) {
+    let own = [];
+    try { own = readJson(ownManifest).surfaces ?? []; }
+    catch (e) { refusals.push(`studio surfaces.json is not valid JSON: ${e.message}`); }
+    for (const row of own) {
+      if (!row?.path) { rows.push({ ...row }); continue; }   // a url row needs no page
+      const file = path.basename(row.path);
+      const src = path.join(STUDIO_ROOT, file);
+      if (!fs.existsSync(src)) {
+        missing.push(`studio surface "${row.id}": page missing (${file} not in the studio directory)`);
+        continue;
+      }
+      fs.copyFileSync(src, path.join(surfacesOut, file));
+      rows.push({ ...row });
+      ownSurfaceIds.push(row.id);
+      log(`${row.id} — this studio's own surface`);
+    }
+  }
+
   // External doors are BOX composition, not apps: services the box does not own
   // and does not install, hung on the rail by absolute URL. Vault-shaped.
   for (const d of doors) rows.push({ ...d });
 
-  return { rows, providers, providerRuns, missing, warnings, refusals, calls, surfacesOut, vendorOut };
+  return { rows, providers, providerRuns, missing, warnings, refusals, calls, ownSurfaceIds, surfacesOut, vendorOut };
 }
 
 // Write the overlay manifest the SDK reads. chatSeats is RUNTIME state — a live

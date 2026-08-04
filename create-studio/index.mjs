@@ -162,6 +162,13 @@ function main() {
       port: 8890, apps: [], appsRoot: "./apps",
     }, null, 2) + "\n",
     "surfaces.row.json": rowJson,
+    // `.runtime/` is composed at boot and MUST NOT be committed. It is rebuilt
+    // every start, and it carries live box state — the seat roster among it,
+    // which on a machine running rigs is every seat on that machine. A studio
+    // scaffolded without this ignore hands the developer a file full of real
+    // identities the first time they run `git add -A`. The composer's design
+    // has always called this directory gitignored; nothing was emitting it.
+    ".gitignore": ".runtime/\n",
     "README.md": render(read("README.md"), { ...vars, ROW_INLINE: rowInline }),
   };
 

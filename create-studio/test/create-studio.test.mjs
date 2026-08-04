@@ -68,7 +68,7 @@ test("emits a runnable project and reports success", () => {
   const r = run(["my-surface", "--dir", dir]);
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(fs.readdirSync(path.join(dir, "my-surface")).sort(),
-    ["README.md", "my-surface.html", "studio.json", "surfaces.json", "surfaces.row.json"]);
+    [".gitignore", "README.md", "my-surface.html", "studio.json", "surfaces.json", "surfaces.row.json"]);
   assert.match(r.stdout, /created/);
 });
 
@@ -268,7 +268,7 @@ test("the packed tarball exposes a working bin through npm's own resolution", { 
     { cwd: out, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
   assert.deepEqual(fs.readdirSync(path.join(out, "packed-check")).sort(),
-    ["README.md", "packed-check.html", "studio.json", "surfaces.json", "surfaces.row.json"]);
+    [".gitignore", "README.md", "packed-check.html", "studio.json", "surfaces.json", "surfaces.row.json"]);
   JSON.parse(fs.readFileSync(path.join(out, "packed-check", "surfaces.row.json"), "utf8"));
 });
 
