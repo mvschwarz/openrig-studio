@@ -62,7 +62,7 @@ app also produces.
 
 ## Versions: the package and the contract move separately
 
-`@openrig/studio` is at **0.3.0**; the **contract is 0.1**. Those are different numbers on
+`@openrig/studio` is at **0.4.0**; the **contract is 0.1**. Those are different numbers on
 purpose and you will trip on it once. Additive changes — new fields, new routes, the
 consumer-surface seam — bump the package and leave `contractVersion` alone. A surface built on
 stable items of contract 0.1 keeps working across package minors.

@@ -45,37 +45,32 @@ visible one.
 **Show degraded states in the UI, not the console.** When something is wrong it must *look*
 wrong. This is the same rule as `failure-modes.md` #4, stated by the contract itself.
 
-**`chatSeats` had no consumer path at contract v0.1.** The runtime merges `surfaces[]` from a
-consumer overlay and passes the rest of the document through, so a consumer's declared seat
-roster was ignored and every install showed the SDK's own fixture seat in the agent sidebar.
-Verify what your box actually serves before trusting the roster in that panel; a consumer front
-that owns the origin can compose the real roster onto `/surfaces.json` itself. **Re-check
-whether this is still true on your contract version** rather than assuming either way.
+**The agent-sidebar roster, as of package 0.4.0.** This section previously said a
+consumer had no way to supply one and that the SDK's own fixture seat reached every install. That
+was true and is now fixed; the old text is replaced rather than annotated because it described a
+mechanism that no longer exists.
 
-> **[producer] Answering that re-check, as of package `0.3.0` / contract `0.1`: STILL TRUE, and
-> here is the mechanism so you can confirm it yourself rather than trust this line.**
-> `/surfaces.json` is served as `{ ...packageDocument, surfaces: <merged rows> }` — the package
-> document spread with only `surfaces` overridden. **The overlay document is never spread**, so
-> overlay `chatSeats` is read by nothing and the package's fixture roster reaches every install.
->
-> **The part that will cost you time: it fails silently.** Putting `chatSeats` in your overlay is
-> the obvious move — it mirrors exactly how you register surfaces — and it produces no warning,
-> no error, and nothing at `/api/contract`. A plausible path that does nothing.
->
-> This is a known defect with a ruled fix pending, not a design intent. The likely shape is that
-> the package roster stops leaking into consumer installs and `/api/contract` starts declaring
-> that seats are package-sourced and **not** overlay-merged — so the obvious attempt hits a
-> visible signal instead of silence. **Check `/api/contract` on your version before assuming
-> either behaviour.**
->
-> One correction to the workaround above: composing the roster onto `/surfaces.json` yourself
-> works only if **you own the origin** — i.e. your own front serves that path. Under the SDK
-> runtime you do not, so there is no consumer-side fix on this version; the honest move is to
-> treat the sidebar roster as unreliable and say so in your UI rather than paper over it.
->
-> The fixture seat **is labelled**: the sidebar renders it beside an explicit note that the
-> reference runtime has no live seat backing. Wrong for a real box, but it is a labelled fixture,
-> not a silent lie — do not report it as one.
+**What you get without doing anything:** if the studio belongs to a rig, the panel shows that
+rig's seats — the one it belongs to, not every seat on the machine — each carrying a `status`, so
+a configured agent that is not running stays listed rather than vanishing. If there is no rig, the
+panel is honestly empty. It never falls back to the SDK's example seat.
+
+**To supply your own roster,** declare `chatSeats` in your own `surfaces.json`. That declaration
+wins entire, and an EMPTY array is a declaration too — "this studio ships without seats" — not an
+absence. There is no merging: a roster is a statement about who is actually there, and a
+half-invented one is worse than either half.
+
+**Which rig, when it is not obvious:** declared in `studio.json` beats the managed session the
+studio was started from, which beats the only rig on the box. Several rigs and nothing declared is
+reported as ambiguous with the candidates named — it will not union them or pick the first.
+
+**Check `GET /api/contract` → `manifest.seats`** for `{ count, source, attachable }`. `source` is
+the field that matters: `"package"` while you have an overlay configured means your declaration
+did not take.
+
+**Terminal attach is authorized against the served roster**, not against the machine. The seat name
+travels in the URL and is caller-controlled, so what the sidebar renders is a suggestion — the
+boundary is the composed manifest the shell is served from, and a seat outside it does not attach.
 
 **The fixture floor is fiction by design.** The SDK ships a `factory-state.json` describing an
 invented rig, rendered under a live-activity header with a green dot. Correct as an SDK

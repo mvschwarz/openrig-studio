@@ -55,4 +55,43 @@ watch a live-updating surface work.
 
 ## Status
 
-Contract v0.1. Pre-release.
+Package 0.4.0. Contract v0.1 — unchanged, because everything below is additive
+or a behaviour fix, and the contract version only moves on a breaking change.
+Pre-release.
+
+### What is in 0.4.0
+
+**The agent panel is real.** Its roster is the rig this studio belongs to, not
+every seat on the machine, and a studio may declare its own roster instead — an
+empty declaration included, which means "this studio ships without seats" rather
+than "nothing was configured". A studio with no rig shows an honest empty panel;
+it no longer falls through to the SDK's own example seat. Seats carry their
+status, so a configured agent that is not running stays visible instead of the
+panel silently shrinking.
+
+**Terminal attach is authorized against the roster the shell is actually served**
+— the same file, not a second lookup that ought to agree. The seat name in the
+URL is caller-controlled, so a narrowed sidebar was never the boundary.
+
+**`GET /api/contract` documents `manifest.consumer` field by field**, including
+`dir`, which is what tells one studio from another on a box running several. The
+drift guard now descends into that block, so a field cannot ship there
+undocumented again.
+
+**Provisioning** reuses a studio only when it is the one this run installed,
+refuses a port held by anything else rather than verifying against a stranger,
+survives a host where `systemctl` exists but no user manager is reachable, and
+binds the root kinds an app actually declared.
+
+### What is NOT in 0.4.0
+
+**The three agent primitives are not in the SDK yet:**
+
+- **focus** — the agent seeing what the user is looking at
+- **agent-drives-the-app** — the agent operating the surface
+- **minimal-refresh** — the surface updating without the user noticing
+
+Working versions of all three exist in applications built on this SDK, which is
+not the same as the SDK offering them. Until they land here, an app that wants
+them builds them itself, and two apps will do it differently. That is the gap
+this line exists to name.
