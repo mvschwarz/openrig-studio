@@ -321,7 +321,11 @@ export function writeOverlayManifest({ surfacesOut, rows, chatSeats, chatLocalPo
     _note: "COMPOSED AT BOOT from installed apps + box doors. Do not edit — edit the app's app.json or studio.config.json.",
     surfaces: rows,
   };
-  if (chatSeats?.length) doc.chatSeats = chatSeats;
+  // Array.isArray, not `.length`: an EMPTY roster is a declaration — "this studio
+  // has no seats" — and omitting the key made the runtime fall through to the
+  // PACKAGE document, which is how the SDK's invented fixture seat reached real
+  // boxes. Writing [] is what makes an honest empty sidebar possible.
+  if (Array.isArray(chatSeats)) doc.chatSeats = chatSeats;
   // The endpoint travels WITH the roster or the tiles are decorative. Omitted
   // deliberately when no terminal can be served, so the shell reports
   // listed-but-not-attachable instead of failing on click.

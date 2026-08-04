@@ -23,6 +23,7 @@ import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { composeRail, writeOverlayManifest } from "./compose-rail.mjs";
+import { resolveRoster, resolveRig, DECLARED } from "./seat-roster.mjs";
 
 const STUDIO = path.resolve(process.env.OPENRIG_STUDIO_DIR || process.cwd());
 const cfgPath = path.join(STUDIO, "studio.json");
@@ -91,22 +92,46 @@ if (declared && !composed) {
 // shell says so. A studio need not be attached to a rig; it must know whether
 // it is.
 //
-// FLEET-WIDE (-A) is required, not optional. Outside a managed session the CLI
-// has no current rig to default to and exits non-zero with "no target" — so a
-// bare invocation fails on precisely the boxes this runs on, while working on
-// a developer machine that happens to be inside a session — so the failure is
-// invisible where it is written and certain where it is deployed.
-function liveSeats() {
+// PRECEDENCE, and it replaces a fleet-wide union. This used to run
+// `rig ps --nodes -A` and put EVERY node on the box into the sidebar — measured
+// here: 92 across 12 rigs, of which 53 running, 25 detached and 14 exited, all
+// printed as "live". It also passed that roster unconditionally, so a studio's
+// own declared `chatSeats` was discarded and the two documented boot paths
+// disagreed about the same studio. Resolution rules live in tools/seat-roster.mjs
+// so their cases are testable without a rig.
+const rigNodes = (args) => {
   try {
-    const raw = execFileSync("rig", ["ps", "--nodes", "-A", "--json"], { encoding: "utf8", timeout: 6000, stdio: ["ignore", "pipe", "ignore"] });
+    const raw = execFileSync("rig", ["ps", "--nodes", ...args, "--json"], { encoding: "utf8", timeout: 6000, stdio: ["ignore", "pipe", "ignore"] });
     const d = JSON.parse(raw);
-    const nodes = Array.isArray(d) ? d : d.nodes ?? [];
-    return nodes
-      .map((n) => ({ seat: n.canonicalSessionName || `${n.logicalId}@${n.rigName}`, name: n.logicalId || n.canonicalSessionName }))
-      .filter((s) => s.seat && !s.seat.includes("undefined"));
+    return Array.isArray(d) ? d : d.nodes ?? [];
   } catch { return []; }
-}
-const seatRoster = liveSeats();
+};
+const whoamiRig = (() => {
+  try {
+    const raw = execFileSync("rig", ["whoami", "--json"], { encoding: "utf8", timeout: 6000, stdio: ["ignore", "pipe", "ignore"] });
+    return JSON.parse(raw)?.identity?.rigName ?? null;
+  } catch { return null; }
+})();
+// The studio's OWN surfaces.json may declare the roster, and that declaration
+// wins entire — including an empty one, which means "this app ships without
+// seats" rather than "nothing was declared".
+const declaredSeats = (() => {
+  const f = path.join(STUDIO, "surfaces.json");
+  if (!fs.existsSync(f)) return undefined;
+  try { return JSON.parse(fs.readFileSync(f, "utf8")).chatSeats; } catch { return undefined; }
+})();
+const { rig: seatRig, why: rigWhy } = resolveRig({
+  declaredRig: config.rig,
+  whoamiRig,
+  rigsOnBox: rigNodes(["-A"]).map((n) => n.rigName).filter(Boolean),
+});
+const roster = resolveRoster({
+  declared: declaredSeats,
+  nodes: seatRig ? rigNodes(["--rig", seatRig]) : [],
+  rig: seatRig,
+  ambiguity: rigWhy,
+});
+const seatRoster = roster.seats;
 // A terminal endpoint is only advertised when one can actually be served.
 // Advertising it without the binary would put clickable tiles in front of a
 // user and fail on click; omitting it makes the shell say "listed, not
@@ -127,11 +152,13 @@ writeOverlayManifest({
   ...(config.welcome ? { welcome: config.welcome } : {}),
   ...(config.primaryRig ? { primaryRig: config.primaryRig } : {}),
 });
-if (seatRoster.length) {
-  console.log(`  seats   : ${seatRoster.length} live${seatPort ? ` · terminals on ${seatPort}` : " · NO ttyd on this box, so seats are listed but not attachable"}`);
-} else {
-  console.log("  seats   : none — no rig on this box, so the agent sidebar will say so rather than show a fixture");
-}
+// Report WHERE the roster came from, not just how many. "N live" was wrong on
+// both counts: it called detached and exited nodes live, and it never said the
+// set was the whole box rather than this studio's rig.
+console.log(`  seats   : ${roster.note} [${roster.source}]${
+  seatRoster.length && !seatPort ? " · NO ttyd on this box, so seats are listed but not attachable" :
+  seatPort ? ` · terminals on ${seatPort}` : ""}`);
+if (roster.source !== DECLARED && !seatRig) console.log(`            ${rigWhy}`);
 
 // ---- ports: assigned by the box, guarded before anything binds -------------
 const sdkPort = port + 1;
