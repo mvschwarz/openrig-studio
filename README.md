@@ -71,11 +71,36 @@ watch a live-updating surface work.
 
 ## Status
 
-Package 0.5.0. Contract v0.1 — unchanged, because everything below is additive
+Package 0.6.0. Contract v0.1 — unchanged, because everything below is additive
 or a behaviour fix, and the contract version only moves on a breaking change.
 Pre-release.
 
-### What is new in 0.5.0
+**All three agent primitives are now in the SDK.** An agent can see what changed,
+see what the user is looking at, and operate the surface they have open.
+
+### What is new in 0.6.0
+
+**Agent-drives-the-app.** The third primitive, and the one that changes what an
+agent is: it can now operate the surface the user already has open instead of
+describing what should happen next. An agent `POST`s an **op** carrying intent,
+the open page follows, and a line of narration rides along so a watcher sees a
+narrated change rather than controls twitching by themselves.
+
+Two properties carry the design. It is a **generation counter, not a queue** — the
+surface applies the newest op and discards everything superseded, because a queue
+lets a slow page fall behind and then act on instructions that were true minutes
+ago, looking perfectly healthy the whole time. And an op is **opaque intent, never
+DOM operations**: "show take 3", not "click the third button". A driver that
+reached into markup would break on any re-layout and would force every drivable
+surface to freeze its DOM as an interface it never agreed to publish.
+
+**Every scaffolded surface is drivable the moment it is generated** — the channel
+is only worth shipping if surfaces actually adopt it, and the scaffolder is where
+that happens once for everyone rather than app by app.
+
+See `contract/drive.md`.
+
+### What arrived in 0.5.0
 
 **The change signal.** A surface can stay fresh without losing what the user was
 doing. The runtime mints an opaque, monotonic **marker**; a consumer polls it with
@@ -150,23 +175,7 @@ refuses a port held by anything else rather than verifying against a stranger,
 survives a host where `systemctl` exists but no user manager is reachable, and
 binds the root kinds an app actually declared.
 
-**Agent-drives-the-app.** The third primitive, and the one that changes what an
-agent is: it can now operate the surface the user already has open instead of
-describing what should happen next. An agent `POST`s an **op** carrying intent,
-the open page follows, and a line of narration rides along so a watcher sees a
-narrated change rather than controls twitching by themselves.
-
-Two properties carry the design. It is a **generation counter, not a queue** — the
-surface applies the newest op and discards everything superseded, because a queue
-lets a slow page fall behind and then act on instructions that were true minutes
-ago, looking perfectly healthy the whole time. And an op is **opaque intent, never
-DOM operations**: "show take 3", not "click the third button". A driver that
-reached into markup would break on any re-layout and would force every drivable
-surface to freeze its DOM as an interface it never agreed to publish.
-
-See `contract/drive.md`.
-
-### What is NOT in 0.5.0
+### What is NOT in 0.6.0
 
 **A surface refusing an op it cannot honour, and saying why.** An agent will ask
 for things a surface cannot do right now — sound a browser will not grant without a
@@ -176,8 +185,16 @@ That shape is not specified yet, deliberately: invented before a real applicatio
 needs one, it would be the wrong shape, and a half-specified refusal is harder to
 correct than an absent one because drivers build on it.
 
-**A surface in this repository that is actually drivable.** The shell hosts and the
-starter renders a fixture; neither has anything worth driving. The helper and its
-rules are contract and tested, and the application that proved the mechanism lives
-outside this repository. The first real drivable surface here is what will exercise
-it.
+Until it exists, a driver learns what happened by **observing the surface** — read
+`/api/focus` back, or watch whatever the surface reports — rather than by trusting
+that a `200` on the op means the thing occurred. Accepting an op and honouring it
+are two different claims, and today only the first one is answered.
+
+**A rich vocabulary in the starter.** The scaffolded surface honours `say`,
+`refresh` and `reload`, because those are what it can actually do. A starter
+advertising more would report success for things it does not perform, which is
+worse than offering less. Real vocabularies belong to real surfaces.
+
+**The SDK's own FLOOR surface is not drivable**, and neither is the shell. They
+render fixture state and have nothing worth driving; the drivable surface this
+repository ships is the one the scaffolder emits.
