@@ -2,8 +2,15 @@
 # provision-studio.sh — bare host -> working OpenRig Studio, in one command.
 #
 # STATUS: the INSTALL below is proven on a real box. The HOST BOOTSTRAP (step 1)
-# has never run on a machine without node/npm/git — that is the one unproven
-# link. Nothing here has provisioned a VPS.
+# is now proven too — against a stock ubuntu:24.04 container carrying no node,
+# npm or git. That was the first execution of the bootstrap branch, and it is
+# what surfaced the defects since fixed here; every earlier host already had
+# node, so the branch had always been skipped and nothing had ever exercised it.
+#
+# A CONTAINER IS NOT A VPS, and holding that line is this header's job: nothing
+# here has provisioned real hosting, and persistence across a reboot is still
+# untested. The container had no init system, so the systemd path went
+# unexercised and the direct-start degrade is what actually ran.
 #
 # The full assessment of what is proven versus untested is tracked separately
 # and is not part of this repo. The script ships; the assessment does not.
