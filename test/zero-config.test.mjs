@@ -86,11 +86,25 @@ async function boot(dir) {
 }
 
 // The commit that introduced the helper; its parent is "before any of this".
+//
+// `--diff-filter=A` also matches a RENAME, so if app/signal.js is ever moved this
+// resolves to the rename commit and the baseline silently walks forward — a
+// weaker comparison that still passes, which is the family of defect this whole
+// file keeps meeting. So the property is ASSERTED rather than trusted: whatever
+// commit this computes, the helper must not exist there. A walked-forward
+// baseline fails loudly instead of quietly comparing the runtime against itself.
 const BASELINE = (() => {
   const added = git("log", "--diff-filter=A", "--format=%H", "--", "app/signal.js");
   assert.ok(added, "cannot find the commit that added app/signal.js — this control needs history");
   return git("rev-parse", `${added.split("\n").pop()}^`);
 })();
+
+test("the baseline really is BEFORE the helper existed", () => {
+  const exists = spawnSync("git", ["cat-file", "-e", `${BASELINE}:app/signal.js`], { cwd: REPO });
+  assert.notEqual(exists.status, 0,
+    `app/signal.js already exists at the computed baseline ${BASELINE.slice(0, 8)} — the baseline ` +
+    `has walked forward (a rename would do this), so every comparison below is weaker than it looks`);
+});
 
 test("zero-config: the served rail and its bytes are unchanged from before the change signal", async (t) => {
   const before = await boot(fromHistory(BASELINE));
@@ -112,6 +126,19 @@ test("zero-config: the contract answer is additive — one field gained, none lo
 
   const b = await before.json("/api/contract");
   const a = await after.json("/api/contract");
+
+  // THE TOP-LEVEL KEY SET, and it was missing from the first version of this
+  // file. Everything below compared the version, the capabilities, the manifest
+  // keys and the runtime block — while a field added at the TOP level of
+  // /api/contract sailed through untouched. Measured on a throwaway clone: the
+  // runtime served an extra top-level key and this suite reported a clean pass.
+  //
+  // That is the exact shape named in this file's own rationale — `manifest.
+  // consumer` shipping undocumented — so the control did not cover the failure it
+  // was written to prevent. The pattern was already here, one block down, applied
+  // to `manifest` and not to the response itself.
+  assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(),
+    "the /api/contract response gained or lost a TOP-LEVEL field");
 
   assert.equal(a.contractVersion, b.contractVersion, "contractVersion moved for an additive change");
   assert.deepEqual(a.capabilities, b.capabilities, "the capability set changed");
