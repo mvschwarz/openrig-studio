@@ -51,9 +51,13 @@ APPS="${APPS:-}"
 # array removes the shell-dependency instead of documenting it.
 read -ra APP_LIST <<< "$APPS"   # may be empty here; filled after the clone
 DRY_RUN=0
-# NOT `[ ... ] && DRY_RUN=1`: under `set -e` a failing test as the final command
-# of an && list can terminate the script, so the no-args invocation would exit
-# silently instead of running.
+# NOT `[ ... ] && DRY_RUN=1` — but the reason is narrower than this comment used
+# to claim, and review-r1 measured it. A failing `&&`-tail does NOT trip `set -e`
+# mid-script; execution continues. It bites only in FINAL-COMMAND position, where
+# the list's status becomes the script's exit status. The `if` below is still the
+# right shape for a value the whole run depends on, and it costs nothing — but
+# the overstated version of this warning was being read as a general prohibition
+# on a construct this file uses correctly elsewhere.
 if [ "${1:-}" = "--dry-run" ]; then DRY_RUN=1; fi
 
 STEP=0
@@ -155,41 +159,26 @@ note "write studio.json"
 # gets $MEDIA_DIR/<kind>, created and reported as a GENERATED default so nobody
 # mistakes it for a considered choice.
 if [ "$DRY_RUN" = 0 ]; then
-  ROOT_KINDS="$("$NODE_BIN" -e '
-    const fs=require("fs"),path=require("path");
-    const base=process.argv[1], apps=process.argv.slice(2), kinds=new Set();
-    for (const a of apps) {
-      const f=path.join(base,a,"app.json");
-      if (!fs.existsSync(f)) continue;
-      const roots=(JSON.parse(fs.readFileSync(f,"utf8")).roots)||{};
-      for (const k of Object.keys(roots)) kinds.add(k);
-    }
-    process.stdout.write([...kinds].sort().join(" "));
-  ' "$STUDIO_DIR/apps/apps" "${APP_LIST[@]}")"
-  printf '  root kinds declared by these apps: %s\n' "${ROOT_KINDS:-<none>}"
-
-  ROOT_JSON=""
-  for k in $ROOT_KINDS; do
-    case "$k" in
-      media)   d="${MEDIA_DIR}" ;;
-      footage) d="${MEDIA_DIR}/footage" ;;
-      project) d="${MEDIA_DIR}/projects" ;;
-      canvas)  d="${MEDIA_DIR}/canvases" ;;
-      *)       d="${MEDIA_DIR}/${k}"; printf '  generated default binding for new root kind "%s" -> %s\n' "$k" "$d" ;;
-    esac
-    mkdir -p "$d"
-    ROOT_JSON="${ROOT_JSON}    \"${k}\": \"${d}\",\n"
-  done
-  ROOT_JSON="$(printf '%b' "$ROOT_JSON" | sed '$ s/,$//')"
+  # Kinds are resolved AND serialized by root-bindings.mjs, never looped over
+  # here. A shell loop over an unquoted $ROOT_KINDS word-splits AND pathname-
+  # globs names that came out of somebody else's manifest: "footage archive"
+  # bound two kinds nobody declared, and "zzz*" bound filenames from whatever
+  # directory the provisioner happened to run in. Both wrote VALID JSON, so the
+  # validator below could not see either. Structured data does not round-trip
+  # through the shell's word list — see that file and test/root-bindings.test.mjs,
+  # whose controls plant both defeating inputs.
+  BIND_MJS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/root-bindings.mjs"
+  # Piped from curl there is no sibling to find, so fall back to the clone made
+  # in step 2 — same repo, same commit as the studio about to run.
+  [ -f "$BIND_MJS" ] || BIND_MJS="$STUDIO_DIR/sdk/provision/root-bindings.mjs"
+  ROOTS_JSON="$("$NODE_BIN" "$BIND_MJS" "$STUDIO_DIR/apps/apps" "$MEDIA_DIR" "${APP_LIST[@]}")"
 
   cat > "$STUDIO_DIR/studio.json" <<JSON
 {
   "port": ${STUDIO_PORT},
   "appsRoot": "${STUDIO_DIR}/apps",
   "apps": [$(printf '"%s",' "${APP_LIST[@]}" | sed 's/,$//')],
-  "roots": {
-${ROOT_JSON}
-  }
+  "roots": ${ROOTS_JSON}
 }
 JSON
   "$NODE_BIN" -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$STUDIO_DIR/studio.json" \
