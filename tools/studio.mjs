@@ -82,11 +82,14 @@ if (declared && !composed) {
 // the app, on one screen. Its roster is RUNTIME state, so it is derived from
 // the live rig at boot and never written back into a source-controlled file.
 //
-// Deriving it is also what keeps the roster and the attach allowlist from
-// disagreeing: seat-attach.sh checks the same live rig, so a tile can never
-// exist for a seat that refuses to attach. Two places deriving one property
-// is the drift shape, and the studio this was ported from named that as its
-// own outstanding fix.
+// The roster and the attach allowlist are the SAME ARTIFACT, not two
+// derivations of one property: seat-attach.sh authorizes against the composed
+// manifest written below, handed to it as OPENRIG_STUDIO_SEATS. This comment
+// used to say the two "check the same live rig" and therefore a tile could
+// never exist for a seat that refuses to attach — retired mechanism, and false
+// twice over, because a configured member that is not running is on the roster
+// and cannot be attached to. Second stale comment sdk-qa has caught in this
+// pair; both were true when written and made false by an edit elsewhere.
 //
 // No rig is a normal state, not an error: the roster is simply absent and the
 // shell says so. A studio need not be attached to a rig; it must know whether
