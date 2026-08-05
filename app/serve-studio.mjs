@@ -700,6 +700,15 @@ function writeFocus(patch) {
 // its surface rather than universally.
 let driveOp = null;
 let driveSeq = 0;
+// HOW MANY TIMES A SURFACE HAS ACTUALLY POLLED. Not a declaration — an
+// observation. A runtime that has served ZERO drive reads since boot has nobody
+// listening, and it is the only party that can know that.
+//
+// The defect this exists for shipped and was found on a real box: an agent POSTed
+// an op to a hand-built surface that had never adopted the helper, got
+// { ok: true, gen: 2 }, and nothing happened. The agent did everything right. A
+// runtime is not allowed to report success for a delivery it cannot make.
+let driveReads = 0;
 const driveMarker = () => `${BOOT_ID}.${driveSeq}`;
 
 function writeDrive(op) {
@@ -708,7 +717,17 @@ function writeDrive(op) {
   }
   driveSeq += 1;
   driveOp = { ...op, gen: driveSeq, at: new Date().toISOString() };
-  return { ok: true, marker: driveMarker(), op: driveOp };
+  // ACCEPTED IS NOT DELIVERED, AND THE CALLER FINDS OUT HERE RATHER THAN LATER.
+  // `listening` is false when nothing has ever polled this verb: the op is
+  // recorded and no surface will act on it. Reported at the moment of the mistake,
+  // in the response the caller is already reading — a doc line only fires once
+  // somebody goes looking, which is after they have concluded the platform is
+  // broken.
+  //
+  // STILL NOT CLAIMED, and drive.md says so: listening does not mean HONOURED. A
+  // surface can poll, receive, and do nothing. That is the refusal shape, and it
+  // stays unspecified until a real application needs one.
+  return { ok: true, marker: driveMarker(), op: driveOp, listening: driveReads > 0 };
 }
 
 const readBody = (req) => new Promise((resolve) => {
@@ -814,6 +833,7 @@ http.createServer(async (req, res) => {
       // The surface polls this. Same `?since=` shape as the change signal and
       // focus, so a surface that already watches one is watching this with the
       // primitive it has rather than a third mechanism of its own.
+      driveReads += 1;
       const since = u.searchParams.get("since");
       const marker = driveMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, op: driveOp });
@@ -823,6 +843,9 @@ http.createServer(async (req, res) => {
         contractVersion: CONTRACT_VERSION,
         runtime: { name: "openrig-studio", flavor: "reference-fixture", boot: BOOT_ID },
         capabilities: CAPABILITIES,
+        // Inspectable without posting: an agent can ask whether anything is
+        // listening before it drives, rather than learning from a no-op.
+        drive: { listening: driveReads > 0, reads: driveReads, ops: driveSeq },
         manifest: manifestReport(),
       });
     }

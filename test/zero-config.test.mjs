@@ -127,18 +127,28 @@ test("zero-config: the contract answer is additive — one field gained, none lo
   const b = await before.json("/api/contract");
   const a = await after.json("/api/contract");
 
-  // THE TOP-LEVEL KEY SET, and it was missing from the first version of this
-  // file. Everything below compared the version, the capabilities, the manifest
-  // keys and the runtime block — while a field added at the TOP level of
-  // /api/contract sailed through untouched. Measured on a throwaway clone: the
+  // THE TOP-LEVEL KEY SET, and this check has been wrong in BOTH directions.
+  //
+  // It was missing entirely at first: everything below compared the version, the
+  // capabilities, the manifest keys and the runtime block, while a field added at
+  // the TOP level sailed through untouched. Measured on a throwaway clone — the
   // runtime served an extra top-level key and this suite reported a clean pass.
   //
-  // That is the exact shape named in this file's own rationale — `manifest.
-  // consumer` shipping undocumented — so the control did not cover the failure it
-  // was written to prevent. The pattern was already here, one block down, applied
-  // to `manifest` and not to the response itself.
-  assert.deepEqual(Object.keys(a).sort(), Object.keys(b).sort(),
-    "the /api/contract response gained or lost a TOP-LEVEL field");
+  // Then it was added as key-set EQUALITY, which reads as strictness and is
+  // actually a rule that no additive field may ever ship — the thing contract v0.1
+  // explicitly permits. It blocked a documented additive field the first time one
+  // arrived, which is the same defect the capability assertion below had.
+  //
+  // MAY GAIN, NEVER LOSE is the property that was meant. Losing a top-level field
+  // is the breaking direction and is what a consumer notices.
+  //
+  // Undocumented fields are NOT this test's job — contract-response-parity owns
+  // "served but not documented" at every level, and owning that in two places is
+  // how the two drift.
+  for (const key of Object.keys(b)) {
+    assert.ok(key in a,
+      `zero-config LOST the top-level field ${key} — that is the breaking direction`);
+  }
 
   assert.equal(a.contractVersion, b.contractVersion, "contractVersion moved for an additive change");
   // GAINING a capability is additive and is the whole point of the field; LOSING
