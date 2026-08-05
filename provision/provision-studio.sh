@@ -271,11 +271,48 @@ install_provider_deps() {
   return 0
 }
 
-for p in "$STUDIO_DIR"/apps/providers/*/; do
-  n=$(basename "$p")
+# ONLY THE PROVIDERS THE ENABLED APPS ACTUALLY NEED.
+#
+# This used to loop over every provider directory on disk, so a provider nobody
+# asked for could stop the whole provision — and did, on a real VPS. A box asking
+# for four apps should not be blocked by the eleventh provider.
+#
+# It also made the curated app default a half-truth: selecting four apps still
+# installed all seven providers' dependencies, so "two providers, no ffmpeg" was
+# a claim about the app list rather than about what actually gets installed.
+# Resolution is in node because it walks JSON and returns a set; the result is
+# read LINE BY LINE rather than word-split.
+NEEDED_PROVIDERS=()
+if [ "$DRY_RUN" = 0 ]; then
+  while IFS= read -r line; do [ -n "$line" ] && NEEDED_PROVIDERS+=("$line"); done < <(
+    "$NODE_BIN" "$(dirname "$0")/needed-providers.mjs" "$STUDIO_DIR/apps" "${APP_LIST[@]}" 2>/dev/null || true)
+fi
+ALL_PROVIDERS=(); for d in "$STUDIO_DIR"/apps/providers/*/; do [ -d "$d" ] && ALL_PROVIDERS+=("$(basename "$d")"); done
+printf '  %d of %d provider(s) needed by the enabled apps: %s\n' \
+  "${#NEEDED_PROVIDERS[@]}" "${#ALL_PROVIDERS[@]}" "${NEEDED_PROVIDERS[*]:-none}"
+
+for n in "${NEEDED_PROVIDERS[@]}"; do
+  p="$STUDIO_DIR/apps/providers/$n/"
+  [ -d "$p" ] || { warn "provider '$n' is needed but not present — reconciliation will name it"; continue; }
+  # A LOCKFILE THAT EXISTS IS NOT A LOCKFILE THAT WORKS.
+  #
+  # This branched on the file's EXISTENCE and committed to `npm ci`. A provider
+  # shipped a STUB lockfile — one entry, locking nothing, against a package.json
+  # with real dependencies — and `npm ci` correctly refused it, which killed the
+  # provision. Present-but-unusable is WORSE than absent: absent fails at a point
+  # the branch already handles, present sails past the file test and dies inside
+  # npm. Presence standing in for meaning, the same shape as the other two defects
+  # in the report that found this.
+  #
+  # So: try the fast, exact path, and if it refuses, SAY SO and take the slow one.
+  # Do not pre-judge the file from its existence.
   if [ -f "$p/package-lock.json" ]; then
     printf '  %-16s npm ci (lockfile present)\n' "$n"
-    install_provider_deps "$n" "npm ci --prefix '$p' --no-audit --no-fund"
+    if ! install_provider_deps "$n" "npm ci --prefix '$p' --no-audit --no-fund"; then
+      warn "provider '$n': npm ci refused the lockfile (see above) — falling back to npm install"
+      printf '  %-16s npm install (lockfile unusable)\n' "$n"
+      install_provider_deps "$n" "npm install --prefix '$p' --no-audit --no-fund"
+    fi
   else
     printf '  %-16s NO LOCKFILE -> npm install (declared deps: %s)\n' "$n" \
       "$($NODE_BIN -p "Object.keys(require('$p/package.json').dependencies||{}).length" 2>/dev/null || echo '?')"

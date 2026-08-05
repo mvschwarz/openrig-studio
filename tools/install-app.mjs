@@ -115,12 +115,30 @@ function checkClosure(dir, m) {
   }
 }
 
+// "THIS APP HAS NO BACKEND" CAN BE SAID TWO WAYS AND BOTH ARE CORRECT MANIFESTS.
+//
+// Omitting `provider` entirely is one. Declaring `{ required: false }` with no
+// package is the other — an app SAYING it needs none, rather than leaving a reader
+// to infer it from an absence. `apps/workspace` does exactly that, with a note
+// explaining why, and it was UNINSTALLABLE ON ANY BOX: this checker read the
+// KEY'S PRESENCE as a declaration and emitted three failures against a manifest
+// that was documenting its own correctness.
+//
+// PRESENCE IS NOT MEANING. A provider is declared by a PACKAGE, not by a key
+// existing. Found by cloud-impl provisioning a real VPS, and it is the same shape
+// as both of their own findings in the same report.
+//
+// The genuinely malformed case is still caught: a `provider` key with no package
+// and no explicit `required: false` says nothing at all, and that still fails.
+const declaresNoProvider = (prov) =>
+  !prov || (!prov.package && prov.required === false);
+
 // DEFECT THIS CATCHES: cutdown's provider serves /media/, /cutprev/ and /cuts/.
 // Nothing declared them, so the studio front proxied only /api/* and the app
 // listed clips it could not play. A backend is not only its /api/ verbs.
 function checkRoutes(m) {
   const prov = m.provider;
-  if (!prov) { ok("ultralight — no provider to route to"); return; }
+  if (declaresNoProvider(prov)) { ok("ultralight — no provider to route to"); return; }
   if (!prov.package) fail("provider declared without a package name");
 
   // Routing facts live on the PROVIDER once it has migrated. Checking only the
@@ -147,7 +165,7 @@ function checkRoutes(m) {
 // hardcodes each one by name. A sixth app would need code here to run at all.
 function checkRunnable(m) {
   const prov = m.provider;
-  if (!prov) return;
+  if (declaresNoProvider(prov)) return;
   // How to run is the PROVIDER's fact. An app that has migrated declares only a
   // reference, so demanding provider.run.entry from the app manifest refuses
   // exactly the shape the contract requires.
