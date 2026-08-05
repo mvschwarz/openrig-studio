@@ -73,12 +73,49 @@ watch a live-updating surface work.
 
 ## Status
 
-Package 0.7.1. Contract v0.1 — unchanged, because everything below is additive
+Package 0.8.0. Contract v0.1 — unchanged, because everything below is additive
 or a behaviour fix, and the contract version only moves on a breaking change.
 Pre-release.
 
-**All three agent primitives are now in the SDK.** An agent can see what changed,
-see what the user is looking at, and operate the surface they have open.
+**All three agent primitives are in the SDK**, and a human and an agent can now
+mark up the same screen. An agent can see what changed, see what the user is
+looking at, operate the surface they have open, and point at the part of it that
+is wrong.
+
+### What is new in 0.8.0
+
+**Annotations.** A human or an agent can draw on a surface and say what should
+change — circle, box, arrow, text, with the two authors rendered differently
+because who marked something is part of what it means.
+
+**The shell draws them, over the stage.** That is the design decision the rest
+follows from: a feature that required surfaces to cooperate would work on none of
+the surfaces that already exist, which is the population that matters. A surface
+written before this release is annotatable and needs no change.
+
+Three optional messages exist for surfaces that want to be *more* correct, and a
+surface that sends none of them still gets a working board:
+
+- A surface holding several documents behind one id can say which board it is
+  showing, so marks drawn on one page do not hang over another.
+- A surface that renders its real content in a same-origin nested frame can name
+  that frame, so an agent naming an element anchors to the document the human is
+  looking at rather than to the surface's own chrome.
+- A surface that moves something can ask for a re-measure. An element that *moves*
+  changes no size and no scroll, so nothing else fires — the mark would sit at the
+  old geometry still reporting itself anchored.
+
+**An anchor that loses its element says so.** It is drawn dashed and badged rather
+than quietly relocated to whatever now occupies that space, because a mark that
+slides is worse than one that admits it lost its target.
+
+Marks are held in memory unless the runtime is started with `--annotations <file>`,
+and the board says **"session only"** rather than "persisted" when nothing is
+storing them. See `contract/annotations.md`.
+
+**Also:** a failing provider install during provisioning now prints what npm said.
+It ran under `--silent`, which suppresses errors as well as progress, so a failure
+aborted the install with no text to act on.
 
 ### What is new in 0.7.1
 
