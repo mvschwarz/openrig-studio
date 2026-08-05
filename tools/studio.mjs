@@ -487,7 +487,37 @@ const proxyTerminal = (req, res) => {
   up.on("error", () => { res.writeHead(502, { "content-type": "application/json" }); res.end('{"ok":false,"error":"terminal unavailable"}'); });
   req.pipe(up);
 };
-const SDK_OWNED = new Set(["/api/contract", "/api/factory/state", "/api/events"]);
+// RESERVED VERBS — the ones a provider may not capture.
+//
+// THE TEST IS WHOSE STATE THE VERB ANSWERS, and it is worth stating because I
+// got it wrong in the other direction first. Asked whether the FILES verbs
+// belonged here, I said yes, then retracted it: files are DIRECTORIES ON THE
+// BOX, so in a real studio they SHOULD be served by something that knows about
+// real directories, and reserving them would have forbidden the correct thing.
+//
+// These five answer the runtime's OWN state, which nothing else can hold:
+//   /api/contract        the runtime describing itself
+//   /api/factory/state   its fixture state
+//   /api/events          its own change stream
+//   /api/focus           focusRecord — in memory, in this process
+//   /api/drive           driveOp     — in memory, in this process
+//
+// WHY focus AND drive WERE ADDED, measured on the founder's box rather than
+// reasoned about: a provider declared /api/focus and implemented POST ONLY. The
+// compositor routes a declared verb to its provider before the runtime, so the
+// provider captured BOTH methods and GET /api/focus answered 404 — while
+// /api/contract went on advertising focus.read, because the runtime declares the
+// capability and cannot see that its route was taken. An agent doing feature
+// detection was told the capability was there and then met a 404.
+// /api/drive reached the runtime only because no provider happened to claim it.
+//
+// Reserving is the blunt fix and it is the right one TODAY: no provider can
+// conformantly substitute state that lives in this process. The precise fix, if
+// a real substitution case ever appears, is method-scoped routing — a provider
+// declaring WHICH methods it implements and the rest falling through — and that
+// wants its own gate rather than being invented here.
+const SDK_OWNED = new Set(["/api/contract", "/api/factory/state", "/api/events",
+  "/api/focus", "/api/drive"]);
 // A provider is not only its /api/ verbs — byte routes are prefixes, declared
 // by the app. Leaving them out is why media listed and would not play.
 // Routing /api/* to "the first provider" only works with one. With three, the
