@@ -99,29 +99,42 @@ export function attach(shell, { store } = {}) {
   // predates the seam — the layer degrades to one board per surface rather than
   // throwing, which is what it did before sub-contexts existed.
   const scopeOf = () => (typeof shell.scope === "function" ? shell.scope() : active().id);
-  const frameDocument = () => {
-    try { return active().frame?.contentDocument ?? null; } catch { return null; }
+  // WHERE TO LOOK FOR ELEMENTS, and that document's rect in top-window
+  // coordinates. Normally the active surface's frame; a surface that renders its
+  // real content in a SAME-ORIGIN NESTED frame may name it, and the shell resolves
+  // the chain. Without this an agent naming "#publish" resolves against the host
+  // surface's chrome instead of the document the human is looking at — the mark
+  // lands as "missing" and the core property (an agent names an element, the human
+  // sees a mark on THAT element) is lost.
+  //
+  // The shell composes it; this layer only consumes it. Falls back to the surface
+  // frame against a shell that predates the seam.
+  const view = () => {
+    if (typeof shell.target === "function") {
+      try { const v = shell.target(); if (v?.doc && v?.rect) return v; } catch {}
+    }
+    const frame = active().frame;
+    try { return frame?.contentDocument ? { doc: frame.contentDocument, rect: frame.getBoundingClientRect() } : null; }
+    catch { return null; }
   };
+  const frameDocument = () => view()?.doc ?? null;
   const point = (event) => {
     const { rect, width, height } = bounds();
     return { x: clamp((event.clientX - rect.left) / width), y: clamp((event.clientY - rect.top) / height) };
   };
   const elementAt = (event) => {
-    const frame = active().frame;
-    const doc = frameDocument();
-    if (!frame || !doc) return null;
-    const rect = frame.getBoundingClientRect();
-    try { return doc.elementFromPoint(event.clientX - rect.left, event.clientY - rect.top); } catch { return null; }
+    const v = view();
+    if (!v) return null;
+    try { return v.doc.elementFromPoint(event.clientX - v.rect.left, event.clientY - v.rect.top); } catch { return null; }
   };
   const elementAnchor = (selector) => {
-    const frame = active().frame;
-    const doc = frameDocument();
-    if (!frame || !doc || !selector) return null;
+    const v = view();
+    if (!v || !selector) return null;
     let element;
-    try { element = doc.querySelector(selector); } catch { return null; }
+    try { element = v.doc.querySelector(selector); } catch { return null; }
     if (!element) return null;
     const outer = bounds();
-    const frameRect = frame.getBoundingClientRect();
+    const frameRect = v.rect;
     const rect = element.getBoundingClientRect();
     return {
       x: (frameRect.left - outer.rect.left + rect.left) / outer.width,
@@ -329,6 +342,8 @@ export function attach(shell, { store } = {}) {
     undo: () => travel("undo"),
     redo: () => travel("redo"),
     tool: choose,
-    state: () => ({ surfaceId: state.surfaceId, scope: state.scope, markup: shell.markup(), tool: state.tool, selected: state.selected, records: clone(state.records), persistence: persistent ? "store" : "session only" }),
+    state: () => ({ surfaceId: state.surfaceId, scope: state.scope,
+      anchoringIn: (() => { const v = view(); return v ? (v.doc === active().frame?.contentDocument ? "surface" : "nested") : null; })(),
+      markup: shell.markup(), tool: state.tool, selected: state.selected, records: clone(state.records), persistence: persistent ? "store" : "session only" }),
   });
 }

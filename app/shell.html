@@ -221,6 +221,12 @@
   // only the surface knows — so the surface may refine the default, and the
   // default is the surface id for everything that says nothing.
   const declaredContexts = new Map();
+  // surface id -> the id of a SAME-ORIGIN nested frame that surface wants marks
+  // anchored inside. Separate from the context above and deliberately so: the
+  // context says WHICH BOARD, this says WHERE TO LOOK. A surface can need one
+  // without the other, and folding them into one field would force a surface with
+  // a nested frame to invent document identities it does not have.
+  const declaredTargets = new Map();
 
   // --- contract meta first: the shell itself is a contract consumer -------
   let meta = null;
@@ -324,6 +330,22 @@
     if (!e.data || typeof e.data !== "object") return;
     if (e.data.t === "open-surface" && byId(e.data.id)) activate(e.data.id);
     if (e.data.t === "open-agent") openAgents(e.data.seat);
+    if (e.data.t === "annotation-target") {
+      // Same active-surface guard as the header and the context, for the same
+      // reason: a backgrounded surface still holds a live channel.
+      const current = frames.get(activeId);
+      if (current && e.source === current.contentWindow) {
+        const frameId = typeof e.data.frame === "string" && e.data.frame ? e.data.frame : null;
+        const had = declaredTargets.get(activeId) ?? null;
+        if (had !== frameId) {
+          if (frameId) declaredTargets.set(activeId, frameId); else declaredTargets.delete(activeId);
+          // Re-anchor: every mark's geometry was computed against the previous
+          // document, so leaving them would draw them at coordinates that mean
+          // nothing in the new one.
+          for (const fn of surfaceListeners) { try { fn(activeId); } catch {} }
+        }
+      }
+    }
     if (e.data.t === "annotation-context") {
       // Only the ACTIVE surface may speak, for the same reason as the header: a
       // backgrounded surface still holds a live channel, and without this the
@@ -576,6 +598,40 @@
     // composing it independently is two places computing one property, and they
     // drift silently. NUL cannot occur in a surface id or a declared context, so
     // "a" + "b\0c" and "a\0b" + "c" cannot collide.
+    // WHERE A FEATURE SHOULD LOOK FOR ELEMENTS, and the rect of that document in
+    // TOP-WINDOW coordinates.
+    //
+    // Normally the active surface's own frame. When the surface has declared a
+    // same-origin nested frame, this resolves the CHAIN — a nested frame's
+    // getBoundingClientRect is relative to its parent's viewport, not to the top
+    // window, so the offsets have to be added. Resolving it here rather than in
+    // each feature keeps that walk in one place; two features doing it
+    // independently is two places computing one property.
+    //
+    // Falls back to the surface frame whenever the target is absent, not an
+    // iframe, or CROSS-ORIGIN — a cross-origin document cannot be read for
+    // element identity, and pretending otherwise would produce anchors that
+    // silently never resolve.
+    target: () => {
+      const outer = frames.get(activeId);
+      if (!outer) return null;
+      const outerRect = outer.getBoundingClientRect();
+      const fallback = () => {
+        try { return outer.contentDocument ? { doc: outer.contentDocument, rect: outerRect } : null; }
+        catch { return null; }
+      };
+      const frameId = declaredTargets.get(activeId) ?? null;
+      if (!frameId) return fallback();
+      try {
+        const nested = outer.contentDocument?.getElementById(frameId);
+        const doc = nested && nested.tagName === "IFRAME" ? nested.contentDocument : null;
+        if (!doc) return fallback();
+        const innerRect = nested.getBoundingClientRect();
+        return { doc, rect: {
+          left: outerRect.left + innerRect.left, top: outerRect.top + innerRect.top,
+          width: innerRect.width, height: innerRect.height } };
+      } catch { return fallback(); }
+    },
     scope: () => {
       const context = declaredContexts.get(activeId) ?? null;
       return activeId ? (context ? activeId + "\u0000" + context : activeId) : null;

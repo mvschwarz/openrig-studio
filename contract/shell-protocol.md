@@ -44,6 +44,7 @@ Send from inside your iframe with `parent.postMessage(msg, "*")`:
 | `{ "t": "open-agent", "seat": "<seat-name>" }` | Opens the sidebar with that roster seat highlighted. Unknown seats open the sidebar unhighlighted. |
 | `{ "t": "header", … }` | Declares the surface's half of the header. See *The header splits in half* below. |
 | `{ "t": "annotation-context", "id": "<opaque>" }` | Refines which board of annotations this surface is showing. Only for a surface holding several documents behind one id — see `annotations.md`. `null` or omitted returns to the default. |
+| `{ "t": "annotation-target", "frame": "<iframe element id>" }` | Names a **same-origin nested iframe** whose document annotations should anchor inside. For a surface that hosts its real content in a frame. `null` or omitted returns to the surface's own document. |
 
 This message set is closed: the shell ignores any other `t` value. **New message
 types arrive as contract additions, never by surfaces inventing them** — which is

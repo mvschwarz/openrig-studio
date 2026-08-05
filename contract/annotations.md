@@ -108,6 +108,43 @@ over the stage — save what you had, load what belongs here, clear and re-ancho
 It is delivered on the existing surface-change channel rather than a new one, so a
 feature never has to know sub-contexts exist.
 
+## The nested-frame target — for a surface that hosts its real content (stable)
+
+A surface that renders its actual document in a **same-origin nested iframe** has
+a second problem, and it is not the same as the sub-context. The layer resolves
+selectors against the *surface's* document, so an agent naming `#publish` finds
+the host surface's own chrome rather than the document the human is looking at.
+
+**And it fails in the worst available way.** If the host happens to carry that id
+too, the mark renders, reports `anchored`, and sits on the wrong element — nothing
+errors and nothing looks degraded. If it does not, the mark reports `missing` and
+the agent's whole point is lost.
+
+So a surface may name the frame to look inside:
+
+```json
+{ "t": "annotation-target", "frame": "<element id of a same-origin iframe>" }
+```
+
+**The surface names the frame; it does not hand over a document and it does not
+compose the persistence scope.** `null` or omitted returns to the surface's own
+document. Active-surface-only, the same guard as everything else on this channel.
+
+**This is orthogonal to the sub-context above.** The context says *which board*;
+the target says *where to look*. A surface can need either without the other, and
+merging them would force a surface with a nested frame to invent document
+identities it does not have.
+
+**The shell resolves the chain**, because a nested frame's
+`getBoundingClientRect()` is relative to its *parent's* viewport rather than the
+top window — the offsets have to be added or every anchor lands somewhere plausible
+and wrong. Doing that walk in one place is the same rule as composing the scope key
+in one place.
+
+**Cross-origin stays spatial and honest.** A cross-origin nested frame cannot be
+read for element identity, so the target silently falls back to the surface
+document rather than pretending: the alternative is anchors that can never resolve.
+
 ### The scope key is composed by the SHELL (stable)
 
 `surfaceId` when no context is declared; `surfaceId`, a **NUL** (`U+0000`), then
@@ -177,7 +214,9 @@ default path:
 | `GET` / `POST /api/annotations`, scoped | **yes**, with controls on both refusal directions |
 | a scope-less read answering empty rather than everything | **yes**, with a control |
 | `{ t: "annotation-context" }` refining the scope | **yes** — verified in a live shell: a surface declaring one gets its own empty board, marks drawn there stay there, and declaring `null` restores the default board intact |
-| the active-surface-only rule on that message | **yes, but the committed check is STRUCTURAL** — it asserts the `e.source` guard is present in the shell, with a control proving the check can fail. The behaviour was verified by driving a live shell; this repository has no browser dependency to re-run that automatically |
+| `{ t: "annotation-target" }` anchoring inside a same-origin nested frame | **yes** — browser-proven against a DECOY: a host surface and its nested document both carrying `#publish`, with the mark hit-tested to confirm it landed on the artifact's button and not the host's |
+| cross-origin nested frames degrading to the surface document rather than failing | **yes**, guarded; those surfaces stay spatial-only as they already were |
+| the active-surface-only rule on those messages | **yes, but the committed check is STRUCTURAL** — it asserts the `e.source` guard is present in the shell, with a control proving the check can fail. The behaviour was verified by driving a live shell; this repository has no browser dependency to re-run that automatically |
 | the scope key composed by the shell and opaque to consumers | **yes** |
 | persistence reported at `GET /api/contract` and shown in the UI | **yes** |
 | marks surviving a runtime restart | **yes when `--annotations <file>` is configured**; in memory otherwise, and the layer says "session only" |

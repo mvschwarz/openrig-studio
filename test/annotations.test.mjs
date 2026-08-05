@@ -209,6 +209,71 @@ test("positive control: the guard check above can fail", () => {
     "the guard survived being removed, so the test above would pass with no guard at all");
 });
 
+test("the nested-frame target seam is wired, guarded, and falls back — STRUCTURAL", () => {
+  // Same honesty as the context guard above: this is a structural check on
+  // shell.html, and the BEHAVIOUR was proven in a browser against a decoy — a host
+  // surface and its nested document BOTH carrying #publish, with the mark
+  // hit-tested to confirm it landed on the artifact's and not the host's.
+  //
+  // Structural is still worth committing: removing the guard, or the cross-origin
+  // fallback, then fails here rather than only failing a LOOK nobody re-runs.
+  const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
+
+  const handler = shell.match(/if \(e\.data\.t === "annotation-target"\)\s*\{([\s\S]*?)\n    \}/);
+  assert.ok(handler, "shell.html no longer handles annotation-target");
+  assert.match(handler[1], /e\.source === current\.contentWindow/,
+    "the annotation-target handler accepts a message without checking it came from the ACTIVE surface");
+
+  const target = shell.match(/target: \(\) => \{([\s\S]*?)\n    \},/);
+  assert.ok(target, "shell.html no longer exposes target() on studioShell");
+  // The chain walk is the whole point: a nested frame's rect is relative to its
+  // PARENT's viewport, so the offsets must be added or every anchor lands at the
+  // wrong place while looking perfectly computed.
+  assert.match(target[1], /outerRect\.left \+ innerRect\.left/,
+    "target() does not add the outer frame offset — nested anchors will be off by the surface frame's position");
+  assert.match(target[1], /catch/,
+    "target() does not guard the cross-origin read; a cross-origin nested frame would throw instead of degrading");
+  assert.match(target[1], /fallback\(\)/,
+    "target() has no fallback to the surface frame");
+});
+
+test("the layer anchors through the shell's view, not the surface frame directly", () => {
+  // The regression this forbids: elementAnchor reading active().frame again would
+  // silently resolve selectors against the HOST document. Both documents can carry
+  // the same id, so the mark still renders and still says "anchored" — it is just
+  // on the wrong element. That is the failure shape with no error path.
+  const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
+  const anchor = layer.match(/const elementAnchor = \(selector\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(anchor, "annotations.js no longer defines elementAnchor");
+  assert.doesNotMatch(anchor[1], /active\(\)\.frame/,
+    "elementAnchor reaches for the surface frame directly, bypassing the nested-frame view");
+  assert.match(anchor[1], /view\(\)/, "elementAnchor does not consult the shell-resolved view");
+
+  const at = layer.match(/const elementAt = \(event\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(at, "annotations.js no longer defines elementAt");
+  assert.doesNotMatch(at[1], /active\(\)\.frame/,
+    "elementAt reaches for the surface frame directly, so drawing by hand would hit the wrong document");
+});
+
+test("positive control: the two checks above can fail", () => {
+  // Both are regexes over source, which is the shape that silently matches
+  // nothing. Proven against mutated copies rather than trusted.
+  const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
+  const noOffset = shell.replace(/outerRect\.left \+ innerRect\.left/g, "innerRect.left");
+  const t = noOffset.match(/target: \(\) => \{([\s\S]*?)\n    \},/);
+  assert.ok(t, "the mutation broke the extractor rather than the property");
+  assert.doesNotMatch(t[1], /outerRect\.left \+ innerRect\.left/,
+    "the offset survived being removed, so that assertion would pass with the chain walk gone");
+
+  const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
+  const regressed = layer.replace(/const v = view\(\);\n    if \(!v \|\| !selector\) return null;/,
+    "const v = { doc: active().frame.contentDocument, rect: active().frame.getBoundingClientRect() };\n    if (!v || !selector) return null;");
+  const a = regressed.match(/const elementAnchor = \(selector\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(a, "the mutation broke the elementAnchor extractor");
+  assert.match(a[1], /active\(\)\.frame/,
+    "the regression could not be planted, so the doesNotMatch assertion proves nothing");
+});
+
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
 });
