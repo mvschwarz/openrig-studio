@@ -121,3 +121,14 @@ each becomes contract only through its own future security/ownership gate:
 
 If your surface needs one of these, it needs a contract version that includes
 it — not a workaround.
+
+**Credential flows are the exception to that sentence: they are not waiting on a
+gate, they are OUT OF SCOPE FOR THIS SDK.** Ruled 2026-08-04. The test is
+audience: using this SDK already implies you can sign in to your own tools, so a
+subscription-login flow serves a different audience than the one holding this
+contract, and it belongs to the product that has that audience rather than here.
+
+This is a **deliberate property, not a gap**: the reference runtime handles no
+credentials, stores none, and has nowhere to put one. Anything that would give it
+somewhere — a token store, a callback route, a secret in a manifest — is a change
+of character rather than an addition, and does not arrive through a version bump.
