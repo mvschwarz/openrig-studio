@@ -195,11 +195,12 @@
   // Declarations above their readers; startup work at the very bottom, which is
   // why the init block is where it is.
   //
-  // NOT YET MECHANISED, and stated so nobody mistakes this comment for a guard:
-  // the real fix is a smoke check that loads this file in a browser and fails
-  // when the shell does not finish booting. It would have caught all four
-  // regardless of which binding caused them. Until that exists, this block is
-  // discipline, and discipline is what produced the four.
+  // MECHANISED, PARTLY, AND THE LIMIT IS STATED: test/shell-boot.test.mjs fails
+  // when a module-level Map or Set is declared outside this block — which is what
+  // all four faults were. It is NOT a TDZ prover and does not run the shell; a
+  // scalar read early still slips past it. The genuine check is a browser that
+  // fails when this page does not finish booting, and this SDK has no browser
+  // dependency to do it with.
   // ============================================================================
   const surfaceListeners = new Set();
   const markupListeners = new Set();
@@ -208,6 +209,9 @@
   // back — it has no reason to speak twice, and reverting to manifest defaults
   // showed a stale crumb and no actions while the surface was unchanged.
   const declaredHeaders = new Map();
+  // id -> the iframe showing that surface. Pre-existing shell state that lived
+  // beside its first use; it belongs here with the rest for the same reason.
+  const frames = new Map();
 
   // --- contract meta first: the shell itself is a contract consumer -------
   let meta = null;
@@ -232,7 +236,6 @@
 
   const tabsEl = document.getElementById("tabs");
   const stage = document.getElementById("stage");
-  const frames = new Map();
   let activeId = null;
   const byId = (id) => surfaces.find((s) => s.id === id);
 
