@@ -401,8 +401,19 @@ test("contract v0.1 is unchanged: same version, same existing fields, additive o
   const body = await r.json();
 
   assert.equal(body.contractVersion, "0.1", "adding fields must not move the contract version");
-  assert.deepEqual(body.capabilities,
-    ["contract.meta", "observe.factory-state", "stream.events", "files.read", "shell.protocol"]);
+  // CAPABILITIES MAY GAIN, NEVER LOSE. This asserted exact equality, which was
+  // true when written and wrong as a rule: `capabilities` is the feature-detection
+  // list, so it MUST grow when a namespace ships or it can never advertise
+  // anything. Equality here would have blocked declaring focus and drive — the
+  // very omission an independent cold build reported.
+  //
+  // Removing one IS breaking, because a consumer gates on it, so that is what is
+  // still checked.
+  for (const cap of ["contract.meta", "observe.factory-state", "stream.events", "files.read",
+    "shell.protocol"]) {
+    assert.ok(body.capabilities.includes(cap),
+      `capability ${cap} disappeared — removing one breaks every consumer gating on it`);
+  }
   for (const key of ["ok", "errors", "warnings", "surfaces"]) {
     assert.ok(key in body.manifest, `pre-existing manifest field ${key} disappeared`);
   }

@@ -141,7 +141,18 @@ test("zero-config: the contract answer is additive — one field gained, none lo
     "the /api/contract response gained or lost a TOP-LEVEL field");
 
   assert.equal(a.contractVersion, b.contractVersion, "contractVersion moved for an additive change");
-  assert.deepEqual(a.capabilities, b.capabilities, "the capability set changed");
+  // GAINING a capability is additive and is the whole point of the field; LOSING
+  // one breaks every consumer that gates on it. This compared them for equality,
+  // which reads as strictness and is actually a rule that no feature may ever be
+  // advertised — it would have blocked declaring focus and drive.
+  // Direction matters and is easy to get backwards: iterate the BASELINE (`b`) and
+  // require the CURRENT runtime (`a`) to still carry each. The reverse reads
+  // identically and asserts that no capability may ever be ADDED, which is the
+  // rule this loop exists to remove.
+  for (const cap of b.capabilities) {
+    assert.ok(a.capabilities.includes(cap),
+      `zero-config LOST capability ${cap} — consumers gate on these, so removal is breaking`);
+  }
   assert.deepEqual(Object.keys(a.manifest).sort(), Object.keys(b.manifest).sort(),
     "the manifest report gained or lost a field");
 

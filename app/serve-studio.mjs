@@ -67,7 +67,19 @@ const CONTRACT_VERSION = "0.1";
 // immediately reload itself, and a restart that straddles a consumer's startup is
 // still seen.
 const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-const CAPABILITIES = ["contract.meta", "observe.factory-state", "stream.events", "files.read", "shell.protocol"];
+// FEATURE DETECTION IS THE POINT. contract-meta.md tells a consumer that every
+// namespace it uses must appear here and to CHECK BEFORE USE — so a verb this
+// runtime answers but does not advertise is worse than a missing verb: the
+// consumer does exactly what the contract instructs and concludes the feature is
+// absent. focus and drive shipped answering, undeclared, and an independent cold
+// build found it by following the documented detection path.
+//
+// Read and write are separate entries because they are separately true. That is
+// what "files.read" has always meant — the files namespace advertises read
+// because there are no write verbs — and it lets a runtime offer read-only focus
+// honestly rather than claiming a namespace it half-implements.
+const CAPABILITIES = ["contract.meta", "observe.factory-state", "stream.events", "files.read",
+  "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write"];
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json", ".css": "text/css",
   ".js": "text/javascript", ".mjs": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png",

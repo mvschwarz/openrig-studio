@@ -87,6 +87,19 @@ and the agent is told nothing at all.
 
 **`POST /api/focus` — a write updates the fields it names and leaves the rest.**
 
+The body is a JSON object naming the fields to change. A write answers with the
+record as it now stands, and with the marker that write produced:
+
+```json
+{ "ok": true, "marker": "<opaque>", "focus": { "...": "the record after the write" } }
+```
+
+**Returning the record means a writer does not need a follow-up read** to know
+what it produced, and the marker it gets back is the one a subsequent `?since=`
+compares against. A write that names no known field is refused with
+`{ "ok": false, "error": "<what> — <what to do>" }` and HTTP 400 rather than
+silently doing nothing.
+
 That is the whole rule, and it exists because whole-record replacement is a
 measured defect: a second verb overwrote the record with `view` blanked and asset
 paths reduced to basenames, so **pinning something destroyed the view context the
@@ -161,6 +174,8 @@ nothing. A surface adopting this reads the address before its first render.
 | `GET /api/focus` answering `{changed, marker, focus}` under `?since=` | **yes**, in the reference runtime |
 | field-scoped writes that cannot blank each other | **yes**, with controls |
 | `at` server-set on every write | **yes** |
+| `POST` answering `{ok, marker, focus}` so a writer needs no follow-up read | **yes** |
+| the namespace advertised at `GET /api/contract` -> `capabilities` (`focus.read`, `focus.write`) | **yes** — and it was NOT, until an independent cold build followed the documented feature-detection path and concluded the verb was absent |
 | `by` overridden from a real caller identity | **no, and it cannot be here.** The reference runtime is single-process and loopback and has no identity for its caller, so `by` is what the caller declared. A runtime that HAS one must override it |
 | a provider declaring the verb in `signals.verbs` | **specified**; the reference runtime is single-process and declares nothing |
 | `readAddress` / `writeAddress`, hash-owned and query-untouched | **yes**, with controls |

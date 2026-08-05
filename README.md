@@ -73,12 +73,25 @@ watch a live-updating surface work.
 
 ## Status
 
-Package 0.7.0. Contract v0.1 — unchanged, because everything below is additive
+Package 0.7.1. Contract v0.1 — unchanged, because everything below is additive
 or a behaviour fix, and the contract version only moves on a breaking change.
 Pre-release.
 
 **All three agent primitives are now in the SDK.** An agent can see what changed,
 see what the user is looking at, and operate the surface they have open.
+
+### What is new in 0.7.1
+
+**`GET /api/contract` now advertises focus and drive.** Both verbs worked and
+neither appeared in `capabilities` — so an agent doing feature detection the way
+`contract-meta.md` instructs concluded the features were absent. A verb that
+answers without advertising is worse than a missing one: the consumer follows the
+documented path and is steered to the wrong answer. Found by an independent cold
+build, which is the only way this class gets found.
+
+`POST /api/focus`'s response shape is now documented, and the generated project's
+final run snippet no longer omits `--surfaces` — without it the new surface never
+reaches the rail, which looks like a broken row rather than a missing flag.
 
 ### What is new in 0.7.0
 

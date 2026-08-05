@@ -145,6 +145,7 @@ feels driven and one that feels haunted.
 | specified | shipped |
 |---|---|
 | `POST` / `GET /api/drive`, opaque ops, server-assigned `gen` | **yes**, in the reference runtime |
+| the namespace advertised at `GET /api/contract` -> `capabilities` (`drive.read`, `drive.write`) | **yes** |
 | the change-signal `?since=` shape on the read | **yes** |
 | `driveSurface` dropping superseded ops | **yes**, with a control that plants a queue and fails |
 | not replaying ops that predate the surface, and `resumeLatestOnLoad` opting back in | **yes**, with controls on both directions — including that a post-load op still applies, so the baseline cannot be satisfied by a surface that stopped listening |

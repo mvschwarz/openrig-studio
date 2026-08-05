@@ -140,6 +140,62 @@ test("overlay-configured: the documented consumer example agrees with the served
   );
 });
 
+test("the documented capabilities are exactly the ones served", async (t) => {
+  // CAPABILITIES ARE SHAPE, NOT DATA, WHICH IS WHY THEY GET A NAMED CHECK HERE
+  // RATHER THAN A GENERAL ARRAY DESCENT. The comparator above deliberately does
+  // not compare array contents — `errors`, `warnings` and `queue` are data and
+  // differ by design. `capabilities` is the opposite: it is a closed contract
+  // enumeration, and contract-meta.md instructs every consumer to check it before
+  // using a namespace.
+  //
+  // So drift here is uniquely damaging: a runtime that answers a verb it does not
+  // advertise sends a consumer doing exactly what the contract says down the path
+  // of concluding the feature is absent. That shipped — focus and drive both
+  // answered while undeclared, and an independent cold build found it by following
+  // the documented detection path rather than by reading the source.
+  //
+  // Measured before this was written: dropping a capability from the documented
+  // example left the parity tests above at pass 4 / fail 0, so nothing could see it.
+  const s = await start(false);
+  t.after(() => s.stop());
+
+  const documented = example("`GET /api/contract` returns:").capabilities;
+  assert.ok(Array.isArray(documented) && documented.length,
+    "positive control: contract-meta.md's example carries no capabilities to compare");
+
+  assert.deepEqual([...s.response.capabilities].sort(), [...documented].sort(),
+    "the capabilities the runtime serves and the ones contract-meta.md documents have diverged — " +
+    "feature detection follows the DOCUMENT, so this gap is what a consumer acts on");
+});
+
+test("every namespace with a served verb is advertised", async (t) => {
+  // The other direction, and the one that actually bit. The check above keeps the
+  // doc and the runtime in step with each other; both could still agree while
+  // omitting a verb the runtime answers.
+  //
+  // Keyed on the ROUTES THE RUNTIME ACTUALLY HANDLES, read out of its source, so a
+  // verb added without a capability fails here rather than being found by whoever
+  // tries to use it.
+  const s = await start(false);
+  t.after(() => s.stop());
+
+  const src = fs.readFileSync(path.join(REPO, "app", "serve-studio.mjs"), "utf8");
+  const routes = [...src.matchAll(/u\.pathname === "(\/api\/[a-z/-]+)"/g)].map((m) => m[1]);
+  assert.ok(routes.length >= 4, `positive control: parsed ${routes.length} routes from the runtime`);
+
+  // namespace -> the capability prefix that advertises it
+  const NAMESPACE = { "/api/contract": "contract", "/api/factory/state": "observe",
+    "/api/events": "stream", "/api/focus": "focus", "/api/drive": "drive" };
+  const caps = s.response.capabilities;
+  const unadvertised = [...new Set(routes)]
+    .filter((r) => NAMESPACE[r])
+    .filter((r) => !caps.some((c) => c === NAMESPACE[r] || c.startsWith(NAMESPACE[r] + ".")));
+
+  assert.deepEqual(unadvertised, [],
+    `the runtime answers these verbs but advertises no capability for them, so a consumer ` +
+    `following contract-meta.md's "check before use" concludes they are absent: ${unadvertised.join(", ")}`);
+});
+
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
 });

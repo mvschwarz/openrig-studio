@@ -51,7 +51,8 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 {
   "contractVersion": "0.1",
   "runtime": { "name": "openrig-studio", "flavor": "reference-fixture", "boot": "<opaque id, stable for this process>" },
-  "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read", "shell.protocol"],
+  "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read",
+                   "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write"],
   "manifest": {
     "ok": true, "errors": [], "warnings": [], "surfaces": 1,
     "seats": { "count": 1, "source": "package", "attachable": false },

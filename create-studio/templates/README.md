@@ -60,11 +60,15 @@ manifest live — check `GET /api/contract` to see whether your row was accepted
 
 ## Run it
 
-Start the studio runtime (from the studio directory):
+Start the studio runtime, pointed at this directory:
 
 ```sh
-node app/serve-studio.mjs
+node <studio>/app/serve-studio.mjs --surfaces .
 ```
+
+**`--surfaces` is not optional.** Without it the runtime serves only its own
+surfaces and `{{LABEL}}` never appears on the rail — which looks like a broken
+row rather than a missing flag, and is the wrong thing to go debugging.
 
 Open <http://127.0.0.1:8890/> and pick **{{LABEL}}** from the rail.
 
