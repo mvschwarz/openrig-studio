@@ -80,6 +80,51 @@ This loop is the intended pattern; the fixture runtime fires the signal when
 fixture or manifest files change, so you can watch it work by editing a
 fixture file.
 
+## The shell chrome — what the shell draws and a surface does not (stable)
+
+The shell provides **two persistent frames** and a surface renders inside them:
+
+| frame | what it is | who owns it |
+|---|---|---|
+| the launcher rail, left | which surfaces exist, which is open | the shell |
+| the header, top | what you are looking at, and studio-level controls | the shell |
+
+**A SURFACE DOES NOT DRAW ITS OWN TITLE BAR.** The header already names the open
+surface and carries its hint. A surface that draws one too produces two headers
+stacked on one screen, and — worse than the wasted room — **switching surfaces
+then flips between one header and two**, so the studio reads as a set of pages
+rather than one application. That was measured across five apps before this rule
+was written: three drew their own, two did not.
+
+**Per-app actions stay in the surface body.** There is no declared slot in the
+header for them yet, and until there is, a surface reaching into shell chrome is
+depending on markup the shell has not promised. When a slot exists it will be
+declared here.
+
+**The rail collapses to a toolstrip** and a surface must not assume its width.
+Anything that measures the viewport should measure it, not compute it from a
+constant — the surface's own width changes when the launcher collapses and when
+the agent sidebar opens.
+
+### Studio-level controls live in the header (stable)
+
+The header is where controls that mean the same thing on every surface live — the
+agent sidebar opener, and markup. A surface does not reimplement them; the point
+of a studio-level control is that it is the same one everywhere. **Two controls
+for one mode are two things that can disagree, and the one a surface did not write
+is the one that will be wrong.**
+
+**`{ "t": "markup", "on": <boolean> }`** is sent from the shell **to** the active
+surface when markup mode changes. It is the one message that travels in that
+direction, and it is **advisory**: a surface that ignores it is unaffected and
+still annotatable, because annotation is drawn by the shell over the stage rather
+than by the surface. A surface handles it only when it wants to participate — to
+render its own richer annotations, or to get its own controls out of the way.
+
+**Do not build a feature that requires this message.** A shell feature that only
+works on surfaces which cooperate is a feature that does not work on the surfaces
+that already exist.
+
 ## Surface expectations (visual / accessibility baseline)
 
 v0.1 deliberately declares **no required visual system and no enforced

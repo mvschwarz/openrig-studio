@@ -14,9 +14,38 @@
   * { box-sizing: border-box; }
   html { color-scheme: dark; }
   html, body { height: 100%; margin: 0; background: var(--ink); font-family: var(--sans); }
-  #app { display: flex; height: 100vh; }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+  /* THE TWO PERSISTENT FRAMES. Every surface gets the same launcher on the left
+     and the same header on top, so the studio reads as one application rather
+     than a set of pages that each invented their own chrome. A surface renders
+     inside them and does not draw either. */
+  #shellframes { display: flex; flex: 1; min-height: 0; }
+  #topbar { display: flex; align-items: center; gap: 12px; padding: 0 14px; height: 46px;
+    background: var(--panel); border-bottom: 1px solid var(--edge); flex: none; }
+  #topbar .title { color: var(--bone); font-weight: 700; letter-spacing: .22em; font-size: 12px; }
+  #topbar .crumb { color: var(--faint); font-size: 11px; flex: 1; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  #topbar button { background: none; border: 1px solid var(--edge2); border-radius: 2px;
+    color: var(--body); font: inherit; font-size: 9px; letter-spacing: .18em; text-transform: uppercase;
+    font-weight: 600; padding: 7px 12px; cursor: pointer; }
+  #topbar button:hover { color: var(--bone); border-color: var(--bone); }
+  #topbar button.on { background: var(--bone); border-color: var(--bone); color: #111; }
+  #railToggle { width: 34px; padding: 7px 0 !important; text-align: center; flex: none; }
   #rail { width: 212px; min-width: 212px; background: var(--panel); border-right: 1px solid var(--edge);
     display: flex; flex-direction: column; }
+  /* COLLAPSE TO A TOOLSTRIP, not to nothing. Small screens and wide work want the
+     room back, but a launcher you cannot see is one you cannot use — the glyphs
+     stay, and they are already in the markup, so this is presentation only. */
+  body.rail-collapsed #rail { width: 52px; min-width: 52px; }
+  body.rail-collapsed #rail-head small,
+  body.rail-collapsed #rail-foot,
+  body.rail-collapsed #manifest-health,
+  body.rail-collapsed .tab .name,
+  body.rail-collapsed .tab .dot { display: none; }
+  body.rail-collapsed #rail-head { padding: 20px 0 10px; text-align: center; font-size: 0; }
+  body.rail-collapsed #tabs { padding: 6px 4px; }
+  body.rail-collapsed .tab { justify-content: center; padding: 9px 0; }
+  body.rail-collapsed .tab .glyph { width: auto; }
   #rail-head { padding: 20px 16px 10px; color: var(--bone); font-weight: 700; letter-spacing: 4px; font-size: 13px; }
   #rail-head small { display: block; color: var(--faint); font-weight: 400; letter-spacing: .14em;
     font-size: 9.5px; margin-top: 5px; text-transform: uppercase; }
@@ -38,6 +67,9 @@
   #stage { flex: 1; position: relative; background: var(--ink); }
   #stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--ink); }
   #stage iframe.hidden { visibility: hidden; pointer-events: none; }
+  /* An idle overlay must not eat clicks meant for the surface. A feature that
+     wants input sets pointer-events on its own node inside this host. */
+  #shell-overlay { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: var(--faint); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; }
   /* ---- the agent sidebar ----
@@ -90,15 +122,26 @@
   #agents-body:empty { display: none; }
   #agents-body .seatrow { padding: 8px 10px; border: 1px solid var(--edge2); border-radius: 2px; margin-bottom: 6px; }
   #agents-body .honest { color: var(--faint); font-size: 10.5px; margin-top: 10px; }
-  #agentToggle { position: absolute; right: 14px; top: 14px; z-index: 40; background: var(--bone);
-    border: none; border-radius: 2px; color: #111; font: inherit; font-size: 9.5px; letter-spacing: .18em;
-    text-transform: uppercase; font-weight: 600; padding: 9px 16px; cursor: pointer; }
+  /* Lives in the header now. It used to float in the stage at position:absolute,
+     which is why it sat ON TOP of the MARKUP button the first time this rendered —
+     an absolutely positioned child does not participate in the flex row it was
+     moved into. Styling comes from #topbar button; only the emphasis is local. */
+  #agentToggle { flex: none; background: var(--bone); border-color: var(--bone); color: #111; }
+  #agentToggle:hover { background: rgba(255,255,255,.8); border-color: var(--bone); color: #111; }
   /* hideAgents rows suppress the sidebar toggle while active (shell-protocol) */
   body.hide-agents #agentToggle { display: none !important; }
 </style>
 </head>
 <body>
 <div id="app">
+  <header id="topbar">
+    <button id="railToggle" title="collapse the launcher to a toolstrip">☰</button>
+    <span class="title" id="topTitle">STUDIO</span>
+    <span class="crumb" id="topCrumb"></span>
+    <button id="markupToggle" title="annotate this surface">MARKUP</button>
+    <button id="agentToggle" title="the seat roster">AGENTS ▸</button>
+  </header>
+  <div id="shellframes">
   <nav id="rail">
     <div id="rail-head">STUDIO<small>openrig studio · contract v0.1</small></div>
     <div id="tabs"></div>
@@ -106,7 +149,6 @@
     <div id="rail-foot">surfaces are rooms.<br/>this is the hallway.</div>
   </nav>
   <main id="stage"><div id="empty">no surfaces in the manifest yet</div>
-    <button id="agentToggle" title="the seat roster">AGENTS ▸</button>
   </main>
   <aside id="agents">
     <div id="agents-head">
@@ -118,9 +160,21 @@
     <div id="agents-body"></div>
     <iframe allow="clipboard-read; clipboard-write" id="chatframe" title="agent seat"></iframe>
   </aside>
+  </div>
 </div>
 <script>
 (async () => {
+  // SUBSCRIBER SETS ARE DECLARED HERE, AT THE TOP, ON PURPOSE.
+  // They were first written next to the buttons that fire them, which is where
+  // they read most naturally and is a temporal dead zone: activate() runs during
+  // boot and reads surfaceListeners, so a const declared 170 lines further down
+  // threw before the shell ever finished starting. The tabs still rendered, so
+  // the page looked ALIVE while the header stayed blank — the third time this
+  // file has produced a TDZ, and the reason its init block sits at the very end.
+  // Declarations go above their readers; startup work goes below everything.
+  const surfaceListeners = new Set();
+  const markupListeners = new Set();
+
   // --- contract meta first: the shell itself is a contract consumer -------
   let meta = null;
   try { meta = await (await fetch("/api/contract", { cache: "no-store" })).json(); } catch {}
@@ -168,6 +222,12 @@
     for (const el of tabsEl.children) el.classList.toggle("active", el.dataset.id === id);
     document.body.classList.toggle("hide-agents", !!s.hideAgents);
     document.title = "openrig studio · " + s.name.toLowerCase();
+    // The header names what you are looking at. It is the shell speaking, not the
+    // surface — a surface that drew its own title bar would disagree with the rail
+    // the moment either changed.
+    for (const fn of surfaceListeners) { try { fn(s.id); } catch {} }
+    document.getElementById("topTitle").textContent = s.name;
+    document.getElementById("topCrumb").textContent = s.hint || "";
   }
 
   function renderTabs() {
@@ -175,7 +235,7 @@
     for (const s of surfaces) {
       const b = document.createElement("button");
       b.className = "tab"; b.dataset.id = s.id;
-      b.innerHTML = `<span class="glyph">${s.glyph || "□"}</span><span>${s.name}</span><span class="dot" id="dot-${s.id}"></span>`;
+      b.innerHTML = `<span class="glyph">${s.glyph || "□"}</span><span class="name">${s.name}</span><span class="dot" id="dot-${s.id}"></span>`;
       b.title = s.hint || "";
       b.onclick = () => activate(s.id);
       if (s.id === activeId) b.classList.add("active");
@@ -336,6 +396,71 @@
     document.getElementById("agentToggle").style.display = "none";
   }
   document.getElementById("agentToggle").onclick = () => openAgents();
+
+  // --- the two shell frames -------------------------------------------------
+  // COLLAPSE IS REMEMBERED. A layout choice that resets on every reload is one
+  // nobody uses twice; sessionStorage keeps it for the session without making it
+  // a setting anyone has to manage.
+  const railBtn = document.getElementById("railToggle");
+  const setRail = (collapsed) => {
+    document.body.classList.toggle("rail-collapsed", collapsed);
+    railBtn.textContent = collapsed ? "\u203A" : "\u2630";
+    railBtn.title = collapsed ? "expand the launcher" : "collapse the launcher to a toolstrip";
+    try { sessionStorage.setItem("shell.rail", collapsed ? "1" : "0"); } catch {}
+  };
+  setRail((() => { try { return sessionStorage.getItem("shell.rail") === "1"; } catch { return false; } })());
+  railBtn.onclick = () => setRail(!document.body.classList.contains("rail-collapsed"));
+
+  // MARKUP is the shell asking the SURFACE to annotate. The shell does not draw
+  // the annotations — it does not know what they would attach to — so this is
+  // intent, sent to the active surface, and the surface answers by doing it or by
+  // not being able to. A surface that ignores it is unaffected, like every other
+  // opt-in here.
+  //
+  // Deliberately NOT persisted across surfaces: annotate-mode belongs to the thing
+  // you are annotating, and carrying it into the next surface would turn a mode you
+  // set once into one you keep meeting.
+  const markupBtn = document.getElementById("markupToggle");
+  let markupOn = false;
+  const tellSurface = (msg) => {
+    const f = frames.get(activeId);
+    if (f && f.contentWindow) { try { f.contentWindow.postMessage(msg, "*"); } catch {} }
+  };
+  markupBtn.onclick = () => {
+    markupOn = !markupOn;
+    markupBtn.classList.toggle("on", markupOn);
+    tellSurface({ t: "markup", on: markupOn });
+    for (const fn of markupListeners) { try { fn(markupOn); } catch {} }
+  };
+
+  // --- the seam a shell-level feature attaches to ---------------------------
+  // ANNOTATION AND ANYTHING LIKE IT IS A SHELL FEATURE, NOT A SURFACE ONE, and
+  // this seam exists to keep it that way. If annotating required the surface to
+  // cooperate then "any surface is annotatable" would be false the moment a
+  // surface did not implement it — including every surface that already exists.
+  // So the overlay host sits OVER the stage, in the shell, and works on a surface
+  // that knows nothing about it.
+  //
+  // The MARKUP button belongs to the shell and stays there: a feature mounting
+  // here SUBSCRIBES to it rather than adding a second control that can disagree
+  // with the first.
+  const overlayHost = document.createElement("div");
+  overlayHost.id = "shell-overlay";
+  document.getElementById("stage").appendChild(overlayHost);
+  window.studioShell = {
+    // Where to draw. Pointer events are OFF on the host, so an idle overlay
+    // cannot swallow clicks meant for the surface underneath; a feature that
+    // wants input sets them on its own node.
+    overlay: overlayHost,
+    // Which surface is showing, and its frame. Read at CALL time — the active
+    // surface changes under a long-lived feature.
+    active: () => ({ id: activeId, frame: frames.get(activeId) || null }),
+    // Is markup mode on, and tell me when it changes.
+    markup: () => markupOn,
+    onMarkup: (fn) => { markupListeners.add(fn); return () => markupListeners.delete(fn); },
+    // Tell me when the surface changes, so an overlay can clear or re-anchor.
+    onSurface: (fn) => { surfaceListeners.add(fn); return () => surfaceListeners.delete(fn); },
+  };
   document.getElementById("agentsWord").onclick = () => {
     agents.classList.remove("open");
     document.getElementById("agentToggle").style.display = "";
