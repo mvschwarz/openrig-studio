@@ -36,6 +36,14 @@
 # files. Two providers, no ffmpeg, and no licence to go and acquire. The run
 # prints what it left out and how to ask for it.
 #
+# THE SYSTEMD UNIT IS NAMED PER STUDIO, not per box:
+#   openrig-studio-<dir-name>-<hash-of-STUDIO_DIR>.service
+# Stable across reprovisions of one studio, distinct between different ones, and
+# printed by the run. It used to be `openrig-studio.service` for everybody, so a
+# second provision silently took over the first studio's persistence — invisible
+# until a reboot, because the old process kept running and answering. A unit
+# belonging to a different studio is now REFUSED rather than overwritten.
+#
 set -euo pipefail
 
 SDK_REPO="${SDK_REPO:-https://github.com/mvschwarz/openrig-studio.git}"
@@ -332,9 +340,64 @@ done
 # (tunnel or an owner-controlled proxy). Do not "fix" this with 0.0.0.0.
 note "persist (systemd user service)"
 UNIT_DIR="$HOME/.config/systemd/user"
+LEGACY_UNIT="openrig-studio.service"
+
+# ONE UNIT NAME PER STUDIO, NOT ONE PER BOX.
+#
+# The unit used to be `openrig-studio.service` for every studio, so a SECOND
+# provision on the same box overwrote the FIRST one's unit and daemon-reloaded it.
+# The old process kept running, so everything anyone would check said fine:
+# `is-active` reported active and the original port answered 200 — both measuring
+# the OLD process — while the DEFINITION already pointed somewhere else. The damage
+# only appears at reboot, when the box starts the second studio and the first never
+# comes back.
+#
+# Found by cloud-impl on a live box with a reboot scheduled and held: the real
+# studio was serving happily while its unit pointed at a test studio that had
+# FAILED its own verification. That reboot would have booted the broken one.
+#
+# The name is derived from STUDIO_DIR, so it is stable across reprovisions of the
+# same studio and distinct between different ones. One box with several studios is
+# a normal thing to want — testing a provision beside a live one is exactly how
+# this was found.
+STUDIO_SLUG=$(basename "$STUDIO_DIR" | tr -c 'a-zA-Z0-9_-' '-' | sed 's/-\{2,\}/-/g; s/^-//; s/-$//')
+STUDIO_HASH=$(printf '%s' "$STUDIO_DIR" | cksum | cut -d' ' -f1)
+UNIT_NAME="openrig-studio-${STUDIO_SLUG:-studio}-${STUDIO_HASH}.service"
+
+# Which studio does an existing unit belong to? Read the DEFINITION, never the
+# runtime — that is the whole lesson of this defect.
+unit_studio_dir() {
+  [ -f "$1" ] || return 1
+  sed -n 's/^Environment=OPENRIG_STUDIO_DIR=//p' "$1" | head -1
+}
+
 if [ "$DRY_RUN" = 0 ]; then
   mkdir -p "$UNIT_DIR"
-  cat > "$UNIT_DIR/openrig-studio.service" <<UNIT
+
+  # REFUSE RATHER THAN ADOPT — the same rule the port guard already applies to a
+  # foreign studio. Rewriting our OWN unit is an ordinary reprovision and stays
+  # allowed; rewriting somebody else's is the defect.
+  EXISTING_DIR=$(unit_studio_dir "$UNIT_DIR/$UNIT_NAME" || true)
+  if [ -n "${EXISTING_DIR:-}" ] && [ "$EXISTING_DIR" != "$STUDIO_DIR" ]; then
+    warn "unit $UNIT_NAME already exists and belongs to a DIFFERENT studio:"
+    warn "  its OPENRIG_STUDIO_DIR: $EXISTING_DIR"
+    warn "  this run's:             $STUDIO_DIR"
+    warn "Refusing to overwrite it. A hash collision on the studio path is the only"
+    warn "way to reach this; rename or remove that unit deliberately."
+    exit 6
+  fi
+
+  # The legacy shared name. If it points at THIS studio it is ours to retire; if it
+  # points at another one, LEAVE IT ALONE and say so — that is the studio this
+  # defect would have silently stolen.
+  LEGACY_DIR=$(unit_studio_dir "$UNIT_DIR/$LEGACY_UNIT" || true)
+  if [ -n "${LEGACY_DIR:-}" ] && [ "$LEGACY_DIR" != "$STUDIO_DIR" ]; then
+    warn "a legacy $LEGACY_UNIT exists and belongs to ANOTHER studio ($LEGACY_DIR)."
+    warn "  Leaving it untouched. This run installs $UNIT_NAME instead."
+    warn "  That other studio should be reprovisioned to get its own named unit."
+  fi
+
+  cat > "$UNIT_DIR/$UNIT_NAME" <<UNIT
 [Unit]
 Description=OpenRig Studio
 After=network.target
@@ -350,7 +413,31 @@ RestartSec=3
 [Install]
 WantedBy=default.target
 UNIT
-  printf '  wrote %s\n' "$UNIT_DIR/openrig-studio.service"
+  printf '  wrote %s\n' "$UNIT_DIR/$UNIT_NAME"
+
+  # VERIFY THE DEFINITION AGAINST INTENT, not the runtime against hope.
+  # `is-active` and a 200 on the port both measure whatever process is already
+  # running, which is exactly what made this defect invisible. The only honest
+  # check is that the unit we just wrote names the studio we just provisioned.
+  WROTE_DIR=$(unit_studio_dir "$UNIT_DIR/$UNIT_NAME" || true)
+  if [ "${WROTE_DIR:-}" != "$STUDIO_DIR" ]; then
+    warn "the unit just written does not name this studio (got '${WROTE_DIR:-none}', expected '$STUDIO_DIR')"
+    exit 6
+  fi
+  if ! grep -q -- "--port ${STUDIO_PORT}\b" "$UNIT_DIR/$UNIT_NAME"; then
+    warn "the unit just written does not name this run's port ($STUDIO_PORT)"
+    exit 6
+  fi
+  printf '  verified unit definition: studio=%s port=%s\n' "$STUDIO_DIR" "$STUDIO_PORT"
+
+  # Retire OUR OWN legacy unit, once the replacement is written and verified.
+  # Only when it names this same studio — the other case warned above and is left
+  # strictly alone.
+  if [ "${LEGACY_DIR:-}" = "$STUDIO_DIR" ]; then
+    printf '  retiring legacy %s (same studio, now named %s)\n' "$LEGACY_UNIT" "$UNIT_NAME"
+    run "systemctl --user disable --now $LEGACY_UNIT" || true
+    rm -f "$UNIT_DIR/$LEGACY_UNIT"
+  fi
 fi
 # A host without an init system is a real case — containers, minimal images —
 # and the install has ALREADY SUCCEEDED by this point. Aborting here would throw
@@ -450,7 +537,23 @@ if [ "$HAVE_SYSTEMD" = 1 ]; then
     warn "The running process keeps the rail it composed at ITS boot; this run's studio.json"
     warn "takes effect on the next restart. Continuing to verify what is actually running."
   else
-    run "systemctl --user enable --now openrig-studio.service"
+    run "systemctl --user enable --now $UNIT_NAME"
+    # The unit MANAGER's view of the definition, which is the one that survives a
+    # reboot. The file on disk being right is necessary and not sufficient — a
+    # daemon-reload that did not take would leave the manager holding the old one,
+    # and every runtime check would still look healthy.
+    if LOADED_DIR=$(systemctl --user show "$UNIT_NAME" -p Environment --value 2>/dev/null); then
+      case "$LOADED_DIR" in
+        *"OPENRIG_STUDIO_DIR=$STUDIO_DIR"*)
+          printf '  systemd holds the right definition for %s\n' "$UNIT_NAME" ;;
+        *)
+          warn "systemd's loaded definition for $UNIT_NAME does not name this studio."
+          warn "  loaded: ${LOADED_DIR:-<empty>}"
+          warn "  expected OPENRIG_STUDIO_DIR=$STUDIO_DIR"
+          warn "  A reboot would start the wrong studio. Not failing the install — the"
+          warn "  studio is running — but persistence is NOT verified." ;;
+      esac
+    fi
   fi
 else
   # REPORT WHICH of the two conditions this is. They are different facts and an
