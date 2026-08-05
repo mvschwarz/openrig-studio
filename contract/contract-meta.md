@@ -54,6 +54,7 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
   "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read",
                    "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write"],
   "drive": { "listening": false, "reads": 0, "ops": 0 },
+  "focus": { "attribution": "caller-declared", "identityHeader": null },
   "manifest": {
     "ok": true, "errors": [], "warnings": [], "surfaces": 1,
     "seats": { "count": 1, "source": "package", "attachable": false },

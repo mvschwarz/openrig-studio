@@ -122,6 +122,23 @@ is single-process, loopback, and knows nothing about who is calling — so it
 records what it was told and this table says so. **Do not build a trust decision
 on `by` without knowing which kind of runtime produced it.**
 
+**And now you can ask.** `GET /api/contract` reports
+`focus: { attribution, identityHeader }` — `"caller-declared"` or `"verified"`,
+with the header's NAME and never a value. That question had no answer until it was
+possible for the answer to differ.
+
+The reference runtime derives a verified `by` when it is **configured** with
+`--identity-header <name>` (or `OPENRIG_STUDIO_IDENTITY_HEADER`), which is the
+operator asserting that something upstream — a proxy doing access control — strips
+that header from client requests and sets it itself. **Trusting an inbound header
+by default would be worse than caller-declared, because anyone can set one.**
+
+Configured, a verified identity **wins over the caller's claim**, and if no
+identity arrives `by` is **`null` rather than the caller's word**. Falling back
+would let `/api/contract` report `"verified"` over a record that was
+self-declared. Configured means this runtime derives identity; no identity
+available is *unknown*, which is a different answer from *whatever you say*.
+
 ## Addressing state WITHIN a surface (stable)
 
 The same problem as focus, arriving from the other end. Focus lets an agent ask

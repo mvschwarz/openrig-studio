@@ -27,12 +27,13 @@ const freePort = () => new Promise((resolve, reject) => {
   s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
 
-async function start() {
+async function start({ identityHeader } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-"));
   fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
   const port = await freePort();
-  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port)],
+  const extra = identityHeader ? ["--identity-header", identityHeader] : [];
+  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port), ...extra],
     { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
   const base = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 10_000;
@@ -47,8 +48,9 @@ async function start() {
     dir,
     read: async (since) => (await fetch(`${base}/api/focus${since === undefined ? "" : `?since=${encodeURIComponent(since)}`}`,
       { cache: "no-store" })).json(),
-    write: async (patch) => (await fetch(`${base}/api/focus`,
-      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) })).json(),
+    write: async (patch, headers = {}) => (await fetch(`${base}/api/focus`,
+      { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(patch) })).json(),
+    contract: async () => (await fetch(`${base}/api/contract`, { cache: "no-store" })).json(),
     stop: () => proc.kill(),
   };
 }
@@ -252,6 +254,66 @@ test("by is CALLER-DECLARED in this runtime — the documented downgrade, pinned
   await s.write({ note: "no by field on this write" });
   assert.equal((await s.read()).focus.by, null,
     "a write that declared no actor produced an actor anyway");
+});
+
+test("a runtime WITH a real identity overrides what the caller claims", async (t) => {
+  // focus.md has always said a runtime that has a real identity for its caller
+  // MUST override `by`. It said so while no runtime could, which made it a
+  // promise about other people's implementations. This one can now.
+  //
+  // The case is real: a provider on the founder's box derives the user from a
+  // proxy-set access header, and migrating it to the platform verb would have
+  // traded header-verified attribution for self-declared — a regression on the one
+  // box where that header exists.
+  const s = await start({ identityHeader: "x-verified-user" });
+  t.after(() => s.stop());
+
+  await s.write({ surface: "canvas", by: "i-said-so" }, { "x-verified-user": "real@example.com" });
+  assert.equal((await s.read()).focus.by, "real@example.com",
+    "the caller's claim beat the verified identity — the override is the whole point");
+});
+
+test("configured but no identity present yields NULL, never the caller's claim", async (t) => {
+  // THE LIE THIS REMOVES, found by reading my own verification output rather than
+  // being told: falling back to the caller's word would make /api/contract report
+  // attribution "verified" over a record that was self-declared. A consumer told
+  // attribution is verified would then trust a value nobody checked.
+  //
+  // Configured means this runtime DERIVES identity. No identity available is
+  // UNKNOWN, which is a different answer from "whatever you say".
+  const s = await start({ identityHeader: "x-verified-user" });
+  t.after(() => s.stop());
+
+  await s.write({ surface: "canvas", by: "i-said-so" });
+  assert.equal((await s.read()).focus.by, null,
+    "a configured runtime accepted the caller's claim as if it were verified");
+});
+
+test("an UNCONFIGURED runtime ignores the header entirely", async (t) => {
+  // The discriminating half. Without it, the two above pass against a runtime that
+  // trusts any inbound header — which is strictly worse than caller-declared,
+  // because anyone can set one.
+  const s = await start();
+  t.after(() => s.stop());
+
+  await s.write({ surface: "canvas", by: "i-said-so" }, { "x-verified-user": "attacker@example.com" });
+  assert.equal((await s.read()).focus.by, "i-said-so",
+    "an unconfigured runtime honoured an inbound identity header it was never told to trust");
+});
+
+test("/api/contract says WHICH kind of attribution this runtime produces", async (t) => {
+  // focus.md tells a consumer not to build a trust decision on `by` without
+  // knowing which kind of runtime produced it — and gave them no way to ask. This
+  // is that gap. The header NAME is reported, never a value: a consumer needs to
+  // know attribution is verified, not who by.
+  const plain = await start();
+  t.after(() => plain.stop());
+  assert.deepEqual((await plain.contract()).focus, { attribution: "caller-declared", identityHeader: null });
+
+  const verified = await start({ identityHeader: "x-verified-user" });
+  t.after(() => verified.stop());
+  assert.deepEqual((await verified.contract()).focus,
+    { attribution: "verified", identityHeader: "x-verified-user" });
 });
 
 test("a malformed write is refused by name rather than silently ignored", async (t) => {

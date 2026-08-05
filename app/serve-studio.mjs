@@ -55,6 +55,20 @@ const OVERLAY_DIR = (() => {
 })();
 const OVERLAY_MANIFEST = OVERLAY_DIR ? path.join(OVERLAY_DIR, "surfaces.json") : null;
 
+// WHO THE CALLER IS, WHEN SOMETHING UPSTREAM ACTUALLY KNOWS.
+//
+// focus.md says `by` is caller-declared here and that "a runtime that has a real
+// identity for the caller MUST override it". This is that override, and it is
+// OPT-IN BY CONFIGURATION rather than sniffed.
+//
+// TRUSTING AN INBOUND HEADER BY DEFAULT WOULD BE WORSE THAN CALLER-DECLARED,
+// because anyone can set one. Naming the header is the operator asserting that
+// something upstream strips it from client requests and sets it themselves — a
+// proxy doing access control. Unconfigured, this runtime behaves exactly as it
+// documented before: it records what it was told.
+const IDENTITY_HEADER = (arg("--identity-header", process.env.OPENRIG_STUDIO_IDENTITY_HEADER) || "")
+  .toLowerCase().trim() || null;
+
 const CONTRACT_VERSION = "0.1";
 // PROCESS IDENTITY — the answer to "the agent edited the page, when may I reload?"
 //
@@ -657,7 +671,7 @@ const focusMarker = () => `${BOOT_ID}.${focusSeq}`;
 // a selection, so pinning something destroyed the view context the focus
 // reporter had just written. Both writers were behaving reasonably; the format
 // made them collide.
-function writeFocus(patch) {
+function writeFocus(patch, verifiedBy = null) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
     return { ok: false, error: "focus write must be a JSON object naming the fields to update" };
   }
@@ -670,7 +684,19 @@ function writeFocus(patch) {
   // the record last genuinely changed. `by` is caller-declared and this runtime
   // has no identity to override it with — see contract/focus.md.
   focusRecord.at = new Date().toISOString();
-  focusRecord.by = typeof patch.by === "string" ? patch.by : null;
+  // A verified identity WINS over whatever the caller said about itself. That is
+  // the whole point of the override: the caller does not get to disagree with the
+  // proxy that authenticated it.
+  //
+  // AND WHEN THIS RUNTIME IS CONFIGURED TO DERIVE IDENTITY BUT NONE ARRIVES, `by`
+  // IS null RATHER THAN THE CALLER SAYING SO. Falling back to the claim would make
+  // /api/contract report "verified" over a record that was self-declared — a
+  // consumer told attribution is verified would then trust a value nobody checked.
+  // Configured means this runtime derives identity; no identity available is
+  // UNKNOWN, which is a different answer from "whatever you say".
+  focusRecord.by = IDENTITY_HEADER
+    ? verifiedBy
+    : (typeof patch.by === "string" ? patch.by : null);
   // ANY field change moves the marker, including a view change with an unchanged
   // selection — the case the surveyed implementation misses entirely, because it
   // dedupes on selection alone and a user who changed page has plainly changed
@@ -812,7 +838,10 @@ http.createServer(async (req, res) => {
         let patch;
         try { patch = JSON.parse(raw || "null"); }
         catch (e) { return sendJson(res, 400, { ok: false, error: `focus write is not valid JSON: ${e.message}` }); }
-        const result = writeFocus(patch);
+        // Read at call time from THIS request. A header on one request says nothing
+        // about the next one.
+        const verified = IDENTITY_HEADER ? (req.headers[IDENTITY_HEADER] || null) : null;
+        const result = writeFocus(patch, typeof verified === "string" && verified ? verified : null);
         return sendJson(res, result.ok ? 200 : 400, result);
       }
       // The read the record never had. `?since=` is the change-signal contract,
@@ -846,6 +875,13 @@ http.createServer(async (req, res) => {
         // Inspectable without posting: an agent can ask whether anything is
         // listening before it drives, rather than learning from a no-op.
         drive: { listening: driveReads > 0, reads: driveReads, ops: driveSeq },
+        // WHICH KIND OF `by` THIS RUNTIME PRODUCES. focus.md tells a consumer not
+        // to build a trust decision on `by` without knowing which kind of runtime
+        // made it — and until now there was no way to ask. The header NAME is
+        // reported, not any value: a consumer needs to know attribution is
+        // verified, not who by.
+        focus: { attribution: IDENTITY_HEADER ? "verified" : "caller-declared",
+                 identityHeader: IDENTITY_HEADER },
         manifest: manifestReport(),
       });
     }
