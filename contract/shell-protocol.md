@@ -96,10 +96,45 @@ then flips between one header and two**, so the studio reads as a set of pages
 rather than one application. That was measured across five apps before this rule
 was written: three drew their own, two did not.
 
-**Per-app actions stay in the surface body.** There is no declared slot in the
-header for them yet, and until there is, a surface reaching into shell chrome is
-depending on markup the shell has not promised. When a slot exists it will be
-declared here.
+### The header splits in half (stable)
+
+| half | belongs to | holds |
+|---|---|---|
+| **left** | the **app** | its title, its crumb, its own actions |
+| **right** | the **shell** | the agent sidebar opener, markup |
+
+**A surface DECLARES what goes in its half; it never draws it.** That distinction
+is the whole rule. Declaring means the shell renders it, so there is exactly one
+header on screen and the shell is never surprised by markup it did not write —
+which is what closes the two-headers problem in the contract rather than by asking
+every app to delete something.
+
+Send over the existing surface→shell channel:
+
+```json
+{ "t": "header",
+  "title": "CUTDOWN",
+  "crumb": "take-04.mov · 3 cuts",
+  "actions": [ { "id": "export", "label": "EXPORT" },
+               { "id": "grid", "label": "GRID", "on": true } ] }
+```
+
+Every field is optional. A surface that sends nothing keeps the shell's defaults —
+the surface's name and hint from its manifest row — so an existing surface needs no
+change and still gets a correct header.
+
+Clicking a declared action posts **`{ "t": "header-action", "id": "<id>" }`** back
+to the surface. The shell does not know what any action means and does not try:
+it renders a label and returns the click.
+
+**Only the ACTIVE surface may write the header.** A background surface is still
+running and still holds a live channel, so without that rule the header shows
+whichever surface spoke last rather than the one you are looking at. Actions are
+cleared when the shown surface changes — a stale button that still looks live is
+worse than an empty space.
+
+**This replaces the earlier rule that per-app actions stay in the surface body.**
+The slot exists now, and it is the left half.
 
 **The rail collapses to a toolstrip** and a surface must not assume its width.
 Anything that measures the viewport should measure it, not compute it from a

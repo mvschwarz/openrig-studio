@@ -23,8 +23,15 @@
   #topbar { display: flex; align-items: center; gap: 12px; padding: 0 14px; height: 46px;
     background: var(--panel); border-bottom: 1px solid var(--edge); flex: none; }
   #topbar .title { color: var(--bone); font-weight: 700; letter-spacing: .22em; font-size: 12px; }
-  #topbar .crumb { color: var(--faint); font-size: 11px; flex: 1; overflow: hidden;
+  #topbar .crumb { color: var(--faint); font-size: 11px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
+  /* THE HEADER IS SPLIT: the left half is the APP's, the right half is the SHELL's.
+     An app declares what goes in its half; it never draws chrome, and it cannot
+     reach into the shell's. That boundary is what closes the two-headers problem
+     in the contract rather than by asking every app to delete something. */
+  #appHalf { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+  #shellHalf { display: flex; align-items: center; gap: 8px; flex: none; }
+  #appActions { display: flex; align-items: center; gap: 6px; flex: none; }
   #topbar button { background: none; border: 1px solid var(--edge2); border-radius: 2px;
     color: var(--body); font: inherit; font-size: 9px; letter-spacing: .18em; text-transform: uppercase;
     font-weight: 600; padding: 7px 12px; cursor: pointer; }
@@ -136,10 +143,15 @@
 <div id="app">
   <header id="topbar">
     <button id="railToggle" title="collapse the launcher to a toolstrip">☰</button>
-    <span class="title" id="topTitle">STUDIO</span>
-    <span class="crumb" id="topCrumb"></span>
-    <button id="markupToggle" title="annotate this surface">MARKUP</button>
-    <button id="agentToggle" title="the seat roster">AGENTS ▸</button>
+    <div id="appHalf">
+      <span class="title" id="topTitle">STUDIO</span>
+      <span class="crumb" id="topCrumb"></span>
+      <span id="appActions"></span>
+    </div>
+    <div id="shellHalf">
+      <button id="markupToggle" title="annotate this surface">MARKUP</button>
+      <button id="agentToggle" title="the seat roster">AGENTS ▸</button>
+    </div>
   </header>
   <div id="shellframes">
   <nav id="rail">
@@ -164,16 +176,38 @@
 </div>
 <script>
 (async () => {
-  // SUBSCRIBER SETS ARE DECLARED HERE, AT THE TOP, ON PURPOSE.
-  // They were first written next to the buttons that fire them, which is where
-  // they read most naturally and is a temporal dead zone: activate() runs during
-  // boot and reads surfaceListeners, so a const declared 170 lines further down
-  // threw before the shell ever finished starting. The tabs still rendered, so
-  // the page looked ALIVE while the header stayed blank — the third time this
-  // file has produced a TDZ, and the reason its init block sits at the very end.
-  // Declarations go above their readers; startup work goes below everything.
+  // ============================================================================
+  // SHELL STATE. EVERY MODULE-LEVEL const/let THIS FILE ADDS GOES HERE, ABOVE
+  // EVERYTHING THAT COULD READ IT. THIS IS NOT A STYLE PREFERENCE.
+  //
+  // Four temporal dead zones have now shipped from this one file, all identical:
+  // a binding declared next to the code that FIRES it — which is where it reads
+  // most naturally — while a function defined earlier READS it during boot.
+  // activate() runs while the shell starts, so anything it touches must already
+  // exist by then.
+  //
+  // THE FAILURE IS WHY THIS DESERVES A RULE RATHER THAN CARE: it does not look
+  // like a crash. The rail renders, the tabs render, the page is plainly alive —
+  // and the header stays blank, because activate() threw halfway through. Three
+  // of the four were found by something else being missing, never by the page
+  // looking wrong.
+  //
+  // Declarations above their readers; startup work at the very bottom, which is
+  // why the init block is where it is.
+  //
+  // NOT YET MECHANISED, and stated so nobody mistakes this comment for a guard:
+  // the real fix is a smoke check that loads this file in a browser and fails
+  // when the shell does not finish booting. It would have caught all four
+  // regardless of which binding caused them. Until that exists, this block is
+  // discipline, and discipline is what produced the four.
+  // ============================================================================
   const surfaceListeners = new Set();
   const markupListeners = new Set();
+  // What each surface declared for its half of the header. The shell holds it, so
+  // a surface that declares once on load keeps its header across a switch away and
+  // back — it has no reason to speak twice, and reverting to manifest defaults
+  // showed a stale crumb and no actions while the surface was unchanged.
+  const declaredHeaders = new Map();
 
   // --- contract meta first: the shell itself is a contract consumer -------
   let meta = null;
@@ -225,9 +259,20 @@
     // The header names what you are looking at. It is the shell speaking, not the
     // surface — a surface that drew its own title bar would disagree with the rail
     // the moment either changed.
+    // The previous surface's actions are meaningless here, and a button that
+    // still LOOKS live is worse than an empty space. Cleared first, then this
+    // surface's own declaration is restored if it made one — so the reset is
+    // never visible as a flash of the wrong header.
+    document.getElementById("appActions").replaceChildren();
     for (const fn of surfaceListeners) { try { fn(s.id); } catch {} }
     document.getElementById("topTitle").textContent = s.name;
     document.getElementById("topCrumb").textContent = s.hint || "";
+    // ORDER IS LOAD-BEARING: the manifest defaults land first, then whatever this
+    // surface declared overrides them. Restoring before the defaults meant the
+    // defaults won — the actions came back but the declared crumb was silently
+    // replaced by the manifest hint, which reads as correct and is not.
+    const remembered = declaredHeaders.get(s.id);
+    if (remembered) renderAppHeader({ actions: [], ...remembered });
   }
 
   function renderTabs() {
@@ -267,6 +312,14 @@
     if (!e.data || typeof e.data !== "object") return;
     if (e.data.t === "open-surface" && byId(e.data.id)) activate(e.data.id);
     if (e.data.t === "open-agent") openAgents(e.data.seat);
+    if (e.data.t === "header") {
+      const active = frames.get(activeId);
+      if (active && e.source === active.contentWindow) {
+        // Merge, so a surface may update one field without restating the rest.
+        declaredHeaders.set(activeId, { ...(declaredHeaders.get(activeId) || {}), ...e.data });
+        renderAppHeader(e.data);
+      }
+    }
   });
 
   // --- agent sidebar: a real seat's session in a frame -------------------
@@ -444,6 +497,38 @@
   // The MARKUP button belongs to the shell and stays there: a feature mounting
   // here SUBSCRIBES to it rather than adding a second control that can disagree
   // with the first.
+  // --- the app half of the header ------------------------------------------
+  // A surface DECLARES what belongs in its half; the shell renders it. Declaring
+  // rather than drawing is what keeps one header on screen: the surface cannot
+  // produce a second bar, and the shell cannot be surprised by markup it did not
+  // write.
+  //
+  // Sent over the existing surface->shell channel because that is already the only
+  // one, and because a manifest field could not do this job — an action's LABEL and
+  // its ON state change while the surface runs, and a static declaration would go
+  // stale the first time a surface toggled something.
+  //
+  // ONLY THE ACTIVE SURFACE MAY WRITE THE HEADER. A background frame is still
+  // running and still holds a live channel, so without this check the header shows
+  // whichever surface spoke last rather than the one you are looking at.
+  const appActionsEl = document.getElementById("appActions");
+  function renderAppHeader(decl) {
+    if (decl.title !== undefined) document.getElementById("topTitle").textContent = decl.title;
+    if (decl.crumb !== undefined) document.getElementById("topCrumb").textContent = decl.crumb;
+    if (!Array.isArray(decl.actions)) return;
+    appActionsEl.replaceChildren(...decl.actions.slice(0, 6).map((a) => {
+      const btn = document.createElement("button");
+      btn.textContent = String(a.label ?? a.id ?? "");
+      btn.title = String(a.title ?? "");
+      if (a.on) btn.classList.add("on");
+      if (a.disabled) btn.disabled = true;
+      // The click goes BACK to the surface. The shell does not know what any of
+      // these mean and must not start guessing.
+      btn.onclick = () => tellSurface({ t: "header-action", id: a.id });
+      return btn;
+    }));
+  }
+
   const overlayHost = document.createElement("div");
   overlayHost.id = "shell-overlay";
   document.getElementById("stage").appendChild(overlayHost);
