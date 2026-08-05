@@ -389,7 +389,7 @@ defect this document was written to end.
 | provider-declared `seeds` | **yes**, `studio.mjs` |
 | `supplies` read from `provider.json` by `install-app --check` | **yes** |
 | `app-manifest.schema.json` **enforced** against a manifest | **not yet** — no tool reads it |
-| `install-app.mjs --check` understanding `calls` / `provider.json` | **not yet** — it validates the older shape |
+| `install-app.mjs --check` understanding `calls` / `provider.json` | **yes** — a provider REFERENCE with no app-level `run`/`verbs` passes, `calls{}` is read, and a root kind the SDK has never heard of binds. Pinned by a test that installs a current-shape app, with negative controls for an unbound root kind and a missing `provider.json` |
 | `manifest_version` checked on install | **not yet** — declared, never verified |
 
 **Coverage behind this table is not uniform, and the difference is worth
