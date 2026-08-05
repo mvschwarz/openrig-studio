@@ -194,14 +194,40 @@ fi
 # added tomorrow without a lockfile must degrade loudly, not abort the install,
 # and the step must never be a no-op that looks like success.
 note "provider dependencies"
+# QUIET ON SUCCESS, LOUD ON FAILURE. These ran under `--silent`, which suppresses
+# npm's ERRORS as well as its progress — so a provider whose install failed
+# aborted the script (set -e) with no output naming what went wrong. A registry
+# 404, a bad engine constraint and a network timeout all produced the same thing:
+# nothing. The operator is left with a dead end at the exact moment they most need
+# the text, and the obvious next move — re-run it — reproduces the silence.
+#
+# Output is captured rather than streamed so a healthy run stays as quiet as it
+# was, and the whole log is printed only when there is a failure to explain.
+install_provider_deps() {
+  local label="$1" cmd="$2" log rc
+  if [ "$DRY_RUN" = 1 ]; then printf '  would: %s\n' "$cmd"; return 0; fi
+  log=$(mktemp "${TMPDIR:-/tmp}/provider-deps-XXXXXX")
+  set +e; eval "$cmd" > "$log" 2>&1; rc=$?; set -e
+  if [ $rc -ne 0 ]; then
+    warn "provider '$label' dependency install FAILED (exit $rc) — npm said:"
+    sed 's/^/    | /' "$log" >&2
+    printf '    (command: %s)\n' "$cmd" >&2
+    rm -f "$log"
+    return $rc
+  fi
+  rm -f "$log"
+  return 0
+}
+
 for p in "$STUDIO_DIR"/apps/providers/*/; do
   n=$(basename "$p")
   if [ -f "$p/package-lock.json" ]; then
-    printf '  %-16s npm ci (lockfile present)\n' "$n"; run "npm ci --prefix '$p' --silent"
+    printf '  %-16s npm ci (lockfile present)\n' "$n"
+    install_provider_deps "$n" "npm ci --prefix '$p' --no-audit --no-fund"
   else
     printf '  %-16s NO LOCKFILE -> npm install (declared deps: %s)\n' "$n" \
       "$($NODE_BIN -p "Object.keys(require('$p/package.json').dependencies||{}).length" 2>/dev/null || echo '?')"
-    run "npm install --prefix '$p' --silent --no-audit --no-fund"
+    install_provider_deps "$n" "npm install --prefix '$p' --no-audit --no-fund"
   fi
 done
 
