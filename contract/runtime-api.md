@@ -133,6 +133,28 @@ Case-insensitive filename search under the root:
 `{ "ok": true, "hits": [{name, path, kind}] }`. Bounded result count; queries
 under 2 characters return empty hits.
 
+## annotations
+
+Marks drawn over a surface by a human or an agent. Full semantics — the record,
+the sub-context, and what the shell composes — are in `annotations.md`; this is
+the verb shape.
+
+### `GET /api/annotations?scope=<key>` — stable
+`{ "ok": true, "scope": "<key>", "records": [ … ] }`.
+
+**Without `scope` this answers an empty set, not every scope on the box.** A
+caller that forgot the parameter would otherwise be handed another surface's marks
+and render them over this one.
+
+### `POST /api/annotations` — stable
+Body `{ scope, records }`; answers `{ ok, scope, records }`. Replaces the whole
+set for that scope. A write naming no scope, or carrying no `records` array, is
+refused with 400 naming which.
+
+**Substitutable, like the files verbs.** These answer stored marks — data on the
+box — not the runtime describing itself, so a provider that knows where a real
+studio keeps annotations should serve them under this shape.
+
 ## runtime-internal — exists in some runtimes; DO NOT build on
 
 Listed so you are warned at the point of temptation. None of these are

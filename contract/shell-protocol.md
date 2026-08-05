@@ -42,10 +42,18 @@ Send from inside your iframe with `parent.postMessage(msg, "*")`:
 | `{ "t": "open-surface", "id": "<surface-id>" }` | The shell activates that surface (same as a rail click). Unknown ids are ignored. |
 | `{ "t": "open-agent" }` | The shell opens the agent sidebar. |
 | `{ "t": "open-agent", "seat": "<seat-name>" }` | Opens the sidebar with that roster seat highlighted. Unknown seats open the sidebar unhighlighted. |
+| `{ "t": "header", … }` | Declares the surface's half of the header. See *The header splits in half* below. |
+| `{ "t": "annotation-context", "id": "<opaque>" }` | Refines which board of annotations this surface is showing. Only for a surface holding several documents behind one id — see `annotations.md`. `null` or omitted returns to the default. |
 
-This message set is closed for v0.1: the shell ignores any other `t` value.
-New message types arrive as contract additions, never by surfaces inventing
-them.
+This message set is closed: the shell ignores any other `t` value. **New message
+types arrive as contract additions, never by surfaces inventing them** — which is
+why each of the two additions since v0.1 shipped was documented in this table in
+the same commit that implemented it, rather than being discovered later by reading
+the shell.
+
+Every one of these is **additive and optional**. A surface that sends nothing at
+all is a correct surface: it gets a header from its manifest row, one board of
+annotations, and no loss of function.
 
 ## The agent sidebar (what "seat" means in v0.1)
 
@@ -159,6 +167,12 @@ render its own richer annotations, or to get its own controls out of the way.
 **Do not build a feature that requires this message.** A shell feature that only
 works on surfaces which cooperate is a feature that does not work on the surfaces
 that already exist.
+
+**Annotation is the worked example of that rule.** The shell draws marks on an
+overlay above the stage, so every surface is annotatable including ones written
+before the feature existed. A surface may refine *which board* it is showing with
+`annotation-context` when it holds several documents behind one id, but it is
+never asked to draw, store, or understand a mark. See `annotations.md`.
 
 ## Surface expectations (visual / accessibility baseline)
 

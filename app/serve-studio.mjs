@@ -69,6 +69,23 @@ const OVERLAY_MANIFEST = OVERLAY_DIR ? path.join(OVERLAY_DIR, "surfaces.json") :
 const IDENTITY_HEADER = (arg("--identity-header", process.env.OPENRIG_STUDIO_IDENTITY_HEADER) || "")
   .toLowerCase().trim() || null;
 
+// WHERE ANNOTATIONS LIVE — in MEMORY, unless an operator names a file.
+//
+// NOT under FIXTURES, and that is the whole reason this is a separate flag. The
+// change-signal watch is recursive over FIXTURES, so a marks file written there
+// would fire the signal on EVERY annotation write — annotating a surface would
+// reload the surface being annotated, which is a defect that looks like a bug in
+// the surface rather than in this choice.
+//
+// NOT inside the package either. A boot step that writes into the installed
+// package makes node_modules state rather than dependencies, and a copied tree
+// then carries one instance's marks into another (failure-modes.md #8).
+//
+// So: memory by default, exactly like focus and drive, and the layer SAYS
+// "session only" when nothing is persisting it. A file is opt-in and lives
+// wherever the operator puts it.
+const ANNOTATIONS_FILE = arg("--annotations", process.env.OPENRIG_STUDIO_ANNOTATIONS) || null;
+
 const CONTRACT_VERSION = "0.1";
 // PROCESS IDENTITY — the answer to "the agent edited the page, when may I reload?"
 //
@@ -93,7 +110,8 @@ const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2
 // because there are no write verbs — and it lets a runtime offer read-only focus
 // honestly rather than claiming a namespace it half-implements.
 const CAPABILITIES = ["contract.meta", "observe.factory-state", "stream.events", "files.read",
-  "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write"];
+  "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write",
+  "annotations.read", "annotations.write"];
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json", ".css": "text/css",
   ".js": "text/javascript", ".mjs": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png",
@@ -724,6 +742,34 @@ function writeFocus(patch, verifiedBy = null) {
 // break on any re-layout, and every surface would have to freeze its markup to
 // stay drivable. Same decision, for the same reason, as `selection` being typed by
 // its surface rather than universally.
+// scope key -> records[]. The key is opaque to the runtime: the shell composes it
+// from the surface and, when a surface declares one, its sub-context. A runtime
+// that parsed it would have to know what a surface's documents are.
+const annotations = new Map();
+let annotationWrites = 0;
+
+function loadAnnotations() {
+  if (!ANNOTATIONS_FILE) return;
+  try {
+    const raw = JSON.parse(fs.readFileSync(ANNOTATIONS_FILE, "utf8"));
+    for (const [scope, records] of Object.entries(raw?.scopes || {})) {
+      if (Array.isArray(records)) annotations.set(scope, records);
+    }
+  } catch (e) {
+    // A missing file is the ordinary first-run case, not a fault. A CORRUPT one
+    // is reported rather than silently starting empty, because an empty board and
+    // a failed load must not share an appearance.
+    if (e.code !== "ENOENT") console.error("annotations: could not read " + ANNOTATIONS_FILE + " — " + e.message);
+  }
+}
+
+function persistAnnotations() {
+  if (!ANNOTATIONS_FILE) return;
+  const scopes = Object.fromEntries(annotations);
+  fs.mkdirSync(path.dirname(ANNOTATIONS_FILE), { recursive: true });
+  fs.writeFileSync(ANNOTATIONS_FILE, JSON.stringify({ scopes }, null, 2));
+}
+
 let driveOp = null;
 let driveSeq = 0;
 // HOW MANY TIMES A SURFACE HAS ACTUALLY POLLED. Not a declaration — an
@@ -828,6 +874,13 @@ function filesSearch(q) {
 // next to the function it calls.
 watchForChanges();
 loadManifest();
+// Marks written by a previous run of this file-backed runtime. Omitting this call
+// is not a visible failure: writing works, the board looks healthy, and the loss
+// only appears on the next restart. A test restarts the runtime rather than
+// reading back within one process, because a write and a read in the same process
+// are both served by the in-memory map and agree with each other whether or not
+// this line exists.
+loadAnnotations();
 
 http.createServer(async (req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
@@ -867,6 +920,27 @@ http.createServer(async (req, res) => {
       const marker = driveMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, op: driveOp });
     }
+    if (u.pathname === "/api/annotations") {
+      if (req.method === "POST") {
+        const raw = await readBody(req);
+        let body;
+        try { body = JSON.parse(raw || "null"); }
+        catch (e) { return sendJson(res, 400, { ok: false, error: `annotations write is not valid JSON: ${e.message}` }); }
+        const scope = typeof body?.scope === "string" && body.scope ? body.scope : null;
+        if (!scope) return sendJson(res, 400, { ok: false, error: "annotations write names no scope — send { scope, records }" });
+        if (!Array.isArray(body?.records)) return sendJson(res, 400, { ok: false, error: "annotations write has no records array — send { scope, records }" });
+        annotations.set(scope, body.records);
+        annotationWrites += 1;
+        try { persistAnnotations(); }
+        catch (e) { return sendJson(res, 500, { ok: false, error: `annotations could not be persisted: ${e.message}` }); }
+        return sendJson(res, 200, { ok: true, scope, records: body.records });
+      }
+      // Read is scoped. Without a scope this answers an EMPTY set rather than
+      // every scope on the box: a caller that forgot the parameter would otherwise
+      // receive another surface's marks and render them over this one.
+      const scope = u.searchParams.get("scope");
+      return sendJson(res, 200, { ok: true, scope: scope || null, records: scope ? (annotations.get(scope) || []) : [] });
+    }
     if (u.pathname === "/api/contract") {
       return sendJson(res, 200, {
         contractVersion: CONTRACT_VERSION,
@@ -882,6 +956,11 @@ http.createServer(async (req, res) => {
         // verified, not who by.
         focus: { attribution: IDENTITY_HEADER ? "verified" : "caller-declared",
                  identityHeader: IDENTITY_HEADER },
+        // MEASURED, not declared. "session only" and "persisted" are two different
+        // promises to whoever just drew a mark, and a consumer should be able to
+        // tell which one it got without drawing one and restarting to find out.
+        annotations: { persistence: ANNOTATIONS_FILE ? "file" : "memory",
+                       scopes: annotations.size, writes: annotationWrites },
         manifest: manifestReport(),
       });
     }

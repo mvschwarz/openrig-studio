@@ -1,0 +1,97 @@
+.studio-annotations {
+  --ann-ink: #f3f5f8;
+  --ann-body: #cbd1db;
+  --ann-faint: #929cad;
+  --ann-line: #323a49;
+  --ann-panel: rgba(18, 21, 28, .96);
+  --ann-human: #ff6b5a;
+  --ann-agent: #8b93ff;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  color: var(--ann-ink);
+  font: 12px/1.35 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.studio-annotations * { box-sizing: border-box; }
+.studio-annotations.is-marking { pointer-events: none; }
+.studio-annotations__canvas { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.studio-annotations.is-marking .studio-annotations__canvas { pointer-events: auto; cursor: crosshair; }
+.studio-annotations.is-marking.is-browsing .studio-annotations__canvas { cursor: default; }
+.studio-annotations__mark { pointer-events: none; }
+.studio-annotations.is-marking.is-browsing .studio-annotations__mark { pointer-events: all; cursor: grab; }
+.studio-annotations.is-marking.is-browsing .studio-annotations__mark:active { cursor: grabbing; }
+.studio-annotations__mark .shape { fill: rgba(255,107,90,.07); stroke: var(--ann-human); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.studio-annotations__mark.agent .shape { fill: rgba(139,147,255,.08); stroke: var(--ann-agent); }
+.studio-annotations__mark.selected .shape { stroke-width: 5; filter: drop-shadow(0 0 4px rgba(255,255,255,.55)); }
+.studio-annotations__badge { fill: var(--ann-human); }
+.studio-annotations__mark.agent .studio-annotations__badge { fill: var(--ann-agent); }
+.studio-annotations__badge-text { fill: #101217; font-size: 10px; font-weight: 900; text-anchor: middle; dominant-baseline: central; }
+.studio-annotations__label { fill: var(--ann-ink); font-size: 11px; font-weight: 800; paint-order: stroke; stroke: #101217; stroke-width: 4px; stroke-linejoin: round; }
+.studio-annotations__draft .shape { stroke-dasharray: 7 5; }
+
+/* A MARK WHOSE ELEMENT IS GONE MUST NOT LOOK LIKE ONE THAT FOUND IT.
+   Drawn at the last geometry it knew, which is the only position available — so
+   without this it points confidently at whatever now occupies that space, and a
+   reader believes it means that thing. Dashed, desaturated, and badged "?": still
+   visible, because deleting it silently would lose what someone wrote, but never
+   mistakable for an anchored mark. The side panel already said "anchor missing";
+   this is the half a reader looking at the SURFACE can see. */
+.studio-annotations__mark.missing .shape { stroke: var(--ann-faint); stroke-dasharray: 5 4; fill: rgba(146,156,173,.05); }
+.studio-annotations__mark.missing .studio-annotations__badge { fill: var(--ann-faint); }
+.studio-annotations__mark.missing .studio-annotations__label { opacity: .75; }
+
+.studio-annotations__tools,
+.studio-annotations__thread {
+  position: absolute;
+  display: none;
+  pointer-events: auto;
+  background: var(--ann-panel);
+  border: 1px solid var(--ann-line);
+  box-shadow: 0 14px 40px rgba(0,0,0,.3);
+  backdrop-filter: blur(14px);
+}
+.studio-annotations.is-marking .studio-annotations__tools,
+.studio-annotations.is-marking .studio-annotations__thread { display: flex; }
+.studio-annotations__tools { top: 12px; left: 50%; transform: translateX(-50%); z-index: 3; align-items: center; gap: 5px; padding: 6px; border-radius: 4px; }
+.studio-annotations__tools button,
+.studio-annotations__thread button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ann-body);
+  padding: 7px 9px;
+  border-radius: 3px;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+.studio-annotations__tools button:hover,
+.studio-annotations__thread button:hover { color: var(--ann-ink); background: rgba(255,255,255,.07); }
+.studio-annotations__tools button.on { color: #111319; background: var(--ann-ink); }
+.studio-annotations__tools kbd { margin-left: 4px; opacity: .48; font: 800 9px/1 inherit; }
+.studio-annotations__note { width: min(260px, 24vw); border: 1px solid var(--ann-line); background: #11151c; color: var(--ann-ink); padding: 7px 9px; border-radius: 3px; outline: none; }
+.studio-annotations__note:focus { border-color: #667085; }
+
+.studio-annotations__thread { top: 62px; right: 12px; bottom: 12px; z-index: 2; width: min(300px, 30vw); flex-direction: column; border-radius: 4px; overflow: hidden; }
+.studio-annotations__thread-head { padding: 13px 14px; border-bottom: 1px solid var(--ann-line); }
+.studio-annotations__thread-head strong { display: block; font-size: 13px; }
+.studio-annotations__status { display: block; color: var(--ann-faint); margin-top: 3px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.studio-annotations__list { overflow: auto; padding: 7px; display: grid; gap: 5px; }
+.studio-annotations__empty { color: var(--ann-faint); padding: 18px 10px; }
+.studio-annotations__item { border: 1px solid var(--ann-line); border-left: 3px solid var(--ann-human); padding: 9px; border-radius: 3px; background: rgba(255,255,255,.025); cursor: pointer; }
+.studio-annotations__item.agent { border-left-color: var(--ann-agent); }
+.studio-annotations__item.selected { border-color: var(--ann-ink); }
+.studio-annotations__item-top { display: flex; align-items: center; gap: 6px; color: var(--ann-faint); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.studio-annotations__source { color: var(--ann-human); }
+.studio-annotations__item.agent .studio-annotations__source { color: var(--ann-agent); }
+.studio-annotations__item p { color: var(--ann-ink); margin: 7px 0 4px; }
+.studio-annotations__item small { color: var(--ann-faint); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-annotations__delete { margin-left: auto; padding: 2px 6px !important; color: var(--ann-faint) !important; }
+.studio-annotations__missing { color: #f2bd62; }
+
+@media (max-width: 760px) {
+  .studio-annotations__tools { left: 8px; right: 8px; transform: none; overflow-x: auto; }
+  .studio-annotations__note { min-width: 150px; }
+  .studio-annotations__thread { width: 250px; }
+}

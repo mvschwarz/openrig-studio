@@ -212,6 +212,15 @@
   // id -> the iframe showing that surface. Pre-existing shell state that lived
   // beside its first use; it belongs here with the rest for the same reason.
   const frames = new Map();
+  // surface id -> the sub-context that surface last declared, or absent.
+  //
+  // WHY THIS EXISTS: a surface id is not always fine enough. ARTIFACTS holds many
+  // independent documents behind ONE id, so marks keyed on the id alone either
+  // sit over the wrong document after a page change or collapse every document's
+  // thread into one. The shell cannot work out what a surface's documents are —
+  // only the surface knows — so the surface may refine the default, and the
+  // default is the surface id for everything that says nothing.
+  const declaredContexts = new Map();
 
   // --- contract meta first: the shell itself is a contract consumer -------
   let meta = null;
@@ -315,6 +324,25 @@
     if (!e.data || typeof e.data !== "object") return;
     if (e.data.t === "open-surface" && byId(e.data.id)) activate(e.data.id);
     if (e.data.t === "open-agent") openAgents(e.data.seat);
+    if (e.data.t === "annotation-context") {
+      // Only the ACTIVE surface may speak, for the same reason as the header: a
+      // backgrounded surface still holds a live channel, and without this the
+      // scope would follow whichever surface spoke last rather than the one you
+      // are looking at.
+      const current = frames.get(activeId);
+      if (current && e.source === current.contentWindow) {
+        const id = typeof e.data.id === "string" && e.data.id ? e.data.id : null;
+        const had = declaredContexts.get(activeId) ?? null;
+        if (had !== id) {
+          if (id) declaredContexts.set(activeId, id); else declaredContexts.delete(activeId);
+          // A context change is the same event as a surface change to anything
+          // drawing over the stage: save what you had, load what belongs here,
+          // clear and re-anchor. Reusing the one channel is what keeps a feature
+          // from needing to know that sub-contexts exist at all.
+          for (const fn of surfaceListeners) { try { fn(activeId); } catch {} }
+        }
+      }
+    }
     if (e.data.t === "header") {
       const active = frames.get(activeId);
       if (active && e.source === active.contentWindow) {
@@ -542,13 +570,58 @@
     overlay: overlayHost,
     // Which surface is showing, and its frame. Read at CALL time — the active
     // surface changes under a long-lived feature.
-    active: () => ({ id: activeId, frame: frames.get(activeId) || null }),
+    active: () => ({ id: activeId, frame: frames.get(activeId) || null,
+                     context: declaredContexts.get(activeId) ?? null }),
+    // The persistence key, composed HERE rather than by each feature. Two features
+    // composing it independently is two places computing one property, and they
+    // drift silently. NUL cannot occur in a surface id or a declared context, so
+    // "a" + "b\0c" and "a\0b" + "c" cannot collide.
+    scope: () => {
+      const context = declaredContexts.get(activeId) ?? null;
+      return activeId ? (context ? activeId + "\u0000" + context : activeId) : null;
+    },
     // Is markup mode on, and tell me when it changes.
     markup: () => markupOn,
     onMarkup: (fn) => { markupListeners.add(fn); return () => markupListeners.delete(fn); },
     // Tell me when the surface changes, so an overlay can clear or re-anchor.
     onSurface: (fn) => { surfaceListeners.add(fn); return () => surfaceListeners.delete(fn); },
   };
+  // --- annotations: a SHELL feature, drawn over the stage --------------------
+  // Annotation belongs to the shell rather than to each surface because it must
+  // work on surfaces that know nothing about it — the ones that already exist.
+  // It attaches at the seam like any other feature and gets no privileges.
+  //
+  // The store is injected from HERE, not built into the layer: the layer must
+  // stay free of any transport so it runs against a runtime that has no
+  // annotations verb at all. That runtime gets an in-memory board that SAYS
+  // "session only" rather than a broken one.
+  try {
+    const capable = Array.isArray(meta?.capabilities) && meta.capabilities.includes("annotations.write");
+    const store = capable ? {
+      load: async (scope) => {
+        const r = await fetch("/api/annotations?scope=" + encodeURIComponent(scope), { cache: "no-store" });
+        const j = await r.json();
+        return Array.isArray(j?.records) ? j.records : [];
+      },
+      save: async (scope, records) => {
+        const r = await fetch("/api/annotations", { method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ scope, records }) });
+        const j = await r.json().catch(() => null);
+        // A save that failed must not look like one that worked. The layer shows
+        // "persisted" while a store is present, so a silent failure here would
+        // make that label a lie.
+        if (!j?.ok) throw new Error(j?.error || "annotations save failed");
+      },
+    } : null;
+    const { attach } = await import("./annotations.js");
+    window.studioAnnotations = attach(window.studioShell, { store });
+  } catch (err) {
+    // The shell keeps working without annotations. It must not take the studio
+    // down with it, and it must not pretend it loaded.
+    console.error("annotations did not attach:", err);
+  }
+
   document.getElementById("agentsWord").onclick = () => {
     agents.classList.remove("open");
     document.getElementById("agentToggle").style.display = "";

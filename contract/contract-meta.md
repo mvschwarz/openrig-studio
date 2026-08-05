@@ -39,6 +39,7 @@ looking at needs `focus.md`.
 | `change-signal.md` | Markers, DATA-vs-CODE refresh, and state that survives a reload |
 | `focus.md` | What the user is looking at, and how an agent reads it |
 | `drive.md` | How an agent operates a surface the user already has open |
+| `annotations.md` | Marking up any surface from the shell, and the sub-context a surface may declare |
 
 Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 `app-manifest.schema.json` for `app.json`.
@@ -52,9 +53,11 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
   "contractVersion": "0.1",
   "runtime": { "name": "openrig-studio", "flavor": "reference-fixture", "boot": "<opaque id, stable for this process>" },
   "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read",
-                   "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write"],
+                   "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write",
+                   "annotations.read", "annotations.write"],
   "drive": { "listening": false, "reads": 0, "ops": 0 },
   "focus": { "attribution": "caller-declared", "identityHeader": null },
+  "annotations": { "persistence": "memory", "scopes": 0, "writes": 0 },
   "manifest": {
     "ok": true, "errors": [], "warnings": [], "surfaces": 1,
     "seats": { "count": 1, "source": "package", "attachable": false },
