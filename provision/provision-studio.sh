@@ -542,10 +542,16 @@ if [ "$HAVE_SYSTEMD" = 1 ]; then
     # reboot. The file on disk being right is necessary and not sufficient — a
     # daemon-reload that did not take would leave the manager holding the old one,
     # and every runtime check would still look healthy.
-    if LOADED_DIR=$(systemctl --user show "$UNIT_NAME" -p Environment --value 2>/dev/null); then
+    #
+    # THIS BRANCH ALWAYS SAYS SOMETHING. An earlier version printed nothing when
+    # the query itself failed, so SILENCE meant both "verified" and "could not
+    # ask" — a check that cannot fail, which is the shape this whole defect is
+    # made of. Three outcomes, three distinct lines, none of them silence.
+    SHOW_ERR=""
+    if LOADED_DIR=$(systemctl --user show "$UNIT_NAME" -p Environment --value 2>/tmp/.openrig-show-err); then
       case "$LOADED_DIR" in
         *"OPENRIG_STUDIO_DIR=$STUDIO_DIR"*)
-          printf '  systemd holds the right definition for %s\n' "$UNIT_NAME" ;;
+          printf '  verified: systemd holds the right definition for %s\n' "$UNIT_NAME" ;;
         *)
           warn "systemd's loaded definition for $UNIT_NAME does not name this studio."
           warn "  loaded: ${LOADED_DIR:-<empty>}"
@@ -553,7 +559,15 @@ if [ "$HAVE_SYSTEMD" = 1 ]; then
           warn "  A reboot would start the wrong studio. Not failing the install — the"
           warn "  studio is running — but persistence is NOT verified." ;;
       esac
+    else
+      SHOW_ERR=$(head -2 /tmp/.openrig-show-err 2>/dev/null | tr '\n' ' ')
+      warn "could not ask systemd what it loaded for $UNIT_NAME — persistence is NOT VERIFIED."
+      warn "  reason: ${SHOW_ERR:-systemctl --user show returned non-zero with no message}"
+      warn "  The unit FILE is correct (checked above); what is unconfirmed is whether the"
+      warn "  manager picked it up. A daemon-reload that did not take looks identical to"
+      warn "  success from every runtime check."
     fi
+    rm -f /tmp/.openrig-show-err
   fi
 else
   # REPORT WHICH of the two conditions this is. They are different facts and an
