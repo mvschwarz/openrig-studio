@@ -586,11 +586,33 @@
   // running and still holds a live channel, so without this check the header shows
   // whichever surface spoke last rather than the one you are looking at.
   const appActionsEl = document.getElementById("appActions");
+  // HOW MANY ACTIONS FIT. The left half shares one fixed bar with the title, the
+  // crumb and the shell's own half, so this is bounded rather than unbounded — an
+  // unlimited list pushes into controls the surface does not own.
+  //
+  // THE BOUND IS FINE; THE SILENCE WAS THE DEFECT. This used to slice and say
+  // nothing, so a surface declaring seven actions rendered six and had no way to
+  // find out: not in the DOM it cannot see, not in any response, not anywhere. The
+  // seventh button simply never worked, which reads as a bug in the app.
+  const HEADER_ACTION_LIMIT = 6;
   function renderAppHeader(decl) {
     if (decl.title !== undefined) document.getElementById("topTitle").textContent = decl.title;
     if (decl.crumb !== undefined) document.getElementById("topCrumb").textContent = decl.crumb;
     if (!Array.isArray(decl.actions)) return;
-    appActionsEl.replaceChildren(...decl.actions.slice(0, 6).map((a) => {
+    // Told twice, because the two channels reach different people: the console
+    // reaches whoever is building the app right now, and the message reaches the
+    // APP, which is the only one that can actually adapt. Answering "an app cannot
+    // see the cap to respect it" needs the second one.
+    if (decl.actions.length > HEADER_ACTION_LIMIT) {
+      const dropped = decl.actions.slice(HEADER_ACTION_LIMIT).map((a) => a?.id ?? a?.label ?? "(unnamed)");
+      console.warn(
+        `studio shell: the header shows at most ${HEADER_ACTION_LIMIT} app actions; ` +
+        `${dropped.length} were dropped: ${dropped.join(", ")}. ` +
+        `Declare fewer, or move the rest into the surface.`);
+      tellSurface({ t: "header-overflow", limit: HEADER_ACTION_LIMIT,
+                    declared: decl.actions.length, dropped });
+    }
+    appActionsEl.replaceChildren(...decl.actions.slice(0, HEADER_ACTION_LIMIT).map((a) => {
       const btn = document.createElement("button");
       btn.textContent = String(a.label ?? a.id ?? "");
       btn.title = String(a.title ?? "");

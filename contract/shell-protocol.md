@@ -137,6 +137,31 @@ Clicking a declared action posts **`{ "t": "header-action", "id": "<id>" }`** ba
 to the surface. The shell does not know what any action means and does not try:
 it renders a label and returns the click.
 
+### The header shows at most SIX actions, and says when it drops some (stable)
+
+The left half shares one fixed bar with the title, the crumb and the shell's own
+half, so the list is bounded rather than unbounded — an unlimited one pushes into
+controls the surface does not own.
+
+**The bound is not the interesting part; being told about it is.** This used to
+truncate in silence, so a surface declaring seven actions rendered six and had no
+way to discover it — not in a DOM it cannot see, not in any response. The seventh
+button simply never worked, which reads as a bug in the app.
+
+Declaring more than six now produces a console warning naming the dropped ids
+**and** a message back to the surface:
+
+```json
+{ "t": "header-overflow", "limit": 6, "declared": 8, "dropped": ["export", "share"] }
+```
+
+Two channels because they reach different people: the console reaches whoever is
+building the app, and the message reaches **the app**, which is the only party that
+can actually adapt — collapse the extras into a menu, or move them into the
+surface body.
+
+A surface that ignores the message is unaffected beyond the drop itself.
+
 **Only the ACTIVE surface may write the header.** A background surface is still
 running and still holds a live channel, so without that rule the header shows
 whichever surface spoke last rather than the one you are looking at. Actions are
@@ -160,8 +185,8 @@ for one mode are two things that can disagree, and the one a surface did not wri
 is the one that will be wrong.**
 
 **`{ "t": "markup", "on": <boolean> }`** is sent from the shell **to** the active
-surface when markup mode changes. It is the one message that travels in that
-direction, and it is **advisory**: a surface that ignores it is unaffected and
+surface when markup mode changes. It is **advisory**: a surface that ignores it is
+unaffected and
 still annotatable, because annotation is drawn by the shell over the stage rather
 than by the surface. A surface handles it only when it wants to participate — to
 render its own richer annotations, or to get its own controls out of the way.
