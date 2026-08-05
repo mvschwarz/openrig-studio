@@ -322,6 +322,39 @@ export function attach(shell, { store } = {}) {
     observedFrame?.addEventListener("load", frameLoad);
   };
   cleaners.push(shell.onSurface(() => { observeFrame(); loadSurface().catch(console.error); }));
+  // RE-MEASURE, NOT RELOAD. render() recomputes every anchor from its selector, so
+  // a repaint is all a moved element needs. Guarded because a shell that predates
+  // this seam has no onRefresh.
+  if (typeof shell.onRefresh === "function") cleaners.push(shell.onRefresh(() => render()));
+  // The cheap automatic half. These cover RESIZE and SCROLL, which are the cases
+  // the browser will tell us about for free.
+  //
+  // THEY ARE NOT SUFFICIENT AND THAT IS WHY THE EXPLICIT HOOK EXISTS: an element
+  // that MOVES within an unchanged viewport fires neither. A canvas item dragged
+  // across a board is exactly that case, and no observer short of polling every
+  // frame would catch it.
+  let observer = null;
+  const watchGeometry = () => {
+    observer?.disconnect();
+    observer = null;
+    const doc = frameDocument();
+    if (!doc?.documentElement || typeof ResizeObserver === "undefined") return;
+    try {
+      observer = new ResizeObserver(() => render());
+      observer.observe(doc.documentElement);
+    } catch { observer = null; }
+  };
+  const onScroll = () => render();
+  const watchScroll = () => {
+    const doc = frameDocument();
+    try { doc?.addEventListener("scroll", onScroll, { capture: true, passive: true }); } catch {}
+  };
+  const unwatchScroll = () => {
+    const doc = frameDocument();
+    try { doc?.removeEventListener("scroll", onScroll, { capture: true }); } catch {}
+  };
+  cleaners.push(shell.onSurface(() => { unwatchScroll(); watchGeometry(); watchScroll(); }));
+  watchGeometry(); watchScroll();
   observeFrame();
   root.classList.toggle("is-marking", Boolean(shell.markup()));
   const ready = loadSurface();
@@ -329,6 +362,8 @@ export function attach(shell, { store } = {}) {
 
   return Object.freeze({
     detach() {
+      observer?.disconnect();
+      unwatchScroll();
       cleaners.forEach((clean) => clean?.());
       observedFrame?.removeEventListener("load", frameLoad);
       window.removeEventListener("keydown", onKey);
@@ -336,6 +371,10 @@ export function attach(shell, { store } = {}) {
       root.remove();
     },
     ready,
+    // Re-measure every anchor and repaint. Cheap, idempotent, and does NOT reload
+    // the board or disturb undo history — for a surface (or an agent) that moved
+    // something the layer cannot observe.
+    refresh: () => { render(); },
     annotate: add,
     list: () => clone(state.records),
     remove,

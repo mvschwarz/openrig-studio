@@ -204,6 +204,11 @@
   // ============================================================================
   const surfaceListeners = new Set();
   const markupListeners = new Set();
+  // "My layout moved — re-measure, but do NOT reload." A separate channel from
+  // surfaceListeners on purpose: that one means the board CHANGED and reloads
+  // records, which resets undo history. A surface whose canvas item moved wants
+  // neither of those, it wants the geometry recomputed.
+  const refreshListeners = new Set();
   // What each surface declared for its half of the header. The shell holds it, so
   // a surface that declares once on load keeps its header across a switch away and
   // back — it has no reason to speak twice, and reverting to manifest defaults
@@ -330,6 +335,22 @@
     if (!e.data || typeof e.data !== "object") return;
     if (e.data.t === "open-surface" && byId(e.data.id)) activate(e.data.id);
     if (e.data.t === "open-agent") openAgents(e.data.seat);
+    if (e.data.t === "annotation-refresh") {
+      // CHEAP AND EXPLICIT. DOM motion inside a surface is invisible from out
+      // here: an element that MOVES changes neither the frame's size nor its
+      // scroll, so nothing fires and anchored marks sit at the old geometry until
+      // something unrelated forces a repaint. Measured by studio-qa: a canvas item
+      // moved (220,170) -> (760,430) and the mark only snapped on a window resize.
+      //
+      // This does not reload the board and does not touch undo history. Re-posting
+      // annotation-target with the SAME frame id stays a no-op deliberately —
+      // overloading it as a nudge would make every redundant declaration re-anchor
+      // and reset undo, so the nudge gets its own verb.
+      const current = frames.get(activeId);
+      if (current && e.source === current.contentWindow) {
+        for (const fn of refreshListeners) { try { fn(); } catch {} }
+      }
+    }
     if (e.data.t === "annotation-target") {
       // Same active-surface guard as the header and the context, for the same
       // reason: a backgrounded surface still holds a live channel.
@@ -641,6 +662,9 @@
     onMarkup: (fn) => { markupListeners.add(fn); return () => markupListeners.delete(fn); },
     // Tell me when the surface changes, so an overlay can clear or re-anchor.
     onSurface: (fn) => { surfaceListeners.add(fn); return () => surfaceListeners.delete(fn); },
+    // Re-measure without reloading. Fired when the active surface says its layout
+    // moved; a feature drawing over the stage recomputes geometry and repaints.
+    onRefresh: (fn) => { refreshListeners.add(fn); return () => refreshListeners.delete(fn); },
   };
   // --- annotations: a SHELL feature, drawn over the stage --------------------
   // Annotation belongs to the shell rather than to each surface because it must

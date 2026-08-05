@@ -145,6 +145,39 @@ in one place.
 read for element identity, so the target silently falls back to the surface
 document rather than pretending: the alternative is anchors that can never resolve.
 
+## Re-measuring when the surface moves something (stable)
+
+An anchored mark is redrawn from its element's *current* rect on every render, so
+it follows anything the shell can observe: a window resize, a scroll, the surface
+frame changing size. **It cannot observe an element that MOVES.**
+
+A canvas item dragged across a board changes neither the viewport nor the scroll
+position nor any element's size, so nothing fires and the mark stays at the old
+geometry — still reporting `anchored`, still looking correct. Measured: an item
+moved 300px right and 180px down and the mark stayed put until an unrelated window
+resize snapped it.
+
+Two ways to say "I moved something, re-measure":
+
+```json
+{ "t": "annotation-refresh" }
+```
+
+and, for a caller that already holds the handle, `window.studioAnnotations.refresh()`.
+
+**Both re-measure without reloading.** The board is not re-read, records are not
+touched, and undo history survives — which is the distinction from a surface or
+context change, where reloading is the correct behaviour.
+
+**Re-posting `annotation-target` with the same frame id is deliberately a no-op**
+and is not the way to nudge. Overloading it would make every redundant declaration
+re-anchor and reset undo, so the nudge has its own verb.
+
+The layer also observes size and scroll on the anchored document, which are the
+cases the browser reports for free. **Those are a convenience and are explicitly
+not sufficient** — the explicit hook exists because motion within an unchanged
+viewport is invisible to every observer short of polling each frame.
+
 ### The scope key is composed by the SHELL (stable)
 
 `surfaceId` when no context is declared; `surfaceId`, a **NUL** (`U+0000`), then
@@ -216,6 +249,7 @@ default path:
 | `{ t: "annotation-context" }` refining the scope | **yes** — verified in a live shell: a surface declaring one gets its own empty board, marks drawn there stay there, and declaring `null` restores the default board intact |
 | `{ t: "annotation-target" }` anchoring inside a same-origin nested frame | **yes** — browser-proven against a DECOY: a host surface and its nested document both carrying `#publish`, with the mark hit-tested to confirm it landed on the artifact's button and not the host's |
 | cross-origin nested frames degrading to the surface document rather than failing | **yes**, guarded; those surfaces stay spatial-only as they already were |
+| `{ t: "annotation-refresh" }` and `refresh()` re-measuring a MOVED element | **yes** — measured before and after: an element moved 300×180px left the mark stale by exactly that offset, and both paths closed the gap to 0×0 without reloading the board |
 | the active-surface-only rule on those messages | **yes, but the committed check is STRUCTURAL** — it asserts the `e.source` guard is present in the shell, with a control proving the check can fail. The behaviour was verified by driving a live shell; this repository has no browser dependency to re-run that automatically |
 | the scope key composed by the shell and opaque to consumers | **yes** |
 | persistence reported at `GET /api/contract` and shown in the UI | **yes** |

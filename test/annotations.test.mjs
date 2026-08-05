@@ -274,6 +274,41 @@ test("positive control: the two checks above can fail", () => {
     "the regression could not be planted, so the doesNotMatch assertion proves nothing");
 });
 
+test("the refresh hook re-measures WITHOUT reloading — STRUCTURAL", () => {
+  // Behaviour was measured in a browser: an element moved 300x180 left the mark
+  // stale by exactly that offset, and both the message and the handle closed it to
+  // 0x0. What is pinned here is the property that makes refresh different from a
+  // surface change — it must NOT call loadSurface, or a nudge would silently reset
+  // undo history and re-read the board.
+  const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
+  const handler = shell.match(/if \(e\.data\.t === "annotation-refresh"\)\s*\{([\s\S]*?)\n    \}/);
+  assert.ok(handler, "shell.html no longer handles annotation-refresh");
+  assert.match(handler[1], /e\.source === current\.contentWindow/,
+    "the refresh handler accepts a nudge from a surface that is not on screen");
+  assert.match(handler[1], /refreshListeners/,
+    "the refresh handler does not notify the refresh channel");
+  assert.doesNotMatch(handler[1], /surfaceListeners/,
+    "refresh fires the SURFACE channel, which reloads the board and resets undo — that is a reload, not a re-measure");
+
+  const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
+  assert.match(layer, /shell\.onRefresh\(\(\) => render\(\)\)/,
+    "the layer does not subscribe to the refresh channel");
+  assert.match(layer, /refresh: \(\) => \{ render\(\); \}/,
+    "the returned handle exposes no refresh()");
+});
+
+test("positive control: the refresh separation check can fail", () => {
+  const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
+  // Plant the exact regression the assertion forbids: refresh reloading the board.
+  const planted = shell.replace(
+    /(if \(e\.data\.t === "annotation-refresh"\)[\s\S]*?)for \(const fn of refreshListeners\)/,
+    "$1for (const fn of surfaceListeners)");
+  const handler = planted.match(/if \(e\.data\.t === "annotation-refresh"\)\s*\{([\s\S]*?)\n    \}/);
+  assert.ok(handler, "the mutation broke the extractor rather than planting the regression");
+  assert.match(handler[1], /surfaceListeners/,
+    "the regression could not be planted, so the doesNotMatch assertion above proves nothing");
+});
+
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
 });
