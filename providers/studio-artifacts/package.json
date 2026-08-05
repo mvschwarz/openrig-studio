@@ -1,0 +1,7 @@
+{
+  "name": "@openrig/studio-artifacts",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "HTML artifact storage and shared, self-describing annotations for OpenRig Studio."
+}

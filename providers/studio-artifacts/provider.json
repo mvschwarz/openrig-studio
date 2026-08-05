@@ -1,0 +1,25 @@
+{
+  "package": "@openrig/studio-artifacts",
+  "run": {
+    "entry": "artifacts-server.mjs",
+    "args": [
+      "--port",
+      "{{port}}",
+      "--root",
+      "{{root:artifacts}}"
+    ]
+  },
+  "serves": [
+    "/artifacts/"
+  ],
+  "verbs": [
+    "/api/annotations",
+    "/api/artifacts",
+    "/api/artifacts/item",
+    "/api/artifacts/annotations",
+    "/api/artifacts/annotations/migrate",
+    "/api/artifacts/assets",
+    "/api/artifacts/items",
+    "/api/artifacts/screenshot"
+  ]
+}

@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Artifacts</title>
+<style>
+  :root {
+    color-scheme:dark;
+    --bg:#121214; --fg:rgba(255,255,255,.95); --body:rgba(255,255,255,.68);
+    --dim:rgba(255,255,255,.52); --faint:rgba(255,255,255,.38);
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.16);
+    --card:rgba(255,255,255,.07); --raised:rgba(255,255,255,.12);
+    --coral:#ff6b5a; --indigo:#8b93ff; --sage:#7ea36f;
+    --sans:Helvetica,"Helvetica Neue",Arial,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  html,body { height:100%; margin:0; overflow:hidden; }
+  body { color:var(--fg); background:var(--bg); font:13.5px/1.4 var(--sans); -webkit-font-smoothing:antialiased; }
+  body::before { content:""; position:fixed; inset:-10%; z-index:-1; pointer-events:none;
+    background:radial-gradient(42% 55% at 18% 22%,rgba(139,147,255,.08),transparent 70%),radial-gradient(48% 60% at 82% 18%,rgba(255,107,90,.05),transparent 70%);
+    filter:blur(56px) saturate(1.2) brightness(.9); transform:scale(1.1); }
+  button,input,textarea,select { font:inherit; }
+  button { color:inherit; }
+  button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:2px solid var(--indigo); outline-offset:2px; }
+  .shell { height:100%; display:grid; grid-template-rows:54px minmax(0,1fr); }
+  header { display:flex; align-items:center; gap:14px; padding:0 112px 0 18px; border-bottom:1px solid var(--line); background:rgba(18,18,20,.82); backdrop-filter:blur(14px); }
+  .brand { display:flex; align-items:baseline; gap:10px; min-width:190px; }
+  .brand strong { font-size:12px; letter-spacing:.22em; }
+  .eyebrow,.label { color:var(--faint); text-transform:uppercase; letter-spacing:.14em; font-size:10px; font-weight:700; }
+  .toolbar { display:flex; align-items:center; gap:6px; margin-left:auto; }
+  .action,.icon-btn { border:1px solid var(--line); background:var(--card); border-radius:2px; min-height:30px; padding:0 11px; cursor:pointer; transition:.12s; font-size:9px; letter-spacing:.14em; text-transform:uppercase; font-weight:600; }
+  .action:hover,.icon-btn:hover { background:var(--raised); border-color:var(--line2); }
+  .action.primary { color:#101014; background:var(--fg); border-color:var(--fg); font-weight:700; }
+  main { min-height:0; display:grid; grid-template-columns:220px minmax(360px,1fr); }
+  aside { min-height:0; overflow:auto; background:rgba(18,18,20,.6); border-right:1px solid var(--line); }
+  .aside-head { position:sticky; top:0; z-index:3; padding:17px 14px 11px; background:#151519; border-bottom:1px solid var(--line); }
+  .aside-head-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
+  .aside-head h2 { font-size:15px; margin:0; letter-spacing:-.01em; }
+  .artifact-list { padding:8px; display:grid; gap:5px; }
+  .artifact-entry { position:relative; }
+  .artifact-row { width:100%; text-align:left; border:1px solid transparent; border-radius:2px; background:transparent; color:var(--body); padding:10px 58px 10px 10px; cursor:pointer; }
+  .artifact-row:hover { background:var(--card); color:var(--fg); }
+  .artifact-row.active { border-color:var(--line2); background:var(--card); color:var(--fg); }
+  .artifact-row strong { display:block; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .artifact-row span { display:block; color:var(--faint); font-size:11px; margin-top:4px; }
+  .artifact-row .artifact-type { display:inline-block; margin-top:7px; padding:2px 5px; border:1px solid var(--line); color:var(--dim); font-size:8px; letter-spacing:.1em; text-transform:uppercase; }
+  .delete-page { position:absolute; right:5px; top:50%; transform:translateY(-50%); z-index:2; border:0; background:transparent; color:var(--faint); padding:5px; border-radius:2px; font-size:8px; letter-spacing:.08em; text-transform:uppercase; }
+  .delete-page:hover { color:var(--coral); background:rgba(255,107,90,.1); }
+  .stage { min-width:0; min-height:0; display:grid; grid-template-rows:39px minmax(0,1fr); background:rgba(5,7,12,.4); }
+  .stagebar { display:flex; align-items:center; gap:9px; padding:0 12px; border-bottom:1px solid var(--line); color:var(--faint); }
+  .stagebar .title { color:var(--body); font-weight:600; margin-right:auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .status-dot { width:6px; height:6px; border-radius:50%; background:var(--sage); box-shadow:0 0 10px rgba(126,163,111,.7); }
+  .viewport-wrap { min-height:0; padding:20px; display:grid; place-items:center; overflow:auto; }
+  .viewport { position:relative; width:min(100%,1120px); height:min(100%,760px); min-height:420px; background:#fff; border:1px solid rgba(255,255,255,.2); box-shadow:0 18px 70px rgba(0,0,0,.42); }
+  .viewport.canvas-mode { width:100%; height:100%; max-width:none; min-height:0; background:#d8d5cd; }
+  iframe { display:block; width:100%; height:100%; border:0; background:white; }
+  .empty { color:var(--faint); line-height:1.55; padding:20px 14px; }
+  .welcome { display:grid; place-items:center; height:100%; text-align:center; padding:30px; color:var(--body); }
+  .welcome-inner { max-width:450px; }
+  .welcome .glyph { font-size:50px; font-weight:200; color:var(--fg); line-height:1; margin-bottom:18px; }
+  .welcome h1 { margin:0 0 10px; color:var(--fg); font-size:25px; letter-spacing:-.035em; }
+  .welcome p { margin:0 auto 20px; line-height:1.55; }
+  dialog { color:var(--fg); width:min(780px,calc(100vw - 40px)); border:1px solid var(--line2); border-radius:3px; padding:0; background:#19191e; box-shadow:0 30px 100px rgba(0,0,0,.65); }
+  dialog::backdrop { background:rgba(0,0,0,.66); backdrop-filter:blur(3px); }
+  .dialog-head { display:flex; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
+  .dialog-head h2 { margin:0; font-size:16px; }
+  .dialog-head button { margin-left:auto; }
+  .form { padding:16px; display:grid; gap:12px; }
+  .field { display:grid; gap:6px; }
+  .field input,.field textarea,.field select { color:var(--fg); background:#101014; border:1px solid var(--line2); border-radius:2px; padding:9px; }
+  .field textarea { min-height:360px; resize:vertical; font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; tab-size:2; }
+  .dialog-actions { display:flex; justify-content:flex-end; gap:7px; padding:0 16px 16px; }
+  .toast { position:fixed; left:50%; bottom:24px; z-index:20; transform:translate(-50%,12px); opacity:0; pointer-events:none; color:#111; background:var(--fg); padding:9px 13px; border-radius:2px; font-weight:700; transition:.18s; }
+  .toast.show { transform:translate(-50%,0); opacity:1; }
+  @media(max-width:760px) { header { padding-right:90px; } main { grid-template-columns:170px minmax(300px,1fr); } }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="brand"><strong>ARTIFACTS</strong><span class="eyebrow">shared canvas</span></div>
+    <div class="toolbar">
+      <button id="editBtn" class="action">Edit HTML</button>
+      <button id="captureBtn" class="action">Save view</button>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <div class="aside-head"><span class="label">Library</span><div class="aside-head-row"><h2>Artifacts</h2><button id="newBtn" class="icon-btn">＋ New</button></div></div>
+      <div id="artifactList" class="artifact-list"></div>
+    </aside>
+    <section class="stage">
+      <div class="stagebar"><span class="status-dot"></span><span id="stageTitle" class="title">No artifact open</span><span id="modeText">Browse</span></div>
+      <div class="viewport-wrap">
+        <div id="welcome" class="welcome"><div class="welcome-inner"><div class="glyph">✎</div><h1>Draw where the work is.</h1><p>Open a document or canvas, then use MARKUP in the Studio header. Human and agent marks share one structured thread.</p><button id="exampleBtn" class="action primary">Make an example page</button></div></div>
+        <div id="viewport" class="viewport" hidden><iframe id="artifactFrame" title="Artifact preview"></iframe></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="editorDialog">
+  <div class="dialog-head"><h2 id="editorTitle">New artifact</h2><button class="icon-btn" data-close>×</button></div>
+  <form id="editorForm" class="form">
+    <div class="field"><label class="label" for="artifactName">Name</label><input id="artifactName" required maxlength="120"></div>
+    <div id="idField" class="field"><label class="label" for="artifactId">ID</label><input id="artifactId" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="launch-page"></div>
+    <div id="typeField" class="field"><label class="label" for="artifactType">Type</label><select id="artifactType"><option value="document">Document</option><option value="canvas">Canvas</option></select></div>
+    <div id="artifactHtmlField" class="field"><label class="label" for="artifactHtml">HTML</label><textarea id="artifactHtml" spellcheck="false" required></textarea></div>
+  </form>
+  <div class="dialog-actions"><button class="action" data-close>Cancel</button><button id="saveEditor" class="action primary">Save page</button></div>
+</dialog>
+<div id="toast" class="toast"></div>
+
+<script>
+(() => {
+  const $ = (selector) => document.querySelector(selector);
+  const state = { artifacts:[], current:null, items:[], canvasView:{x:0,y:0,scale:1}, canvasDrag:null, annotationContext:null, annotationsReady:Promise.resolve() };
+  const els = {
+    list:$("#artifactList"), frame:$("#artifactFrame"), viewport:$("#viewport"), welcome:$("#welcome"),
+    stageTitle:$("#stageTitle"), mode:$("#modeText"), dialog:$("#editorDialog"), form:$("#editorForm"),
+    name:$("#artifactName"), id:$("#artifactId"), html:$("#artifactHtml"), idField:$("#idField"),
+    type:$("#artifactType"), typeField:$("#typeField"), htmlField:$("#artifactHtmlField"), edit:$("#editBtn"),
+  };
+  const sampleHtml = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}body{margin:0;background:#f3efe7;color:#171719;font:16px/1.45 Helvetica,Arial,sans-serif}.page{min-height:100vh;padding:7vw}.kicker{text-transform:uppercase;letter-spacing:.15em;font-size:11px;font-weight:700;color:#705d50}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:5vw;align-items:end;padding:8vh 0;border-bottom:1px solid #bdb3a5}h1{font-size:clamp(48px,8vw,104px);line-height:.88;letter-spacing:-.07em;margin:0}.lede{font-size:20px;color:#5d554f}.actions{display:flex;gap:10px;margin-top:28px}button{border:1px solid #171719;background:transparent;padding:13px 18px;font-weight:700;cursor:pointer}#publish{background:#171719;color:white}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding-top:24px}.card{min-height:120px;border:1px solid #bdb3a5;padding:18px}.card strong{display:block;font-size:22px;margin-bottom:7px}@media(max-width:700px){.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}</style></head><body><main class="page"><div class="kicker">OpenRig / Launch note</div><section class="hero"><div><h1>Make the work visible.</h1></div><div><p class="lede">A small page for choosing what ships next.</p><div class="actions"><button id="preview">Preview</button><button id="publish">Publish</button></div></div></section><section class="grid"><article class="card"><strong>01</strong>Build the smallest useful thing.</article><article class="card"><strong>02</strong>Look at the real pixels.</article><article class="card"><strong>03</strong>Change your mind quickly.</article></section></main></body></html>`;
+
+  const api = async (url, options = {}) => {
+    const response = await fetch(url, options);
+    const type = response.headers.get("content-type") || "";
+    const payload = type.includes("json") ? await response.json() : await response.text();
+    if (!response.ok) throw new Error(payload.error || payload || `HTTP ${response.status}`);
+    return payload;
+  };
+  const send = (url, value) => api(url, { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(value) });
+  const remove = (url) => api(url, { method:"DELETE" });
+  const postShell = (value) => { if (parent !== window) parent.postMessage(value, "*"); };
+  const annotations = () => parent !== window ? parent.studioAnnotations : null;
+  const waitFor = async (read, timeout = 5000) => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const value = read();
+      if (value) return value;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error("Studio annotations did not become ready");
+  };
+  const annotationApi = () => waitFor(() => annotations());
+  const sameRecordIds = (left, right) => JSON.stringify(left.map((item) => item.id).sort()) === JSON.stringify(right.map((item) => item.id).sort());
+  const declareAnnotationTarget = () => postShell({ t:"annotation-target", frame:state.current ? "artifactFrame" : null });
+  const refreshAnnotations = () => postShell({ t:"annotation-refresh" });
+  const syncAnnotationContext = async (artifactId) => {
+    const layer = await annotationApi();
+    const before = layer.state().scope;
+    const same = state.annotationContext === artifactId;
+    state.annotationContext = artifactId;
+    postShell({ t:"annotation-context", id:artifactId });
+    declareAnnotationTarget();
+    const scoped = await waitFor(() => {
+      const value = layer.state();
+      return value.surfaceId === "artifacts" && value.scope && (same || value.scope !== before) ? value : null;
+    });
+    const migration = await send(`/api/artifacts/annotations/migrate?artifact=${encodeURIComponent(artifactId)}`, { scope:scoped.scope });
+    if (migration.migrated) {
+      postShell({ t:"annotation-context", id:null });
+      await waitFor(() => layer.state().scope !== scoped.scope);
+      postShell({ t:"annotation-context", id:artifactId });
+    }
+    await waitFor(() => {
+      const value = layer.state();
+      return value.scope === migration.scope && sameRecordIds(layer.list(), migration.records) ? value : null;
+    });
+    return layer;
+  };
+  const clearAnnotationContext = () => {
+    state.annotationContext = null;
+    postShell({ t:"annotation-target", frame:null });
+    postShell({ t:"annotation-context", id:null });
+  };
+  const toast = (message) => {
+    const node = $("#toast"); node.textContent = message; node.classList.add("show");
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => node.classList.remove("show"), 1900);
+  };
+  const slug = (value) => String(value || "artifact").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,64) || "artifact";
+  const esc = (value) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[char]));
+  const frameLoaded = () => new Promise((resolve) => els.frame.addEventListener("load", resolve, { once:true }));
+
+  const loadArtifacts = async () => {
+    state.artifacts = (await api("/api/artifacts")).artifacts;
+    els.list.innerHTML = state.artifacts.length ? state.artifacts.map((item) => `<div class="artifact-entry"><button class="artifact-row ${state.current?.id === item.id ? "active" : ""}" data-id="${esc(item.id)}"><strong>${esc(item.name)}</strong><span>${esc(item.id)}</span><span class="artifact-type">${item.type === "canvas" ? "Canvas" : "Document"}</span></button><button class="delete-page" data-delete-page="${esc(item.id)}" aria-label="Delete ${esc(item.name)}">Delete</button></div>`).join("") : '<div class="empty">No artifacts yet.</div>';
+  };
+  const openArtifact = async (id) => {
+    const payload = await api(`/api/artifacts/item?id=${encodeURIComponent(id)}`);
+    state.current = { ...payload.artifact, html:payload.html };
+    state.items = state.current.type === "canvas" ? (await api(`/api/artifacts/assets?artifact=${encodeURIComponent(id)}`)).items : [];
+    state.canvasView = { x:24, y:24, scale:.55 };
+    els.welcome.hidden = true; els.viewport.hidden = false; els.viewport.classList.toggle("canvas-mode", state.current.type === "canvas");
+    els.stageTitle.textContent = state.current.name; els.edit.hidden = state.current.type === "canvas";
+    els.mode.textContent = state.current.type === "canvas" ? "Canvas · paste an image" : "Document · use MARKUP to annotate";
+    const loaded = frameLoaded();
+    els.frame.src = `/artifacts/${encodeURIComponent(id)}/artifact.html?at=${Date.now()}`;
+    await loaded;
+    setupCanvasInteractions();
+    state.annotationsReady = syncAnnotationContext(id);
+    await Promise.all([loadArtifacts(), state.annotationsReady]);
+    return state.current;
+  };
+  const createArtifact = async ({ id, name, html = "", type = "document" }) => {
+    const payload = await send("/api/artifacts", { id, name, html, type });
+    await loadArtifacts(); await openArtifact(payload.artifact.id); return payload.artifact;
+  };
+  const updateArtifact = async ({ id = state.current?.id, name, html }) => {
+    const payload = await send(`/api/artifacts/item?id=${encodeURIComponent(id)}`, { name, html });
+    if (state.current?.id === id) await openArtifact(id);
+    return payload.artifact;
+  };
+  const deleteArtifact = async (id = state.current?.id, { confirm:ask = true } = {}) => {
+    if (!id) throw new Error("open an artifact first or pass artifact");
+    const artifact = state.artifacts.find((item) => item.id === id);
+    if (ask && !window.confirm(`Delete “${artifact?.name || id}” and all of its annotations?`)) return false;
+    if (state.current?.id === id) clearAnnotationContext();
+    await remove(`/api/artifacts/item?id=${encodeURIComponent(id)}`);
+    if (state.current?.id === id) {
+      state.current = null; state.items = [];
+      els.frame.removeAttribute("src"); els.viewport.hidden = true; els.welcome.hidden = false;
+      els.stageTitle.textContent = "No artifact open"; els.mode.textContent = "Browse"; els.edit.hidden = false;
+    }
+    await loadArtifacts();
+    if (!state.current && state.artifacts[0]) await openArtifact(state.artifacts[0].id);
+    toast("Artifact deleted"); return true;
+  };
+
+  const readImage = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(reader.error || new Error("image could not be read"));
+    reader.readAsDataURL(file);
+  });
+  const addImage = async ({ artifact = state.current?.id, name = "Pasted image", mime = "image/png", data, x, y, width = 420 }) => {
+    if (!artifact) throw new Error("open an artifact first or pass artifact");
+    if (!data) throw new Error("base64 image data is required");
+    if (state.current?.id === artifact && state.current.type === "canvas") {
+      const view = state.canvasView;
+      if (!Number.isFinite(Number(x))) x = (els.frame.clientWidth / 2 - view.x) / view.scale - width / 2;
+      if (!Number.isFinite(Number(y))) y = (els.frame.clientHeight / 2 - view.y) / view.scale - 180;
+    }
+    const payload = await send(`/api/artifacts/assets?artifact=${encodeURIComponent(artifact)}`, { name, mime, data, x, y, width });
+    if (state.current?.id === artifact) await openArtifact(artifact);
+    toast(state.current?.type === "canvas" ? "Image placed on canvas" : "Image added to document");
+    return payload.item;
+  };
+  const moveItem = async (item, position, artifact = state.current?.id, { refresh = true } = {}) => {
+    if (!artifact || !item) throw new Error("artifact and item name are required");
+    const payload = await send(`/api/artifacts/items?artifact=${encodeURIComponent(artifact)}`, { item, ...position });
+    if (state.current?.id === artifact) {
+      const at = state.items.findIndex((entry) => entry.id === payload.item.id);
+      if (at >= 0) state.items[at] = payload.item;
+      if (refresh) await openArtifact(artifact); else refreshAnnotations();
+    }
+    return payload.item;
+  };
+  const setupCanvasInteractions = () => {
+    if (state.current?.type !== "canvas") return;
+    const doc = els.frame.contentDocument;
+    const world = doc?.querySelector("[data-canvas-world]");
+    if (!doc || !world || doc.documentElement.dataset.artifactsInteractions === "ready") return;
+    doc.documentElement.dataset.artifactsInteractions = "ready";
+    const paintView = () => {
+      const { x,y,scale } = state.canvasView;
+      world.style.transform = `translate(${x}px,${y}px) scale(${scale})`;
+      els.mode.textContent = `Canvas · ${Math.round(scale * 100)}% · paste to place`;
+      refreshAnnotations();
+    };
+    paintView();
+    doc.addEventListener("pointerdown", (event) => {
+      const item = event.target.closest?.("[data-item-id]");
+      state.canvasDrag = item ? { kind:"item", pointerId:event.pointerId, item, id:item.dataset.itemId, startX:event.clientX, startY:event.clientY, left:parseFloat(item.style.left), top:parseFloat(item.style.top) } : { kind:"pan", pointerId:event.pointerId, startX:event.clientX, startY:event.clientY, x:state.canvasView.x, y:state.canvasView.y };
+      (item || doc.documentElement).setPointerCapture?.(event.pointerId); event.preventDefault();
+    });
+    doc.addEventListener("pointermove", (event) => {
+      const drag = state.canvasDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      const dx = event.clientX-drag.startX, dy = event.clientY-drag.startY;
+      if (drag.kind === "item") { drag.item.style.left = `${drag.left + dx/state.canvasView.scale}px`; drag.item.style.top = `${drag.top + dy/state.canvasView.scale}px`; refreshAnnotations(); }
+      else { state.canvasView.x = drag.x+dx; state.canvasView.y = drag.y+dy; paintView(); }
+    });
+    doc.addEventListener("pointerup", (event) => {
+      const drag = state.canvasDrag;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      state.canvasDrag = null;
+      if (drag.kind === "item") moveItem(drag.id, { x:parseFloat(drag.item.style.left), y:parseFloat(drag.item.style.top) }, state.current.id, { refresh:false }).catch((error) => toast(error.message));
+    });
+    doc.addEventListener("pointercancel", () => { state.canvasDrag = null; });
+    doc.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const before = state.canvasView.scale;
+      const next = Math.max(.25,Math.min(2.5,before*Math.exp(-event.deltaY*.0015)));
+      const worldX = (event.clientX-state.canvasView.x)/before, worldY = (event.clientY-state.canvasView.y)/before;
+      state.canvasView.x = event.clientX-worldX*next; state.canvasView.y = event.clientY-worldY*next; state.canvasView.scale = next; paintView();
+    }, { passive:false });
+  };
+  const handlePaste = async (event) => {
+    const file = [...(event.clipboardData?.items || [])].find((item) => item.kind === "file" && item.type.startsWith("image/"))?.getAsFile();
+    if (!file) return;
+    event.preventDefault();
+    try { await addImage({ name:file.name || `Pasted image ${new Date().toLocaleTimeString()}`, mime:file.type, data:await readImage(file) }); }
+    catch(error) { toast(error.message); }
+  };
+
+  const saveScreenshot = async () => {
+    if (!state.current) throw new Error("open an artifact first");
+    await state.annotationsReady;
+    const doc = els.frame.contentDocument;
+    if (!doc) throw new Error("artifact is not loaded");
+    const width = els.frame.clientWidth, height = els.frame.clientHeight;
+    const clone = doc.documentElement.cloneNode(true);
+    clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    const serialized = new XMLSerializer().serializeToString(clone);
+    const activeFrame = parent.studioShell?.active?.().frame;
+    const annotationRoot = parent.document?.querySelector?.(".studio-annotations");
+    const annotationCanvas = annotationRoot?.querySelector?.(".studio-annotations__canvas");
+    const surfaceRect = activeFrame?.getBoundingClientRect?.();
+    const rootRect = annotationRoot?.getBoundingClientRect?.();
+    const nestedRect = els.frame.getBoundingClientRect();
+    const dx = (surfaceRect?.left || 0) + nestedRect.left - (rootRect?.left || 0);
+    const dy = (surfaceRect?.top || 0) + nestedRect.top - (rootRect?.top || 0);
+    const defs = annotationCanvas?.querySelector("defs")?.outerHTML || "";
+    const marks = annotationCanvas?.querySelector("[data-marks]")?.innerHTML || "";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject><svg width="100%" height="100%"><style>.shape{fill:rgba(255,107,90,.10);stroke:#ff6b5a;stroke-width:2.5}.agent .shape{fill:rgba(139,147,255,.10);stroke:#8b93ff}.studio-annotations__badge{fill:#ff6b5a}.agent .studio-annotations__badge{fill:#8b93ff}.studio-annotations__badge-text,.studio-annotations__label{fill:#fff;font:bold 11px Helvetica}</style>${defs}<g transform="translate(${-dx} ${-dy})">${marks}</g></svg></svg>`;
+    await send(`/api/artifacts/screenshot?artifact=${encodeURIComponent(state.current.id)}`, { svg });
+    toast("Rendered view saved"); return `/api/artifacts/screenshot?artifact=${encodeURIComponent(state.current.id)}`;
+  };
+
+  window.addEventListener("paste", handlePaste);
+  els.frame.addEventListener("load", () => els.frame.contentDocument?.addEventListener("paste", handlePaste));
+  els.list.addEventListener("click", (event) => {
+    const deleting = event.target.closest("[data-delete-page]");
+    if (deleting) return deleteArtifact(deleting.dataset.deletePage).catch((error) => toast(error.message));
+    const row = event.target.closest("[data-id]");
+    if (row) openArtifact(row.dataset.id).catch((error) => toast(error.message));
+  });
+  $("#newBtn").addEventListener("click", () => {
+    $("#editorTitle").textContent = "New artifact"; els.form.dataset.mode = "new"; els.idField.hidden = false; els.typeField.hidden = false;
+    els.type.value = "document"; els.htmlField.hidden = false; els.html.required = true; els.name.value = ""; els.id.value = ""; els.html.value = sampleHtml; els.dialog.showModal(); els.name.focus();
+  });
+  $("#exampleBtn").addEventListener("click", () => createArtifact({ id:`launch-page-${Date.now().toString().slice(-5)}`, name:"Launch page", html:sampleHtml }).catch((error) => toast(error.message)));
+  $("#editBtn").addEventListener("click", () => {
+    if (!state.current) return toast("Open a page first");
+    $("#editorTitle").textContent = "Edit artifact"; els.form.dataset.mode = "edit"; els.idField.hidden = true; els.typeField.hidden = true; els.htmlField.hidden = false; els.html.required = true;
+    els.name.value = state.current.name; els.id.value = state.current.id; els.html.value = state.current.html; els.dialog.showModal();
+  });
+  $("#saveEditor").addEventListener("click", async () => {
+    if (!els.form.reportValidity()) return;
+    try {
+      if (els.form.dataset.mode === "new") await createArtifact({ id:slug(els.id.value || els.name.value), name:els.name.value, html:els.type.value === "canvas" ? "" : els.html.value, type:els.type.value });
+      else await updateArtifact({ id:state.current.id, name:els.name.value, html:els.html.value });
+      els.dialog.close(); toast("Page saved");
+    } catch(error) { toast(error.message); }
+  });
+  els.name.addEventListener("input", () => { if (els.form.dataset.mode === "new" && !els.id.dataset.touched) els.id.value = slug(els.name.value); });
+  els.id.addEventListener("input", () => { els.id.dataset.touched = "true"; });
+  els.type.addEventListener("change", () => { const canvas = els.type.value === "canvas"; els.htmlField.hidden = canvas; els.html.required = !canvas; });
+  document.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => els.dialog.close()));
+  $("#captureBtn").addEventListener("click", () => saveScreenshot().catch((error) => toast(error.message)));
+
+  const withArtifact = async (artifact, task) => {
+    if (artifact && artifact !== state.current?.id) await openArtifact(artifact);
+    if (!state.current) throw new Error("open an artifact first or pass artifact");
+    const layer = await state.annotationsReady;
+    return task(layer);
+  };
+  const ready = loadArtifacts().then(() => state.artifacts[0] ? openArtifact(state.artifacts[0].id) : null);
+  window.artifacts = Object.freeze({
+    ready,
+    list:async () => (await api("/api/artifacts")).artifacts,
+    open:openArtifact,
+    create:createArtifact,
+    update:updateArtifact,
+    delete:(artifact, options) => deleteArtifact(artifact, { confirm:false, ...options }),
+    addImage,
+    moveItem,
+    items:async (artifact = state.current?.id) => (await api(`/api/artifacts/assets?artifact=${encodeURIComponent(artifact)}`)).items,
+    annotate:({ artifact = state.current?.id, ...mark } = {}) => withArtifact(artifact, (layer) => layer.annotate(mark)),
+    deleteAnnotation:(id, artifact = state.current?.id) => withArtifact(artifact, (layer) => layer.remove(id)),
+    annotations:(artifact = state.current?.id) => withArtifact(artifact, (layer) => layer.list()),
+    screenshot:saveScreenshot,
+    state:() => ({ current:state.current?.id || null, items:structuredClone(state.items), annotations:annotations()?.list?.() || [], annotationScope:annotations()?.state?.().scope || null }),
+  });
+})();
+</script>
+</body>
+</html>
