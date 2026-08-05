@@ -26,6 +26,14 @@ Open http://127.0.0.1:8890/ — the shell. It starts with one surface on the rai
 | `app/surfaces.json` | The surface manifest the shell renders. |
 | `app/surfaces/` | Surface pages live here, served at `/surfaces/…`. |
 | `fixtures/` | The data behind the runtime's API verbs (rig floor state, files root). |
+| `apps/` | Apps bundled with the SDK. An **app** is a surface plus whatever backend it needs — see `contract/app-manifest.md`. Most apps live in their own repositories; the ones here ship with the SDK because they exercise a primitive it defines. |
+| `providers/` | The backends those bundled apps call. A provider declares how to run itself and which verbs it answers; nothing in `app/` depends on one. |
+
+**The SDK is still a shell and a contract, not a framework you import.** A bundled
+app is an app like any other — it registers a row and calls verbs, with no
+privileged access to the runtime. It is here so that a primitive the contract
+defines has a real consumer in the same repository, which is the thing the
+conformance tables kept having to say "no" about.
 
 ## Starting a new surface
 

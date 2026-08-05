@@ -256,6 +256,7 @@ default path:
 | marks surviving a runtime restart | **yes when `--annotations <file>` is configured**; in memory otherwise, and the layer says "session only" |
 | human and agent marks rendered distinguishably | **yes** |
 | an agent handle to add and remove marks | **yes** — `window.studioAnnotations.annotate()` / `.remove()` / `.list()` |
+| **a SHIPPED app in this repository that actually consumes these seams** | **yes** — the bundled ARTIFACTS app uses the context, target and refresh messages and holds no annotation implementation of its own. Its migration was browser-verified by the QA seat that requested the seams, not by the author of them; the per-page isolation and element anchoring were measured against a live studio after a full restart. **This is the row the sibling primitives still answer "no" to** — `focus.md` and `drive.md` have no in-repo consumer, and both say so |
 | **a mark anchored across a CROSS-ORIGIN surface** | **no.** A cross-origin iframe cannot be read for element identity, so marks there are spatial only and say so. Same-origin surfaces get element anchoring |
 | **agreement about a mark between two people watching at once** | **no.** Last write for a scope wins. Concurrent annotation needs the write-path concurrency `change-signal.md` deliberately excludes, and inventing it before two real watchers exist would be the wrong shape |
 
