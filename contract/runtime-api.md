@@ -6,6 +6,32 @@ Base: the runtime's own origin (default `http://127.0.0.1:8890`). All routes
 are GET unless noted. Start every integration by reading `GET /api/contract`
 (shape in `contract-meta.md`) and checking `capabilities`.
 
+## Who may answer a verb (stable)
+
+**The documented shape binds whoever serves it.** In a studio running apps, a
+provider may implement a verb documented here — that is expected, not a
+workaround: in a real install the files verbs are served by something that knows
+about real directories rather than the reference runtime's fixtures. **What a
+provider may not do is answer a documented name with an undocumented shape.**
+
+So a surface may rely on the shape without knowing who produced it, which is the
+only thing that makes these verbs worth documenting. A provider that wants to
+answer a different question **gives it a different name** — new names in the same
+namespace are the provider's own and need no permission. Shadowing a documented
+name with a different answer is the one move that is out of bounds, because it
+turns a contract into a coin flip decided by what happens to be installed.
+
+Three verbs cannot be substituted at all, and it is worth knowing why they are
+different in kind rather than more important: `GET /api/contract`,
+`GET /api/events` and `GET /api/factory/state` are the runtime **describing
+itself**. Nothing else can answer them, so nothing else may.
+
+**Measured, not theoretical.** A provider once answered zero-argument
+`/api/files/tree` with a list of bound roots instead of a directory's contents —
+a reasonable answer to a different question, since it had several roots and the
+reference runtime has one. Every consumer then had to handle both, which is the
+cost this rule exists to prevent.
+
 ## Failure semantics (stable)
 
 - **Degraded reads** return HTTP 200 with `{ "ok": false, "degraded": "<why>" }`
