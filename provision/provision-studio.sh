@@ -26,9 +26,15 @@
 #     nothing to leak, so nothing has to remember not to leak it.
 #
 # Usage:
-#   ./provision-studio.sh                       # defaults
+#   ./provision-studio.sh                       # curated default app set
+#   APPS="workspace files canvas" ./provision-studio.sh    # exactly these
+#   APPS=all ./provision-studio.sh              # everything the repo ships
 #   STUDIO_PORT=8890 STUDIO_USER=studio ./provision-studio.sh
 #   ./provision-studio.sh --dry-run             # print plan, touch nothing
+#
+# A bare host gets FOUR apps, not everything: workspace, rig-designer, factory,
+# files. Two providers, no ffmpeg, and no licence to go and acquire. The run
+# prints what it left out and how to ask for it.
 #
 set -euo pipefail
 
@@ -38,11 +44,32 @@ STUDIO_DIR="${STUDIO_DIR:-$HOME/studio}"
 MEDIA_DIR="${MEDIA_DIR:-$HOME/media}"
 STUDIO_PORT="${STUDIO_PORT:-8890}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
-# Explicit APPS is an instruction; absent APPS is a question answered after the
-# clone (see "discover apps"). A hardcoded default list silently rots: the apps
-# repository moves on its own schedule, and a provisioner pinned to yesterday's
-# names fails on a box that did nothing wrong.
+# Explicit APPS is an instruction; absent APPS gets the CURATED SET below.
+#
+# WHY NOT EVERYTHING. Installing whatever the repository happens to ship put 13
+# apps and 7 providers on a fresh box — including a video toolchain that wants
+# ffmpeg and a canvas that needs a licence the user has to go and get. A first
+# boot should show someone that the studio works, not hand them every dependency
+# the ecosystem has ever needed.
+#
+# WHY NOT A PINNED LIST EITHER, which is the failure this replaced: the apps
+# repository moves on its own schedule, so a provisioner asserting yesterday's
+# names fails on a box that did nothing wrong. The default is therefore
+# INTERSECTED with what the clone actually ships, and anything in the curated set
+# that has since been renamed or removed is reported rather than fatal.
+#
+# THE SET, and why each earns a slot on a bare host:
+#   workspace     - no provider at all; the thing you actually work in
+#   rig-designer  - no provider at all; shows the rig being driven
+#   factory       - studio-factory; the rig floor, which is what OpenRig IS
+#   files         - studio-host; browsing the box, the most universal verb set
+# Two providers, no ffmpeg, no licence to acquire. Everything else is one
+# `APPS=` away and the summary says so.
+APPS_DEFAULT="workspace rig-designer factory files"
 APPS_EXPLICIT="${APPS:+yes}"
+# `APPS=all` is the documented escape hatch back to install-everything.
+APPS_ALL=""
+if [ "${APPS:-}" = "all" ]; then APPS_ALL="yes"; APPS_EXPLICIT=""; fi
 APPS="${APPS:-}"
 # Split ONCE, explicitly, into an array. The obvious `for a in $APPS` relies on
 # unquoted word-splitting, which bash does and zsh does NOT — so the same line
@@ -137,9 +164,34 @@ clone_or_update "$APPS_REPO" "$STUDIO_DIR/apps"
 note "apps"
 if [ "$DRY_RUN" = 0 ]; then
   if [ -z "$APPS_EXPLICIT" ]; then
-    APP_LIST=(); for d in "$STUDIO_DIR"/apps/apps/*/; do [ -d "$d" ] && APP_LIST+=("$(basename "$d")"); done
-    printf '  discovered %d app(s) from the repository: %s\n' "${#APP_LIST[@]}" "${APP_LIST[*]}"
-    [ "${#APP_LIST[@]}" -gt 0 ] || { warn "no apps found under $STUDIO_DIR/apps/apps — refusing to write an empty studio"; exit 3; }
+    AVAILABLE=(); for d in "$STUDIO_DIR"/apps/apps/*/; do [ -d "$d" ] && AVAILABLE+=("$(basename "$d")"); done
+    printf '  repository ships %d app(s): %s\n' "${#AVAILABLE[@]}" "${AVAILABLE[*]}"
+    [ "${#AVAILABLE[@]}" -gt 0 ] || { warn "no apps found under $STUDIO_DIR/apps/apps — refusing to write an empty studio"; exit 3; }
+
+    if [ -n "$APPS_ALL" ]; then
+      APP_LIST=("${AVAILABLE[@]}")
+      printf '  APPS=all -> installing every app the repository ships\n'
+    else
+      # Intersect the curated set with what is actually there. A curated name that
+      # has been renamed or dropped is REPORTED, never fatal and never silent —
+      # a default that quietly installs three of four looks identical to one that
+      # installed all four.
+      APP_LIST=(); MISSING=()
+      for a in $APPS_DEFAULT; do
+        if [ -d "$STUDIO_DIR/apps/apps/$a" ]; then APP_LIST+=("$a"); else MISSING+=("$a"); fi
+      done
+      # NO SILENT CAPS: say what was left out and how to get it.
+      SKIPPED=()
+      for a in "${AVAILABLE[@]}"; do
+        case " ${APP_LIST[*]} " in *" $a "*) ;; *) SKIPPED+=("$a");; esac
+      done
+      printf '  installing the curated default (%d of %d): %s\n' \
+        "${#APP_LIST[@]}" "${#AVAILABLE[@]}" "${APP_LIST[*]}"
+      [ "${#SKIPPED[@]}" -eq 0 ] || printf '  not installed: %s\n     (add them with APPS="%s ..." or install everything with APPS=all)\n' \
+        "${SKIPPED[*]}" "${APP_LIST[*]}"
+      [ "${#MISSING[@]}" -eq 0 ] || warn "curated app(s) not in this repository, skipped: ${MISSING[*]}"
+      [ "${#APP_LIST[@]}" -gt 0 ] || { warn "none of the curated apps (${APPS_DEFAULT}) exist in this repository — pass APPS=... explicitly or APPS=all"; exit 3; }
+    fi
   else
     printf '  using the requested app list: %s\n' "${APP_LIST[*]}"
     for a in "${APP_LIST[@]}"; do
