@@ -1,0 +1,78 @@
+/* The shared file viewer. Runs inside an APP's frame, so it inherits nothing from
+   the shell — the palette is restated rather than referenced, because a surface is
+   sovereign inside its iframe and cannot read the shell's variables. */
+.fv-host {
+  --fv-ink: #e8ecf3; --fv-faint: #929cad; --fv-line: #262d3a;
+  --fv-panel: #11151d; --fv-back: rgba(6, 8, 12, .72);
+  position: fixed; inset: 0; z-index: 9000; display: none;
+  font: 13px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fv-ink);
+}
+.fv-host.open { display: block; }
+.fv-host * { box-sizing: border-box; }
+
+.fv-backdrop { position: absolute; inset: 0; background: var(--fv-back); }
+
+.fv-panel {
+  position: absolute; inset: 4vh 4vw; display: flex; flex-direction: column;
+  background: var(--fv-panel); border: 1px solid var(--fv-line); border-radius: 6px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5); overflow: hidden;
+}
+
+.fv-head {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: 10px 12px; border-bottom: 1px solid var(--fv-line);
+}
+.fv-icon { color: var(--fv-faint); }
+.fv-name { font-weight: 600; letter-spacing: .01em; }
+.fv-kind {
+  color: var(--fv-faint); font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  border: 1px solid var(--fv-line); border-radius: 2px; padding: 2px 6px;
+}
+.fv-close {
+  margin-left: auto; background: none; border: 1px solid var(--fv-line); border-radius: 2px;
+  color: var(--fv-faint); cursor: pointer; font: inherit; padding: 3px 9px;
+}
+.fv-close:hover { color: var(--fv-ink); border-color: var(--fv-ink); }
+
+/* The body scrolls; the panel does not. A viewer whose chrome scrolls away takes
+   the close button with it. */
+.fv-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px; }
+
+/* Media sizes to the pane rather than the file: a 4000px screenshot must not make
+   the reader pan around to find the thing being pointed at. */
+.fv-media { display: block; max-width: 100%; max-height: calc(92vh - 90px); margin: 0 auto; }
+.fv-audio { display: block; width: 100%; margin: 12px 0; }
+.fv-frame { width: 100%; height: calc(92vh - 90px); border: 0; background: #fff; }
+
+.fv-pre {
+  margin: 0; white-space: pre-wrap; word-break: break-word;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--fv-ink);
+}
+
+.fv-doc { max-width: 76ch; }
+.fv-doc h1, .fv-doc h2, .fv-doc h3, .fv-doc h4 { margin: 1.1em 0 .4em; line-height: 1.25; }
+.fv-doc h1 { font-size: 20px; } .fv-doc h2 { font-size: 17px; } .fv-doc h3 { font-size: 15px; }
+.fv-doc p, .fv-doc ul { margin: .55em 0; }
+.fv-doc ul { padding-left: 1.3em; }
+.fv-doc code { font: 12px/1.4 ui-monospace, Menlo, monospace; background: rgba(255,255,255,.06); padding: 1px 4px; border-radius: 2px; }
+.fv-doc pre { background: rgba(255,255,255,.04); border: 1px solid var(--fv-line); border-radius: 3px; padding: 10px 12px; overflow: auto; }
+.fv-doc pre code { background: none; padding: 0; }
+.fv-doc a { color: #8fb7ff; }
+
+.fv-note { color: var(--fv-faint); }
+/* A failure must not look like an empty file. */
+.fv-error {
+  color: #ff8f7a; border-left: 2px solid #ff8f7a; padding-left: 10px; margin: 0 0 .6em;
+}
+
+/* A chain entry: icon + filename, never a thumbnail. A wall of thumbnails turns an
+   ordered story into a contact sheet. */
+.fv-link {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  background: none; border: 1px solid transparent; border-radius: 3px;
+  color: var(--fv-ink); cursor: pointer; font: inherit; padding: 4px 7px; text-align: left;
+}
+.fv-link:hover { border-color: var(--fv-line); background: rgba(255,255,255,.03); }
+.fv-link-icon { color: var(--fv-faint); flex: none; }
+.fv-link-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
