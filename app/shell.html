@@ -14,7 +14,13 @@
   * { box-sizing: border-box; }
   html { color-scheme: dark; }
   html, body { height: 100%; margin: 0; background: var(--ink); font-family: var(--sans); }
-  #app { display: flex; flex-direction: column; height: 100vh; }
+  /* THE RAIL IS FULL HEIGHT AND THE HEADER STARTS BESIDE IT. The header used to
+     span the whole width with the rail beneath it, which read as two separate
+     bands and put the launcher's collapse control in the header rather than on
+     the thing it collapses. Now the launcher is one continuous edge from the top
+     of the window, and the header belongs to the surface it sits above. */
+  #app { display: flex; flex-direction: row; height: 100vh; }
+  #maincol { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
   /* THE TWO PERSISTENT FRAMES. Every surface gets the same launcher on the left
      and the same header on top, so the studio reads as one application rather
      than a set of pages that each invented their own chrome. A surface renders
@@ -37,7 +43,13 @@
     font-weight: 600; padding: 7px 12px; cursor: pointer; }
   #topbar button:hover { color: var(--bone); border-color: var(--bone); }
   #topbar button.on { background: var(--bone); border-color: var(--bone); color: #111; }
-  #railToggle { width: 34px; padding: 7px 0 !important; text-align: center; flex: none; }
+  /* Lives on the rail now, not in the header: a control belongs to the thing it
+     acts on, and in the header it read as a studio-level control beside MARKUP
+     and AGENTS when it is only ever about the launcher. */
+  #railToggle { flex: none; width: 28px; height: 24px; padding: 0; text-align: center;
+    background: none; border: 1px solid var(--edge2); border-radius: 2px; color: var(--faint);
+    cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
+  #railToggle:hover { color: var(--bone); border-color: var(--bone); }
   #rail { width: 212px; min-width: 212px; background: var(--panel); border-right: 1px solid var(--edge);
     display: flex; flex-direction: column; }
   /* COLLAPSE TO A TOOLSTRIP, not to nothing. Small screens and wide work want the
@@ -49,11 +61,16 @@
   body.rail-collapsed #manifest-health,
   body.rail-collapsed .tab .name,
   body.rail-collapsed .tab .dot { display: none; }
-  body.rail-collapsed #rail-head { padding: 20px 0 10px; text-align: center; font-size: 0; }
+  /* Collapsed, the toggle is the only thing left in the head, so it centres
+     rather than sitting against a title that is no longer rendered. */
+  body.rail-collapsed #rail-head { justify-content: center; padding: 16px 0 10px; }
+  body.rail-collapsed #rail-head .headtext { display: none; }
   body.rail-collapsed #tabs { padding: 6px 4px; }
   body.rail-collapsed .tab { justify-content: center; padding: 9px 0; }
   body.rail-collapsed .tab .glyph { width: auto; }
-  #rail-head { padding: 20px 16px 10px; color: var(--bone); font-weight: 700; letter-spacing: 4px; font-size: 13px; }
+  #rail-head { display: flex; align-items: flex-start; gap: 10px;
+    padding: 20px 16px 10px; color: var(--bone); font-weight: 700; letter-spacing: 4px; font-size: 13px; }
+  #rail-head .headtext { flex: 1; min-width: 0; display: block; }
   #rail-head small { display: block; color: var(--faint); font-weight: 400; letter-spacing: .14em;
     font-size: 9.5px; margin-top: 5px; text-transform: uppercase; }
   #tabs { flex: 1; overflow-y: auto; padding: 6px 8px; }
@@ -141,8 +158,17 @@
 </head>
 <body>
 <div id="app">
+  <nav id="rail">
+    <div id="rail-head">
+      <button id="railToggle" title="collapse the launcher to a toolstrip">☰</button>
+      <span class="headtext">STUDIO<small>openrig studio · contract v0.1</small></span>
+    </div>
+    <div id="tabs"></div>
+    <div id="manifest-health"></div>
+    <div id="rail-foot">surfaces are rooms.<br/>this is the hallway.</div>
+  </nav>
+  <div id="maincol">
   <header id="topbar">
-    <button id="railToggle" title="collapse the launcher to a toolstrip">☰</button>
     <div id="appHalf">
       <span class="title" id="topTitle">STUDIO</span>
       <span class="crumb" id="topCrumb"></span>
@@ -154,12 +180,6 @@
     </div>
   </header>
   <div id="shellframes">
-  <nav id="rail">
-    <div id="rail-head">STUDIO<small>openrig studio · contract v0.1</small></div>
-    <div id="tabs"></div>
-    <div id="manifest-health"></div>
-    <div id="rail-foot">surfaces are rooms.<br/>this is the hallway.</div>
-  </nav>
   <main id="stage"><div id="empty">no surfaces in the manifest yet</div>
   </main>
   <aside id="agents">
@@ -172,6 +192,7 @@
     <div id="agents-body"></div>
     <iframe allow="clipboard-read; clipboard-write" id="chatframe" title="agent seat"></iframe>
   </aside>
+  </div>
   </div>
 </div>
 <script>
