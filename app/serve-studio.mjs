@@ -745,6 +745,14 @@ function writeFocus(patch, verifiedBy = null) {
 // scope key -> records[]. The key is opaque to the runtime: the shell composes it
 // from the surface and, when a surface declares one, its sub-context. A runtime
 // that parsed it would have to know what a surface's documents are.
+// The package's own version, resolved once at boot from the manifest beside this
+// file rather than from a constant kept in step by hand.
+const SDK_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version || null;
+  } catch { return null; }
+})();
+
 const annotations = new Map();
 let annotationWrites = 0;
 
@@ -944,7 +952,13 @@ http.createServer(async (req, res) => {
     if (u.pathname === "/api/contract") {
       return sendJson(res, 200, {
         contractVersion: CONTRACT_VERSION,
-        runtime: { name: "openrig-studio", flavor: "reference-fixture", boot: BOOT_ID },
+        // VERSION IS READ, NEVER TYPED. A runtime that states its own version from a
+        // literal is a runtime that will state the wrong one the first time it ships
+        // without someone remembering to edit it — and it is stated here precisely so
+        // consumers can act on it, which makes a stale value worse than none. Read
+        // from the package this file is part of; null if that cannot be read, because
+        // "I do not know" is an answer and a guess is not.
+        runtime: { name: "openrig-studio", version: SDK_VERSION, flavor: "reference-fixture", boot: BOOT_ID },
         capabilities: CAPABILITIES,
         // Inspectable without posting: an agent can ask whether anything is
         // listening before it drives, rather than learning from a no-op.

@@ -51,7 +51,7 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 ```json
 {
   "contractVersion": "0.1",
-  "runtime": { "name": "openrig-studio", "flavor": "reference-fixture", "boot": "<opaque id, stable for this process>" },
+  "runtime": { "name": "openrig-studio", "version": "<this runtime package's version, or null>", "flavor": "reference-fixture", "boot": "<opaque id, stable for this process>" },
   "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read",
                    "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write",
                    "annotations.read", "annotations.write"],
@@ -75,6 +75,29 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 
 - `contractVersion` — the version of this contract the runtime implements.
 - `capabilities` — which contract namespaces this runtime serves. Check before use.
+- `runtime.version` — the runtime **package's** own version, or `null` when it cannot
+  be determined. **Informational only.**
+
+  **DO NOT MAKE A COMPATIBILITY DECISION ON IT.** That is what `capabilities` and
+  `contractVersion` are for, and they answer the question this field looks like it
+  answers: *can this runtime serve me?* A package version cannot — a runtime that
+  is not this package has a version too, and it means something else entirely.
+  This is stated because a version number is the thing a consumer reaches for, and
+  reaching for it here produces a check that passes on the reference runtime and
+  refuses every other implementation of the same contract.
+
+  What it is *for*: telling a human, or a log, or a bug report **which build is
+  running** — a question nothing could answer over HTTP before, so consumers on
+  the box read the package manifest and consumers off it guessed. It exists
+  because this contract already tells you not to write a version in prose and to
+  read it from the thing itself; a remote consumer had no way to do that.
+
+  **It is READ, never typed** — the reference runtime resolves it from the
+  `package.json` it ships beside, at boot. `null` is a real answer and means *not
+  known*; a runtime that states a version it was told rather than one it read will
+  eventually state the wrong one, and a wrong version is worse than an absent one
+  precisely because it is stated to be acted on.
+
 - `runtime.boot` — an opaque id, **stable for the life of this process and different
   after a restart**. It is how a surface knows its own CODE changed: a studio copies
   surfaces into its runtime directory at boot, so edited source only reaches the

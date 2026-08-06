@@ -61,6 +61,12 @@ function fromWorkingTree() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zeroconf-now-"));
   fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
+  // The package manifest sits beside app/ in every real install, and the runtime
+  // reads its own version from it. Copying app/ alone tested a LAYOUT THAT NEVER
+  // SHIPS: the runtime honestly answered "version unknown" and the parity check
+  // read that as a divergence. Make the fixture faithful rather than teach the
+  // comparator to accept an answer no consumer would get.
+  fs.cpSync(path.join(REPO, "package.json"), path.join(dir, "package.json"));
   return dir;
 }
 
@@ -171,7 +177,12 @@ test("zero-config: the contract answer is additive — one field gained, none lo
   // second field appearing here would fail, and so would `boot` disappearing.
   const gained = Object.keys(a.runtime).filter((k) => !(k in b.runtime));
   const lost = Object.keys(b.runtime).filter((k) => !(k in a.runtime));
-  assert.deepEqual(gained, ["boot"], `unexpected addition(s) to the runtime block: ${gained.join(", ")}`);
+  // NAMED, not open-ended, and that is deliberate: this permits additions and
+  // requires each to be DECLARED here, so a third field appearing unannounced
+  // still fails. `version` was added 2026-08-06 and documented in contract-meta.md
+  // in the same change — this line is the record of that intent, not a rubber stamp.
+  assert.deepEqual(gained.sort(), ["boot", "version"],
+    `unexpected addition(s) to the runtime block: ${gained.join(", ")}`);
   assert.deepEqual(lost, [], `the runtime block LOST field(s): ${lost.join(", ")}`);
 });
 

@@ -42,6 +42,8 @@ async function start(withOverlay) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "parity-"));
   fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
+  // Beside app/ in every real install; the runtime reads its own version from it.
+  fs.cpSync(path.join(REPO, "package.json"), path.join(dir, "package.json"));
   const args = [];
   if (withOverlay) {
     const overlay = path.join(dir, "overlay");

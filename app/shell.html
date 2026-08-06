@@ -46,10 +46,15 @@
   /* Lives on the rail now, not in the header: a control belongs to the thing it
      acts on, and in the header it read as a studio-level control beside MARKUP
      and AGENTS when it is only ever about the launcher. */
-  #railToggle { flex: none; width: 28px; height: 24px; padding: 0; text-align: center;
+  #railToggle { flex: none; width: 26px; height: 24px; padding: 0; display: inline-flex;
+    align-items: center; justify-content: center;
     background: none; border: 1px solid var(--edge2); border-radius: 2px; color: var(--faint);
     cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
   #railToggle:hover { color: var(--bone); border-color: var(--bone); }
+  /* Collapsed, the filled column flips to the right: the same glyph now reads as
+     "open this" rather than "close it". One glyph, one meaning per state, and no
+     JS reaching into the button's contents. */
+  body.rail-collapsed #railToggle svg { transform: scaleX(-1); }
   #rail { width: 212px; min-width: 212px; background: var(--panel); border-right: 1px solid var(--edge);
     display: flex; flex-direction: column; }
   /* COLLAPSE TO A TOOLSTRIP, not to nothing. Small screens and wide work want the
@@ -68,8 +73,15 @@
   body.rail-collapsed #tabs { padding: 6px 4px; }
   body.rail-collapsed .tab { justify-content: center; padding: 9px 0; }
   body.rail-collapsed .tab .glyph { width: auto; }
-  #rail-head { display: flex; align-items: flex-start; gap: 10px;
-    padding: 20px 16px 10px; color: var(--bone); font-weight: 700; letter-spacing: 4px; font-size: 13px; }
+  /* Toggle to the RIGHT: the head reads title-then-control, and the control sits
+     on the outer edge where a collapse affordance is looked for. */
+  #rail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
+    padding: 20px 16px 10px; color: var(--bone); font-weight: 700; letter-spacing: 3px; font-size: 11.5px; }
+  /* 11.5/3 rather than 13/4: at the rail's 212px the longer name wrapped to two
+     lines and the toggle beside it aligned to the first, which read as a mistake.
+     The wide tracking is the studio's own language, so it is kept and the size
+     gives way — measured, not guessed. */
+  #rail-head .headtext { white-space: nowrap; }
   #rail-head .headtext { flex: 1; min-width: 0; display: block; }
   #rail-head small { display: block; color: var(--faint); font-weight: 400; letter-spacing: .14em;
     font-size: 9.5px; margin-top: 5px; text-transform: uppercase; }
@@ -86,8 +98,17 @@
   .tab .dot.down { background: var(--red); }
   #manifest-health { padding: 8px 16px; font-size: 10px; letter-spacing: .06em; color: var(--faint); }
   #manifest-health.bad { color: var(--red); }
-  #rail-foot { padding: 12px 16px; border-top: 1px solid var(--edge); color: var(--faint);
-    font-size: 10px; line-height: 1.6; }
+  #rail-foot { padding: 14px 16px 16px; border-top: 1px solid var(--edge); color: var(--faint);
+    font-size: 10px; line-height: 1.6; display: flex; flex-direction: column; gap: 7px; }
+  /* currentColor, so the mark is the same ink as the text around it and there is
+     no second palette to keep in step. Inlined rather than fetched: the shell has
+     no asset route, and a logo that 404s is a broken-looking product. */
+  #rail-foot .wordmark { width: 104px; height: auto; display: block; color: var(--bone); opacity: .92; }
+  #rail-foot .markLink { display: block; }
+  #rail-foot .markLink:hover .wordmark { opacity: 1; }
+  #rail-foot .tagline { color: var(--faint); }
+  #rail-foot .links a { color: var(--dim); text-decoration: none; }
+  #rail-foot .links a:hover { color: var(--bone); text-decoration: underline; }
   #stage { flex: 1; position: relative; background: var(--ink); }
   #stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--ink); }
   #stage iframe.hidden { visibility: hidden; pointer-events: none; }
@@ -160,12 +181,30 @@
 <div id="app">
   <nav id="rail">
     <div id="rail-head">
-      <button id="railToggle" title="collapse the launcher to a toolstrip">☰</button>
-      <span class="headtext">STUDIO<small>openrig studio · contract v0.1</small></span>
+      <span class="headtext">OPENRIG STUDIO<small id="railVersion">sdk —</small></span>
+      <button id="railToggle" title="collapse the launcher to a toolstrip" aria-label="collapse the launcher">
+        <!-- The conventional collapse-to-toolstrip glyph: a panel with its left
+             column filled. A hamburger means "a menu is behind this" and this is
+             not a menu, so it was saying the wrong thing in the right place. -->
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+          <rect x="1.25" y="2.75" width="13.5" height="10.5" rx="1.75"
+                fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M6.25 3.4v9.2" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M2.6 4.4h2.3v7.2H2.6z" fill="currentColor" opacity=".85"/>
+        </svg>
+      </button>
     </div>
     <div id="tabs"></div>
     <div id="manifest-health"></div>
-    <div id="rail-foot">surfaces are rooms.<br/>this is the hallway.</div>
+    <div id="rail-foot">
+      <a class="markLink" href="https://openrig.dev" target="_blank" rel="noopener"
+         title="OpenRig — the substrate under every box"><svg class="wordmark" aria-label="OpenRig" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="18 -744 4844 788" fill="currentColor"><g transform="scale(1,-1)"><path d="M306.0 -14.0Q426.0 -14.0 495.0 59.5Q564.0 133.0 564.0 272.0V428.0Q564.0 563.0 495.0 638.5Q426.0 714.0 306.0 714.0Q186.0 714.0 117.0 638.5Q86.79292297363281 605.4473266601562 69.80999755859375 560.9911499023438L198.7979278564453 531.2119750976562Q211.2019805908203 556.6514892578125 233.0 573.0Q261.0 594.0 306.0 594.0Q351.0 594.0 378.5 573.0Q406.0 552.0 419.0 516.0Q432.0 480.0 432.0 436.0V264.0Q432.0 194.0 405.0 150.0Q378.0 106.0 306.0 106.0Q234.0 106.0 207.0 150.0Q180.0 194.0 180.0 264.0V436.0Q180.0 456.5721130371094 182.7324981689453 475.3953552246094L54.454036712646484 505.0107727050781Q48.0 469.2881164550781 48.0 428.0V272.0Q48.0 133.0 117.0 59.5Q186.0 -14.0 306.0 -14.0Z"/><path d="M784.0 0.0V700.0H1058.0Q1130.0 700.0 1177.5 670.5Q1225.0 641.0 1248.5 594.5Q1272.0 548.0 1272.0 497.0V473.0Q1272.0 421.0 1248.5 373.0Q1225.0 325.0 1177.5 294.5Q1130.0 264.0 1058.0 264.0H916.0V0.0H784.0ZM916.0 390.0H1045.0Q1089.0 390.0 1114.5 414.0Q1140.0 438.0 1140.0 476.0V488.0Q1140.0 526.0 1114.5 550.0Q1089.0 574.0 1045.0 574.0H916.0V390.0Z"/><path d="M1506.0 0.0V700.0H1948.0V574.0H1638.0V414.0H1936.0V288.0H1638.0V126.0H1960.0V0.0H1506.0Z"/><path d="M2197.0 0.0V700.0H2455.0L2537.0 66.0H2555.0V700.0H2687.0V0.0H2429.0L2347.0 634.0H2329.0V0.0H2197.0Z"/><path d="M2921.0 0.0V700.0H3189.0Q3261.0 700.0 3310.0 674.0Q3359.0 648.0 3384.0 604.5Q3409.0 561.0 3409.0 507.0V483.0Q3409.0 440.0 3385.5 402.5Q3362.0 365.0 3315.0 345.0V327.0Q3350.0 323.0 3370.5 300.0Q3391.0 277.0 3391.0 242.0V0.0H3259.0V210.0Q3259.0 234.0 3246.5 249.0Q3234.0 264.0 3205.0 264.0H3053.0V0.0H2921.0ZM3053.0 390.0H3179.0Q3227.0 390.0 3252.0 413.0Q3277.0 436.0 3277.0 476.0V488.0Q3277.0 523.0 3252.0 548.5Q3227.0 574.0 3179.0 574.0H3053.0V390.0Z"/><path d="M3632.0 0.0V126.0H3800.0V574.0H3632.0V700.0H4100.0V574.0H3932.0V126.0H4100.0V0.0H3632.0Z"/><path d="M4546.0 -14.0Q4482.0 -14.0 4430.0 17.5Q4378.0 49.0 4347.0 112.0Q4316.0 175.0 4316.0 268.0V432.0Q4316.0 523.0 4349.5 586.0Q4383.0 649.0 4442.0 681.5Q4501.0 714.0 4578.0 714.0Q4658.0 714.0 4715.0 680.0Q4772.0 646.0 4802.0 588.5Q4832.0 531.0 4832.0 460.0V448.0H4700.0V460.0Q4700.0 523.0 4667.5 555.5Q4635.0 588.0 4576.0 588.0Q4521.0 588.0 4484.5 551.0Q4448.0 514.0 4448.0 422.0V274.0Q4448.0 112.0 4580.0 112.0Q4639.0 112.0 4669.5 144.0Q4700.0 176.0 4700.0 228.0H4532.0V354.0H4832.0V0.0H4712.0V78.0H4694.0Q4682.0 39.0 4648.0 12.5Q4614.0 -14.0 4546.0 -14.0Z"/></g></svg></a>
+      <span class="tagline">Durable teams of coding agents.</span>
+      <span class="links">
+        <a href="https://openrig.dev" target="_blank" rel="noopener">openrig.dev</a> ·
+        <a href="https://rigs.to" target="_blank" rel="noopener">rigs.to</a>
+      </span>
+    </div>
   </nav>
   <div id="maincol">
   <header id="topbar">
@@ -257,6 +296,15 @@
   // --- contract meta first: the shell itself is a contract consumer -------
   let meta = null;
   try { meta = await (await fetch("/api/contract", { cache: "no-store" })).json(); } catch {}
+  // The rail states which SDK is actually serving it. Pulled from the runtime's
+  // own report rather than written into this page, because a version typed into
+  // the thing it describes is the one nobody remembers to change. Unreachable
+  // runtime leaves the em dash, which says "not known" instead of a stale number.
+  {
+    const v = meta?.runtime?.version;
+    const el = document.getElementById("railVersion");
+    if (el && v) el.textContent = `sdk v${v}`;
+  }
   const health = document.getElementById("manifest-health");
   if (!meta) { health.className = "bad"; health.textContent = "runtime unreachable"; }
   else if (!meta.manifest.ok) {
@@ -552,8 +600,14 @@
   const railBtn = document.getElementById("railToggle");
   const setRail = (collapsed) => {
     document.body.classList.toggle("rail-collapsed", collapsed);
-    railBtn.textContent = collapsed ? "\u203A" : "\u2630";
+    // THE GLYPH IS MARKUP AND STAYS MARKUP. This used to assign textContent, which
+    // ran on boot and DESTROYED the inline SVG before anyone saw it — the button
+    // was replaced by a hamburger character no matter what the markup said. The
+    // served HTML and the live DOM disagreed, which is why reading either one
+    // alone gets you the wrong answer. Direction is conveyed by mirroring the
+    // glyph in CSS; only the label changes here.
     railBtn.title = collapsed ? "expand the launcher" : "collapse the launcher to a toolstrip";
+    railBtn.setAttribute("aria-label", railBtn.title);
     try { sessionStorage.setItem("shell.rail", collapsed ? "1" : "0"); } catch {}
   };
   setRail((() => { try { return sessionStorage.getItem("shell.rail") === "1"; } catch { return false; } })());
