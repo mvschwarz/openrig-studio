@@ -10,10 +10,34 @@
 // that 404, because the process showing the row never heard of the provider
 // behind it. No check saw it. The row is real, the page is real, the 200 is real.
 //
-// NOTE ON SCOPE, because these tests prove the CAUSE and not the whole symptom:
-// they assert the repaint is prevented. Reproducing the 404 needs a
-// PROVIDER-BACKED app, since the reference runtime answers the files verbs itself
-// and would mask it. The repaint is what the fix removes; the 404 follows from it.
+// NOTE ON SCOPE: these tests prove the CAUSE, not the whole symptom — they assert
+// the repaint is prevented. Reproducing the 404 needs a PROVIDER-BACKED app, since
+// the reference runtime answers the files verbs itself and would mask it.
+//
+// ✅ THE ROUTING GAP WAS REPRODUCED SEPARATELY, against the UNGUARDED tool — the
+// only place it can be shown, since the guard below prevents it. Two studios, one
+// STUDIO_DIR: A boots ['files'], B boots ['files','provider-manager'] from the same
+// directory. `provider-manager` is backed by a real provider, so nothing in the
+// reference runtime can cover for its verbs.
+//
+//                                  A before B   A after B    B
+//   rail lists provider-manager    no           YES          yes
+//   /surfaces/provider-manager     404          200          200
+//   /api/fleet/state               404          404          200
+//
+// A was never restarted and never told. An app listed on the rail, served 200,
+// whose verbs 404 — present, apparently installed, and unable to work.
+//
+// READ THE LAST ROW CAREFULLY: it shows NO DELTA on its own. 404-before is honest
+// (nothing installed); 404-after is the defect. The finding is the COMBINATION of
+// all three rows, and B answering 200 for the SAME verb with the SAME probe is the
+// control that makes the after-404 a real negative rather than a probe reading
+// nothing.
+//
+// Recorded HERE rather than only in a private working note, because the commit
+// that added this file says the 404 was unproven and a commit message cannot be
+// corrected without moving a pushed SHA. A correction filed somewhere the reader
+// of the stale line cannot reach is not a correction.
 //
 // This is also the first behavioural test `tools/studio.mjs` has ever had — it is
 // a script with no exports, so everything about its boot has been hand-verified.
