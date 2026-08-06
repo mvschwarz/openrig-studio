@@ -463,3 +463,34 @@ export function driveSurface({
     get applied() { return seen; },
   };
 }
+
+// WHERE THIS SURFACE WANTS CAPTURES WRITTEN.
+//
+// A root KIND and a path RELATIVE to it — never an absolute directory. Roots are
+// kinds and not paths for the reason app-manifest.md gives: a literal path works
+// on exactly one machine. The runtime resolves the pair against what this box
+// bound and REFUSES anything that escapes, so a target that cannot be expressed
+// unsafely cannot be inherited unsafely by whatever captures.
+//
+// Call it on EVERY page/screen load. An app whose screens map to different
+// directories is re-declaring per navigation, and one declaration at startup
+// sends later captures to the first screen's directory.
+//
+// Resolves to { ok, target, error }. A refusal is worth acting on: the kind may
+// not be bound on this box, which is a configuration answer the app can show.
+export function declareCaptureTarget(spec) {
+  const { root = null, path = null } = spec || {};
+  return new Promise((resolve) => {
+    const onResult = (e) => {
+      if (e.data?.t !== "capture-target-result") return;
+      window.removeEventListener("message", onResult);
+      resolve({ ok: !!e.data.ok, target: e.data.target ?? null, error: e.data.error ?? null });
+    };
+    window.addEventListener("message", onResult);
+    parent.postMessage({ t: "capture-target", root, path }, "*");
+    // A shell that predates this seam never answers. Resolving rather than
+    // hanging keeps an app that awaits this from stalling its own load.
+    setTimeout(() => { window.removeEventListener("message", onResult);
+      resolve({ ok: false, target: null, error: "no answer from the shell" }); }, 4000);
+  });
+}

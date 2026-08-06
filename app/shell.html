@@ -436,6 +436,33 @@
         }
       }
     }
+    if (e.data.t === "capture-target") {
+      // The app names a root KIND and a path RELATIVE to it; the RUNTIME resolves
+      // and refuses. The shell does not validate paths and must not try — it
+      // cannot resolve a symlink from in here, and a lexical check follows one
+      // straight out of the root.
+      const current = frames.get(activeId);
+      if (current && e.source === current.contentWindow) {
+        const src = e.source;
+        fetch("/api/capture-target", { method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ root: e.data.root ?? null, path: e.data.path ?? null }) })
+          .then((r) => r.json())
+          .then((j) => {
+            // The REFUSAL goes back to the app, for the same reason the header
+            // overflow does: the app is the only party that can adapt, and a
+            // declaration that silently did not take is the shape this whole
+            // seam exists to avoid.
+            try { src.postMessage({ t: "capture-target-result", ok: !!j?.ok,
+              target: j?.target ?? null, error: j?.error ?? null }, "*"); } catch {}
+            if (!j?.ok) console.warn(`studio shell: capture target refused — ${j?.error || "unknown reason"}`);
+          })
+          .catch((err) => {
+            try { src.postMessage({ t: "capture-target-result", ok: false, target: null,
+              error: String(err && err.message || err) }, "*"); } catch {}
+          });
+      }
+    }
     if (e.data.t === "annotation-context") {
       // Only the ACTIVE surface may speak, for the same reason as the header: a
       // backgrounded surface still holds a live channel, and without this the

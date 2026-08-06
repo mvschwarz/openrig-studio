@@ -86,6 +86,29 @@ const IDENTITY_HEADER = (arg("--identity-header", process.env.OPENRIG_STUDIO_IDE
 // wherever the operator puts it.
 const ANNOTATIONS_FILE = arg("--annotations", process.env.OPENRIG_STUDIO_ANNOTATIONS) || null;
 
+// THE ROOTS THIS BOX BOUND, so a declared target can be REFUSED rather than
+// trusted. The runtime had never been told about roots — the launcher resolved
+// them and kept them — which was fine while nothing declared a path at runtime.
+//
+// Shape: {"<kind>": "<abs>" | ["<abs>", ...]}. An array binds several
+// locations for one kind, which studio.json already permits.
+const BOUND_ROOTS = (() => {
+  const raw = arg("--roots", process.env.OPENRIG_STUDIO_ROOTS);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    const out = {};
+    for (const [kind, v] of Object.entries(parsed || {})) {
+      const list = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" && x);
+      if (list.length) out[kind] = list;
+    }
+    return out;
+  } catch (e) {
+    console.error(`roots: --roots is not valid JSON (${e.message}) — no kind will resolve`);
+    return {};
+  }
+})();
+
 const CONTRACT_VERSION = "0.1";
 // PROCESS IDENTITY — the answer to "the agent edited the page, when may I reload?"
 //
@@ -111,7 +134,7 @@ const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2
 // honestly rather than claiming a namespace it half-implements.
 const CAPABILITIES = ["contract.meta", "observe.factory-state", "stream.events", "files.read",
   "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write",
-  "annotations.read", "annotations.write"];
+  "annotations.read", "annotations.write", "capture.target"];
 
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json", ".css": "text/css",
   ".js": "text/javascript", ".mjs": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png",
@@ -826,6 +849,48 @@ const insideRoot = (p) => {
   try { real = fs.realpathSync(p); rootReal = fs.realpathSync(FILES_ROOT); } catch { return null; }
   return real === rootReal || real.startsWith(rootReal + path.sep) ? real : null;
 };
+// Containment for an ARBITRARY bound root. Same rule as insideRoot above and
+// for the same reason: resolve BOTH sides, because a lexical startsWith follows
+// a symlink straight out of the root.
+//
+// The root itself must exist. An unbound or missing kind is a REFUSAL, never a
+// silent fallback to somewhere else — landing captures in an unexpected
+// directory is worse than not capturing.
+function resolveInRoot(kind, rel) {
+  const roots = BOUND_ROOTS[kind];
+  if (!roots) return { ok: false, error: `no root bound for kind '${kind}' — bind it in studio.json roots{}` };
+  if (typeof rel !== "string" || !rel || path.isAbsolute(rel)) {
+    return { ok: false, error: `path must be a non-empty RELATIVE path inside the '${kind}' root` };
+  }
+  for (const base of roots) {
+    let baseReal;
+    try { baseReal = fs.realpathSync(base); } catch { continue; }
+    const target = path.resolve(baseReal, rel);
+    // Resolve the deepest EXISTING ancestor: the target directory legitimately
+    // may not exist yet (a slice's feedback/ before anything was captured), and
+    // realpath on a missing path throws. Walking up is what lets a not-yet-
+    // created directory be validated without accepting one that escapes.
+    let probe = target, real = null;
+    for (;;) {
+      try { real = fs.realpathSync(probe); break; } catch {}
+      const up = path.dirname(probe);
+      if (up === probe) break;
+      probe = up;
+    }
+    if (!real) continue;
+    const rest = path.relative(probe, target);
+    const resolved = rest ? path.join(real, rest) : real;
+    if (resolved === baseReal || resolved.startsWith(baseReal + path.sep)) {
+      return { ok: true, root: kind, base: baseReal, path: resolved };
+    }
+  }
+  return { ok: false, error: `'${rel}' resolves outside every location bound to '${kind}'` };
+}
+
+// The declared capture target, or null. MODULE STATE — this runtime's own answer
+// about itself, which is why the verb is reserved rather than substitutable.
+let captureTarget = null;
+
 const FILE_KINDS = { image: /\.(png|jpe?g|gif|webp|svg)$/i, video: /\.(mp4|mov|webm)$/i,
   audio: /\.(mp3|wav|m4a|flac)$/i, markdown: /\.(md|markdown)$/i, html: /\.html?$/i,
   text: /\.(txt|json|jsonl|yaml|yml|mjs|js|ts|css|py|sh|toml|csv)$/i };
@@ -928,6 +993,27 @@ http.createServer(async (req, res) => {
       const marker = driveMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, op: driveOp });
     }
+    if (u.pathname === "/api/capture-target") {
+      if (req.method === "POST") {
+        const raw = await readBody(req);
+        let body;
+        try { body = JSON.parse(raw || "null"); }
+        catch (e) { return sendJson(res, 400, { ok: false, error: `capture-target is not valid JSON: ${e.message}` }); }
+        // null withdraws it. A surface that navigates away from a capturable
+        // screen should be able to say so.
+        if (body === null || body?.root === null) { captureTarget = null; return sendJson(res, 200, { ok: true, target: null }); }
+        if (typeof body?.root !== "string" || !body.root) {
+          return sendJson(res, 400, { ok: false, error: "capture-target names no root KIND — send { root, path }" });
+        }
+        // REFUSED AT DECLARATION, not at write time. A target that cannot be
+        // expressed unsafely cannot be inherited unsafely by whatever captures.
+        const r2 = resolveInRoot(body.root, body.path);
+        if (!r2.ok) return sendJson(res, 400, { ok: false, error: r2.error });
+        captureTarget = { root: r2.root, path: r2.path, declaredPath: body.path, at: new Date().toISOString() };
+        return sendJson(res, 200, { ok: true, target: captureTarget });
+      }
+      return sendJson(res, 200, { ok: true, target: captureTarget });
+    }
     if (u.pathname === "/api/annotations") {
       if (req.method === "POST") {
         const raw = await readBody(req);
@@ -973,6 +1059,13 @@ http.createServer(async (req, res) => {
         // MEASURED, not declared. "session only" and "persisted" are two different
         // promises to whoever just drew a mark, and a consumer should be able to
         // tell which one it got without drawing one and restarting to find out.
+        // WHAT IS DECLARED AND WHAT COULD BE. `roots` lists the kinds this box
+        // bound, so an app can see whether the kind it needs exists before
+        // declaring — and an operator can see why a declaration was refused.
+        // NOTHING CONSUMES `target` YET: the capture action is not in this
+        // runtime. Reported so the seam is observable rather than inert.
+        capture: { target: captureTarget, roots: Object.keys(BOUND_ROOTS).sort(),
+                   consumedBy: null },
         annotations: { persistence: ANNOTATIONS_FILE ? "file" : "memory",
                        scopes: annotations.size, writes: annotationWrites },
         manifest: manifestReport(),

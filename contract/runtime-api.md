@@ -155,6 +155,33 @@ refused with 400 naming which.
 box — not the runtime describing itself, so a provider that knows where a real
 studio keeps annotations should serve them under this shape.
 
+## capture
+
+### `POST /api/capture-target` — stable
+Body `{ root, path }` — a root **KIND** and a path **relative to it**. Answers
+`{ ok: true, target: { root, path, declaredPath, at } }` with `path` resolved
+absolute, or 400 with `{ ok: false, error }`. `GET` returns the current target or
+`null`; posting `null` withdraws it.
+
+**Roots are KINDS, never paths** (`app-manifest.md`) — a literal directory works
+on exactly one machine, and a verb that accepted one would be an unbounded write
+surface besides. The pair is resolved against what this box bound and **refused at
+DECLARATION**, so a target that cannot be expressed unsafely cannot be inherited
+unsafely by whatever captures.
+
+Containment resolves **both sides** with `realpath`: a symlink inside the root that
+points outside it is refused. The target directory need not exist yet — resolution
+walks to the deepest existing ancestor, so a slice's `feedback/` can be declared
+before anything has been written there.
+
+**An unbound kind is a refusal, never a fallback.** Landing captures in an
+unexpected directory is worse than not capturing.
+
+**THIS VERB WRITES NOTHING.** It records where a capture *would* go. The contract
+still has no write verbs; whatever performs a capture is a separate concern and
+does not exist in the reference runtime — `GET /api/contract` reports
+`capture.consumedBy: null` to say so rather than leaving the seam looking wired.
+
 ## runtime-internal — exists in some runtimes; DO NOT build on
 
 Listed so you are warned at the point of temptation. None of these are
