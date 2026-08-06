@@ -38,12 +38,75 @@ const port = Number(arg("--port", String(config.port ?? 8890)));
 const appsRoot = (config.appsRoot ?? path.join(STUDIO, "apps")).replace(/^~/, os.homedir());
 const RUNTIME = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "app", "serve-studio.mjs");
 
+// ---- who owns .runtime/ ----------------------------------------------------
+//
+// TWO STUDIOS SHARING ONE STUDIO_DIR SHARE .runtime/, AND COMPOSING IS
+// DESTRUCTIVE. The second to boot silently repainted the first's rail — and the
+// first cannot notice, because it built its routing table IN MEMORY at ITS boot
+// and never reads the directory again.
+//
+// The result is an app that is PRESENT, LOOKS INSTALLED, AND CANNOT WORK: the
+// founder opened a PROVIDERS tab on a live studio that loaded 200 while every
+// verb behind it 404'd, because the process serving it had never heard of the
+// provider whose row it was now showing. Found by opening it. None of the
+// obvious checks could have caught it — the row is real, the page is real, and
+// the 200 is real.
+//
+// So the SECOND boot refuses rather than winning quietly. Same rule as the port
+// guard and the systemd unit: REFUSE RATHER THAN ADOPT.
+//
+// LIVENESS IS THE STAMPED PORT, NOT THE STAMPED PID. A pid can be reused by
+// anything, so a dead studio whose number came round again would refuse a
+// legitimate boot forever. What matters is whether something is still SERVING
+// from this .runtime, so that is what gets asked.
+const RUNTIME_DIR = path.join(STUDIO, ".runtime");
+const OWNER_FILE = path.join(RUNTIME_DIR, "owner.json");
+
+// Deliberately does not ask WHO answers: a stranger on that port is still a
+// reason to refuse, and asking the studio would mean trusting a reply from the
+// process we are unsure about.
+const portIsServing = (p) => new Promise((resolve) => {
+  const s = net.connect(Number(p), "127.0.0.1");
+  const done = (v) => { s.destroy(); resolve(v); };
+  s.once("connect", () => done(true));
+  s.once("error", () => done(false));
+  setTimeout(() => done(false), 700);
+});
+
+let priorOwner = null;
+try { priorOwner = JSON.parse(fs.readFileSync(OWNER_FILE, "utf8")); } catch {}
+
+if (priorOwner && Number(priorOwner.port) !== port) {
+  if (await portIsServing(priorOwner.port)) {
+    console.error("studio: .runtime/ in " + STUDIO + " is in use by the studio on port " + priorOwner.port);
+    console.error("  (pid " + (priorOwner.pid ?? "?") + ", started " + (priorOwner.startedAt ?? "?") + ")");
+    console.error("  Composing would REPAINT that studio's rail while it keeps serving the one it");
+    console.error("  built at ITS boot — its tabs would load and their verbs would 404, and it");
+    console.error("  cannot detect the change. Refusing rather than corrupting a running studio.");
+    console.error("  Give this studio its own OPENRIG_STUDIO_DIR, or stop port " + priorOwner.port + " first.");
+    process.exit(7);
+  }
+  // Stale stamp: the owner is gone. Take over and SAY SO — a silent takeover
+  // here is the same silence this guard exists to remove, with nobody harmed
+  // this time.
+  console.log("  runtime : taking over .runtime/ from a studio on port " + priorOwner.port + " that is no longer serving");
+}
 // ---- compose ---------------------------------------------------------------
 const rail = composeRail({
   appsRoot, enabled: config.apps ?? [], doors: config.doors ?? [],
   runtimeDir: path.join(STUDIO, ".runtime"), studioRoot: STUDIO,
   log: (m) => console.log(`  app     : ${m}`),
 });
+// Claim it only once the compose actually happened.
+try {
+  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+  fs.writeFileSync(OWNER_FILE, JSON.stringify(
+    { pid: process.pid, port, studioRoot: STUDIO, startedAt: new Date().toISOString() }, null, 2));
+} catch (e) {
+  // Not fatal — a studio that cannot stamp still runs. But an unstamped
+  // .runtime/ is one the NEXT boot will silently take, so it is said out loud.
+  console.error("  warn    : could not stamp .runtime/ ownership (" + e.message + ") — a second boot will not be warned");
+}
 for (const m of rail.missing) console.error(`  MISSING : ${m}`);
 for (const w of rail.warnings ?? []) console.error(`  warn    : ${w}`);
 

@@ -1,0 +1,119 @@
+// Two studios must not share one .runtime/ silently.
+//
+//   node --test 'test/*.test.mjs'
+//
+// THE DEFECT, found by studio-impl on a live box and by the founder OPENING IT:
+// composing is destructive, and two studios sharing a STUDIO_DIR share .runtime/.
+// The second to boot repainted the first's rail while the first kept serving the
+// routing table it built IN MEMORY at ITS boot. The result is an app that is
+// present, looks installed, and cannot work — a tab that loads 200 over verbs
+// that 404, because the process showing the row never heard of the provider
+// behind it. No check saw it. The row is real, the page is real, the 200 is real.
+//
+// NOTE ON SCOPE, because these tests prove the CAUSE and not the whole symptom:
+// they assert the repaint is prevented. Reproducing the 404 needs a
+// PROVIDER-BACKED app, since the reference runtime answers the files verbs itself
+// and would mask it. The repaint is what the fix removes; the 404 follows from it.
+//
+// This is also the first behavioural test `tools/studio.mjs` has ever had — it is
+// a script with no exports, so everything about its boot has been hand-verified.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import net from "node:net";
+import path from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const STUDIO_MJS = path.join(REPO, "tools", "studio.mjs");
+const APPS = path.join(path.dirname(REPO), "openrig-studio-apps");
+let nextPort = 9640;
+
+const hasApps = fs.existsSync(path.join(APPS, "apps", "workspace", "app.json"));
+
+function makeStudio(apps, port) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "studio-own-"));
+  fs.writeFileSync(path.join(dir, "studio.json"),
+    JSON.stringify({ port, appsRoot: APPS, apps }, null, 2));
+  return dir;
+}
+const listening = (port) => new Promise((resolve) => {
+  const s = net.connect(port, "127.0.0.1");
+  const done = (v) => { s.destroy(); resolve(v); };
+  s.once("connect", () => done(true));
+  s.once("error", () => done(false));
+  setTimeout(() => done(false), 500);
+});
+async function boot(dir, port) {
+  const proc = spawn(process.execPath, [STUDIO_MJS, "--port", String(port)],
+    { cwd: dir, env: { ...process.env, OPENRIG_STUDIO_DIR: dir }, stdio: ["ignore", "pipe", "pipe"] });
+  for (let i = 0; i < 120; i++) {
+    if (await listening(port)) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return { proc, stop: () => new Promise((r) => { proc.once("exit", r); proc.kill(); }) };
+}
+const railIds = (dir) => {
+  const p = path.join(dir, ".runtime", "surfaces", "surfaces.json");
+  return JSON.parse(fs.readFileSync(p, "utf8")).surfaces.map((s) => s.id);
+};
+
+test("a booting studio stamps .runtime/ with its own port", { skip: !hasApps && "apps repo not present" },
+  async (t) => {
+    const port = nextPort++;
+    const dir = makeStudio(["workspace"], port);
+    const a = await boot(dir, port);
+    t.after(() => a.stop());
+    const owner = JSON.parse(fs.readFileSync(path.join(dir, ".runtime", "owner.json"), "utf8"));
+    assert.equal(owner.port, port, "the stamp does not name this studio's port");
+    assert.equal(owner.studioRoot, dir);
+    assert.ok(owner.pid > 0 && owner.startedAt, "the stamp is missing pid or startedAt");
+  });
+
+test("a SECOND studio on the same .runtime/ REFUSES instead of repainting",
+  { skip: !hasApps && "apps repo not present" }, async (t) => {
+    const portA = nextPort++, portB = nextPort++;
+    const dir = makeStudio(["workspace"], portA);
+    const a = await boot(dir, portA);
+    t.after(() => a.stop());
+    const before = railIds(dir);
+    assert.ok(before.includes("workspace"), `first studio did not compose workspace: ${before}`);
+
+    // Same directory, different port, different app list — the exact shape.
+    fs.writeFileSync(path.join(dir, "studio.json"),
+      JSON.stringify({ port: portB, appsRoot: APPS, apps: ["files"] }, null, 2));
+    const second = spawnSync(process.execPath, [STUDIO_MJS, "--port", String(portB)],
+      { cwd: dir, env: { ...process.env, OPENRIG_STUDIO_DIR: dir }, encoding: "utf8", timeout: 30000 });
+
+    assert.equal(second.status, 7, `expected refusal (exit 7), got ${second.status}: ${second.stderr}`);
+    assert.match(second.stderr, new RegExp(`port ${portA}`),
+      "the refusal does not name which studio owns the directory");
+    assert.deepEqual(railIds(dir), before,
+      "the first studio's rail was repainted anyway — its tabs now show apps it cannot route");
+    assert.ok(await listening(portA), "the first studio stopped serving");
+  });
+
+test("a STALE stamp is taken over, and the takeover is announced",
+  { skip: !hasApps && "apps repo not present" }, async (t) => {
+    const dir = makeStudio(["workspace"], nextPort++);
+    // A stamp naming a port nothing is serving: the owner is gone.
+    fs.mkdirSync(path.join(dir, ".runtime"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".runtime", "owner.json"),
+      JSON.stringify({ pid: 999999, port: 9999, studioRoot: dir, startedAt: "2020-01-01T00:00:00Z" }));
+
+    const port = nextPort++;
+    fs.writeFileSync(path.join(dir, "studio.json"),
+      JSON.stringify({ port, appsRoot: APPS, apps: ["workspace"] }, null, 2));
+    const b = await boot(dir, port);
+    t.after(() => b.stop());
+
+    const owner = JSON.parse(fs.readFileSync(path.join(dir, ".runtime", "owner.json"), "utf8"));
+    assert.equal(owner.port, port, "a stale stamp was not taken over — a dead studio blocks a live one forever");
+  });
+
+test("positive control: this suite is capable of failing", () => {
+  assert.throws(() => assert.equal(1, 2));
+});
