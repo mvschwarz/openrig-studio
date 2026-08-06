@@ -92,6 +92,13 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
   because this contract already tells you not to write a version in prose and to
   read it from the thing itself; a remote consumer had no way to do that.
 
+  **It identifies the PACKAGE, not the bytes being served.** A consumer that
+  patches its installed copy — a real and disciplined practice when the patch is a
+  committed file re-applied on install — still reports the unpatched version, because
+  that is what the manifest says. So `runtime.version` narrows *which release* you
+  are looking at; it does not prove the files match it. When a bug report matters,
+  ask whether the install is patched as well.
+
   **It is READ, never typed** — the reference runtime resolves it from the
   `package.json` it ships beside, at boot. `null` is a real answer and means *not
   known*; a runtime that states a version it was told rather than one it read will
