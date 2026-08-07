@@ -404,6 +404,19 @@
     if (!e.data || typeof e.data !== "object") return;
     if (e.data.t === "open-surface" && byId(e.data.id)) activate(e.data.id);
     if (e.data.t === "open-agent") openAgents(e.data.seat);
+    // A surface may ASK for markup, exactly as it may already summon the agent
+    // sidebar. Both are studio-level controls the shell owns and the surface has a
+    // legitimate reason to want: a surface that opens an artifact in its own modal
+    // knows the user is looking at something markable, and the only route before
+    // this was the user knowing to reach for the header.
+    //
+    // It is a REQUEST, not a seizure — the shell still owns the state, only the
+    // ACTIVE surface is heard, and the button stays the visible truth. A surface
+    // cannot read markup state or force it off for the user.
+    if (e.data.t === "open-markup") {
+      const current = frames.get(activeId);
+      if (current && e.source === current.contentWindow) setMarkup(e.data.on !== false);
+    }
     if (e.data.t === "annotation-refresh") {
       // CHEAP AND EXPLICIT. DOM motion inside a surface is invisible from out
       // here: an element that MOVES changes neither the frame's size nor its
@@ -655,12 +668,16 @@
     const f = frames.get(activeId);
     if (f && f.contentWindow) { try { f.contentWindow.postMessage(msg, "*"); } catch {} }
   };
-  markupBtn.onclick = () => {
-    markupOn = !markupOn;
+  // ONE PATH for the click and the message. Two places flipping this state is two
+  // places computing one property, and the second one always forgets a listener.
+  const setMarkup = (on) => {
+    if (markupOn === Boolean(on)) return;
+    markupOn = Boolean(on);
     markupBtn.classList.toggle("on", markupOn);
     tellSurface({ t: "markup", on: markupOn });
     for (const fn of markupListeners) { try { fn(markupOn); } catch {} }
   };
+  markupBtn.onclick = () => setMarkup(!markupOn);
 
   // --- the seam a shell-level feature attaches to ---------------------------
   // ANNOTATION AND ANYTHING LIKE IT IS A SHELL FEATURE, NOT A SURFACE ONE, and

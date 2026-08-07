@@ -178,6 +178,30 @@ cases the browser reports for free. **Those are a convenience and are explicitly
 not sufficient** — the explicit hook exists because motion within an unchanged
 viewport is invisible to every observer short of polling each frame.
 
+### The worked pattern: an app opens an artifact in its own modal
+
+The case the three messages exist for, in the order they are sent. An app that
+opens a document in a modal of its own — a viewer, a preview, an artifact pane —
+declares all three per navigation and hands them back on close:
+
+```js
+// opening
+parent.postMessage({ t: "annotation-target",  frame: "artifactFrame" }, "*");
+parent.postMessage({ t: "annotation-context", id: artifactId }, "*");
+parent.postMessage({ t: "open-markup" }, "*");          // optional, see shell-protocol.md
+
+// closing
+parent.postMessage({ t: "annotation-target",  frame: null }, "*");
+parent.postMessage({ t: "annotation-context", id: null }, "*");
+```
+
+**With the modal open the shell anchors inside the artifact, so a mark lands on
+the picture rather than on the panel around it.** Handing the target back on close
+is what stops the next mark anchoring into a modal that is gone.
+
+Reported by an app author building exactly this; recorded here rather than left to
+be rediscovered, because the seam is only obvious once you have needed it.
+
 ### The scope key is composed by the SHELL (stable)
 
 `surfaceId` when no context is declared; `surfaceId`, a **NUL** (`U+0000`), then

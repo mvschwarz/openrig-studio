@@ -45,6 +45,7 @@ Send from inside your iframe with `parent.postMessage(msg, "*")`:
 | `{ "t": "header", … }` | Declares the surface's half of the header. See *The header splits in half* below. |
 | `{ "t": "annotation-context", "id": "<opaque>" }` | Refines which board of annotations this surface is showing. Only for a surface holding several documents behind one id — see `annotations.md`. `null` or omitted returns to the default. |
 | `{ "t": "annotation-target", "frame": "<iframe element id>" }` | Names a **same-origin nested iframe** whose document annotations should anchor inside. For a surface that hosts its real content in a frame. `null` or omitted returns to the surface's own document. |
+| `{ "t": "open-markup" }` | Asks the shell to turn markup on (`{"on": false}` turns it off). A REQUEST, not a seizure: the shell owns the state and the header button stays the visible truth. For a surface that opens an artifact and knows the user is looking at something markable. |
 | `{ "t": "annotation-refresh" }` | "I moved something — re-measure." Repaints anchored marks without reloading the board or disturbing undo. Needed because an element that *moves* changes no size and no scroll, so nothing else fires. |
 
 This message set is closed: the shell ignores any other `t` value. **New message

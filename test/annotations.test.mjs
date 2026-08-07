@@ -312,3 +312,32 @@ test("positive control: the refresh separation check can fail", () => {
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
 });
+
+test("open-markup is a REQUEST from the active surface, not a seizure — STRUCTURAL", () => {
+  // studio-impl built a Mark-up button into a modal and deleted it: the message
+  // set is closed and there was no verb for it. The only route was the user
+  // knowing to reach for the header, which a surface that just opened an artifact
+  // has good reason to shortcut.
+  //
+  // Added mirroring `open-agent`, which already lets a surface summon a
+  // studio-level control. The shell keeps ownership: only the ACTIVE surface is
+  // heard, the header button stays the visible truth, and a surface cannot read
+  // the state back or hold it off.
+  const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
+  const handler = shell.match(/if \(e\.data\.t === "open-markup"\) \{([\s\S]*?)\n    \}/);
+  assert.ok(handler, "shell.html no longer handles open-markup");
+  assert.match(handler[1], /e\.source === current\.contentWindow/,
+    "a background surface can turn markup on for whatever is on screen");
+  assert.match(handler[1], /setMarkup\(/,
+    "open-markup does not go through the shared toggle, so a listener will be missed");
+
+  // ONE path for the click and the message. Two places flipping this state is two
+  // places computing one property, and the second one always forgets a listener.
+  const setters = shell.match(/markupOn = /g) || [];
+  assert.equal(setters.length, 2,
+    `markupOn is assigned in ${setters.length} places — it should be its declaration and setMarkup only`);
+
+  const doc = fs.readFileSync(path.join(REPO, "contract", "shell-protocol.md"), "utf8");
+  assert.match(doc, /"t": "open-markup"/,
+    "open-markup is not in the message table — the set is closed and additions are documented with the code");
+});
