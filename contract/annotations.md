@@ -261,6 +261,45 @@ default path:
   makes `node_modules` state rather than dependencies, and a copied tree then
   carries one instance's marks into another.
 
+## Rasterising a marked-up surface (stable, and measured)
+
+Marks are **plain SVG** drawn over the stage, which makes an annotated screenshot a
+compositing job rather than a screenshot API: draw the evidence to a canvas, draw
+the serialised overlay on top, export.
+
+**Measured, because the constraint here is not where you would guess:**
+
+| what is rasterised | serialised via | canvas exports? |
+|---|---|---|
+| plain SVG shapes | `blob:` URL or `data:` URI | **yes** |
+| SVG containing `<foreignObject>` | **`data:` URI** | **yes** |
+| SVG containing `<foreignObject>` | **`blob:` URL** | **NO — `toDataURL` throws** |
+| a same-origin image or video frame | n/a — `drawImage` directly | **yes** |
+| an `<iframe>` element | n/a | **never — `drawImage` throws `TypeError` at any origin** |
+
+**SERIALISE TO A `data:` URI, NOT A `blob:` URL.** That is the whole rule, and it is
+stated this precisely because the obvious summary — "`foreignObject` taints" — is
+FALSE and expensive: text marks use `foreignObject` so they WRAP, and a contract
+saying they taint would push the next person back to a single-line `<text>` that
+runs off the edge of its box.
+
+Not about external resources either: a `foreignObject` holding no image, a
+same-origin image, or a cross-origin image all taint equally through a `blob:` URL,
+and none of them taint through a `data:` URI. That causal story — "it taints when
+it pulls something external" — sounds right, was offered with a real measurement
+behind it, and is false; it is recorded here so nobody re-derives it.
+
+**⚠️ AND `blob:` IS THE CONVENTIONAL OPTIMISATION, WHICH IS WHY THIS NEEDS ITS
+REASON ATTACHED.** Swapping a `data:` URI for a `blob:` URL is the standard way to
+avoid a large base64 string, so someone will eventually make that change as a
+tidy-up and silently break capture for every artifact carrying a text mark —
+nothing throws at the swap, the export just starts failing later. A rule stated
+without its reason reads as an arbitrary preference and gets optimised away.
+
+**A same-origin video must have data before it is drawn.** `drawImage` on a video
+at `readyState 0` does not throw — it draws nothing. Wait for `readyState >= 2`
+and verify pixels, or a capture of an empty frame reports as a success.
+
 ## Conformance — what ships TODAY
 
 | specified | shipped |
