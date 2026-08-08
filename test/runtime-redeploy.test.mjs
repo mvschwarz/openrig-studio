@@ -502,6 +502,36 @@ test("the SSE change-signal still fires on a manifest change", async (t) => {
 // top-level awaits, method chains — where the old guard matched two whitelisted
 // call names and never saw the statement that carried the defect. A checker that
 // cannot see the statement is a checker nothing runs, for that statement.
+// Blank out string contents so braces and identifier-lookalikes inside them
+// neither break depth tracking nor register as references.
+function stripStrings(text) {
+  return text
+    .replace(/`(?:[^`\\]|\\[\s\S])*`/g, "``")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+}
+
+// Remove `=> { … }` and `function … { … }` bodies: code inside a function does
+// NOT evaluate at module load, so its references belong to call time, not to
+// the initializer being scanned. Expects string-stripped input so brace
+// counting cannot be derailed by a brace in a message.
+function stripFunctionBodies(text) {
+  let out = "", i = 0;
+  for (;;) {
+    const m = /(?:=>\s*\{|function\b[^{]*\{)/.exec(text.slice(i));
+    if (!m) { out += text.slice(i); break; }
+    out += text.slice(i, i + m.index) + "{}";
+    let depth = 1, j = i + m.index + m[0].length;
+    while (j < text.length && depth > 0) {
+      if (text[j] === "{") depth++;
+      else if (text[j] === "}") depth--;
+      j++;
+    }
+    i = j;
+  }
+  return out;
+}
+
 function startupOrderingViolations(src) {
   const lines = src.split("\n");
 
@@ -515,12 +545,45 @@ function startupOrderingViolations(src) {
     for (const name of names) bindings.push({ name, line: i + 1 });
   });
 
-  // Module-level executable statements (column 0): anything that RUNS at load
-  // time rather than declaring. A statement spans lines until one closes at
-  // column 0 with `;`.
-  const executables = []; // { line, text }
+  // Consume a multi-line statement starting at line i: cumulative ()[]{} depth
+  // over string-stripped lines, ending on the line where depth returns to zero
+  // and the line closes with `;`.
+  const statementEnd = (i) => {
+    let depth = 0;
+    for (let j = i; j < lines.length; j++) {
+      const s = stripStrings(lines[j]);
+      for (const ch of s) {
+        if ("([{".includes(ch)) depth++;
+        else if (")]}".includes(ch)) depth--;
+      }
+      if (depth <= 0 && /;\s*$/.test(s)) return j;
+    }
+    return lines.length - 1;
+  };
+
+  // What EXECUTES at module load, in both spellings:
+  //   - executable statements (calls, awaits, chains), and
+  //   - const/let INITIALIZERS — an initializer runs at load exactly like a
+  //     statement, unless the whole initializer is a function expression, whose
+  //     body waits for call time. Missing the second spelling is how
+  //     `const probe = handleRequest;` crashed the runtime while this guard
+  //     passed: it enforced reachability over the wrong SET of statements.
+  const executables = []; // { line, text, kind: "statement" }
+  const initializers = []; // { line, text, kind: "initializer" }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const decl = line.match(/^(?:const|let)\s+[^=]*=\s*(.*)$/);
+    if (decl) {
+      const initStart = decl[1];
+      // A pure function expression: nothing but the closure evaluates at load.
+      if (/^(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(initStart) ||
+          /^(?:async\s+)?function\b/.test(initStart)) continue;
+      const end = statementEnd(i);
+      const text = lines.slice(i, end + 1).join("\n");
+      initializers.push({ line: i + 1, text: stripFunctionBodies(stripStrings(text)) });
+      i = end;
+      continue;
+    }
     if (!/^(?:await\s+|[A-Za-z_$][\w$]*\s*[.(])/.test(line)) continue;
     if (/^(?:import|export|const|let|var|function|class|async\s+function)\b/.test(line)) continue;
     let text = line;
@@ -531,17 +594,19 @@ function startupOrderingViolations(src) {
   }
 
   const violations = [];
-  for (const ex of executables) {
+  for (const ex of [...executables, ...initializers]) {
+    const what = ex === undefined ? "" : (executables.includes(ex) ? "statement" : "initializer");
     const referenced = new Set(ex.text.match(/[A-Za-z_$][\w$]*/g) || []);
     for (const b of bindings) {
       if (b.line > ex.line && referenced.has(b.name)) {
         violations.push({
           kind: "reachability", statement: ex.line, binding: b.name, declared: b.line,
           message:
-            `the statement at line ${ex.line} references '${b.name}', declared at line ${b.line} — ` +
-            `that is a ReferenceError in the temporal dead zone the moment the module loads. ` +
-            `Being last is not the same as being after everything you TOUCH: startup must follow ` +
-            `the bindings it references, so move the STATEMENT below line ${b.line}, not the binding above.`,
+            `the ${what} at line ${ex.line} references '${b.name}', declared at line ${b.line} — ` +
+            `an ${what === "initializer" ? "initializer executes at module load exactly like a statement, so this" : "executable statement"} ` +
+            `is a ReferenceError in the temporal dead zone the moment the module loads. ` +
+            `Being last is not the same as being after everything you TOUCH: load-time code must follow ` +
+            `the bindings it references, so move it below line ${b.line}, not the binding above.`,
         });
       }
     }
@@ -581,23 +646,31 @@ test("startup follows every binding it touches AND every binding, so the TDZ cla
     "startup ordering violations in app/serve-studio.mjs");
 });
 
-test("positive control: the ordering checker fires on a statement in a later binding's dead zone", () => {
-  // The defect this guard exists for, planted verbatim: startup work sitting
-  // "at the bottom" of an init block while referencing a const declared beneath
-  // it. A checker that has never been seen to fire is not a control.
+test("positive control: the ordering checker fires on BOTH load-time spellings of the dead zone", () => {
+  // The two defects this guard exists for, planted verbatim: the historical
+  // top-level statement referencing a const declared beneath it, and sdk-qa's
+  // `const probe = handleRequest;` — an INITIALIZER, which executes at module
+  // load exactly like a statement and which the previous scan excluded
+  // wholesale. A checker that has never been seen to fire is not a control.
   const planted = [
     "const early = 1;",
     "doStartup();",
     "await handleThing(",
     "  { url: x },",
     ").catch(() => {});",
+    "const qaInitializerProbe = handleThing;",
+    "const notALoad = () => handleThing;",
     "const handleThing = async () => {};",
     "listenSomething();",
   ].join("\n");
   const { violations } = startupOrderingViolations(planted);
   const reach = violations.filter((v) => v.kind === "reachability");
-  assert.equal(reach.length, 1, `expected exactly the planted TDZ, got: ${JSON.stringify(violations)}`);
-  assert.equal(reach[0].binding, "handleThing");
+  assert.deepEqual(reach.map((v) => [v.statement, v.binding]).sort((a, b) => a[0] - b[0]),
+    [[3, "handleThing"], [6, "handleThing"]],
+    `expected the STATEMENT plant and the INITIALIZER plant, exactly: ${JSON.stringify(reach)}`);
+  assert.ok(!reach.some((v) => v.statement === 7),
+    "a function-expression initializer was flagged — its body runs at call time, not load time, " +
+    "and over-firing there would force every helper above the binding it eventually calls");
   assert.ok(violations.some((v) => v.kind === "position"),
     "the position property must also fire on statements before the last binding");
 });

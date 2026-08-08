@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup,
-         discoverApiRoutes, verbMatches, isRuntimeOwned } from "../app/verbs.mjs";
+         routingSurfaceViolations, verbMatches, isRuntimeOwned } from "../app/verbs.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...p) => fs.readFileSync(path.join(REPO, ...p), "utf8");
@@ -132,31 +132,13 @@ test("the safe primitive actually resists prototype keys", () => {
   }
 });
 
-test("CONTROL: a LIVE unclassified route of EACH served form is caught", async () => {
-  // ⛔ THE CONTROL THAT USED TO BE HERE FIRED ON THE WRONG STAGE OF THE PIPELINE.
-  // It appended a string to the SCANNER'S RESULT, proving the set subtraction could
-  // fail and proving nothing about whether discovery sees the forms the runtime
-  // serves. sdk-qa planted a live `startsWith("/api/qa-added-prefix/")` route: it
-  // answered 200 while the suite passed 10/10, because a route the scanner cannot
-  // see is a route the classifier is never asked about.
-  //
-  // So this plants BOTH FORMS into a real runtime, BOOTS it, and asserts the
-  // runtime's own reported route set contains them and the classifier rejects them.
-  // Nothing here is scanned; the routes are live and answering.
-  const src = read("app", "serve-studio.mjs");
-  const marker = 'if (serves(u.pathname, "/api/contract")) {';
-  assert.ok(src.includes(marker), "the contract arm moved — re-anchor this control before trusting it");
-  const planted = src.replace(marker,
-    'if (serves(u.pathname, "/api/qa-exact-probe")) return sendJson(res, 200, { ok: true });\n' +
-    '    if (serves(u.pathname, "/api/qa-prefix-probe/")) return sendJson(res, 200, { ok: true });\n' +
-    '    ' + marker);
-  assert.notEqual(planted, src, "the plant did not apply — every result below would be meaningless");
-
+// Boot a mutated copy of the runtime and probe it. Shared by the two controls
+// below, which differ only in WHAT they plant.
+async function bootMutated(plantedSrc, probes) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "routes-ctl-"));
   fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "app", "serve-studio.mjs"), planted);
-
+  fs.writeFileSync(path.join(dir, "app", "serve-studio.mjs"), plantedSrc);
   const port = 9960 + Math.floor(Math.random() * 30);
   const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port)],
     { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
@@ -165,19 +147,89 @@ test("CONTROL: a LIVE unclassified route of EACH served form is caught", async (
       try { await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" }); break; }
       catch { await new Promise((r) => setTimeout(r, 50)); }
     }
-    // VERIFY THE PLANT IS LIVE, not merely present in the file. A planted route
-    // that does not answer would make the rest of this control vacuous.
-    const exact = await fetch(`http://127.0.0.1:${port}/api/qa-exact-probe`, { cache: "no-store" });
-    const prefix = await fetch(`http://127.0.0.1:${port}/api/qa-prefix-probe/control`, { cache: "no-store" });
-    assert.equal(exact.status, 200, "the planted EXACT route does not answer — the control proves nothing");
-    assert.equal(prefix.status, 200, "the planted PREFIX route does not answer — this is sdk-qa's exact case");
-
+    const statuses = {};
+    for (const p of probes) statuses[p] = (await fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" })).status;
     const c = await (await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" })).json();
-    const classified = new Set([...RUNTIME_OWNED_VERBS, ...SUBSTITUTABLE_VERBS]);
-    const unclassified = c.runtime.routes.filter((v) => !classified.has(v));
-    assert.deepEqual(unclassified.sort(), ["/api/qa-exact-probe", "/api/qa-prefix-probe/"],
-      "a LIVE unclassified route was not reported by the runtime — the guard cannot see the form it most needs to catch");
+    return { statuses, routes: c.runtime.routes };
   } finally { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+test("CONTROL: a LIVE unclassified TABLE ROW of each form is served, reported, and caught", async () => {
+  // The positive half of the mechanism: a route added the way routes are now
+  // added — a table row — must be live, must appear in the runtime's own account,
+  // and must fail classification if unclassified. Planted into a real runtime and
+  // BOOTED; nothing here is scanned.
+  const src = read("app", "serve-studio.mjs");
+  const marker = "const API_ROUTES = [";
+  assert.ok(src.includes(marker), "the route table moved — re-anchor this control before trusting it");
+  const planted = src.replace(marker, marker +
+    '\n  { verb: "/api/qa-exact-probe", handler: (u, req, res) => sendJson(res, 200, { ok: true }) },' +
+    '\n  { verb: "/api/qa-prefix-probe/", handler: (u, req, res) => sendJson(res, 200, { ok: true }) },');
+  assert.notEqual(planted, src, "the plant did not apply — every result below would be meaningless");
+
+  const { statuses, routes } = await bootMutated(planted,
+    ["/api/qa-exact-probe", "/api/qa-prefix-probe/control"]);
+  assert.equal(statuses["/api/qa-exact-probe"], 200, "the planted EXACT row does not answer — the control proves nothing");
+  assert.equal(statuses["/api/qa-prefix-probe/control"], 200, "the planted PREFIX row does not answer");
+
+  const classified = new Set([...RUNTIME_OWNED_VERBS, ...SUBSTITUTABLE_VERBS]);
+  const unclassified = routes.filter((v) => !classified.has(v));
+  assert.deepEqual(unclassified.sort(), ["/api/qa-exact-probe", "/api/qa-prefix-probe/"],
+    "a LIVE unclassified table row was not reported by the runtime — enumeration is not reading the serving table");
+});
+
+test("BYPASS CONTROL: a raw handler that does not go through the table cannot land silently", async () => {
+  // ⛔ THE DISCRIMINATING CONTROL, and the one that has now failed twice from the
+  // other side: sdk-qa planted live raw handlers — no registration call, no table
+  // row — in exact, prefix, and parameterized form. All three served 200, all
+  // three were absent from runtime.routes, and the suite passed. An opt-in
+  // mechanism is a convention, not a mechanism.
+  //
+  // Under the table design a raw arm can only serve from ABOVE the dispatch, and
+  // there are exactly two honest outcomes, asserted here per orch's ruling:
+  //   - it cannot serve (dispatch only walks the table): the probe must 404; or
+  //   - it can still serve: then it must be REPORTED, or the structural tripwire
+  //     must NAME the planted line — otherwise the table is not the only door and
+  //     this test fails, which is the correct verdict on that design.
+  const src = read("app", "serve-studio.mjs");
+  const anchor = /const u = new URL\(req\.url[^\n]*\n/;
+  assert.match(src, anchor, "handleRequest's entry moved — re-anchor this control before trusting it");
+
+  const forms = [
+    ["exact", '  if (u.pathname === "/api/qa-raw-exact") return sendJson(res, 200, { ok: true });\n',
+      "/api/qa-raw-exact", "/api/qa-raw-exact"],
+    ["prefix", '  if (u.pathname.startsWith("/api/qa-raw-prefix/")) return sendJson(res, 200, { ok: true });\n',
+      "/api/qa-raw-prefix/x", "/api/qa-raw-prefix"],
+    ["parameterized", '  { const qm = u.pathname.match(/^\\/api\\/qa-raw-param\\/([^/]+)$/); if (qm) return sendJson(res, 200, { ok: true, id: qm[1] }); }\n',
+      "/api/qa-raw-param/42", "qa-raw-param"],
+  ];
+  for (const [form, arm, probe, needle] of forms) {
+    const planted = src.replace(anchor, (m) => m + arm);
+    assert.notEqual(planted, src, `${form}: the plant did not apply`);
+    const { statuses, routes } = await bootMutated(planted, [probe]);
+
+    if (statuses[probe] === 200) {
+      const reported = routes.some((v) => v === probe || (v.endsWith("/") && probe.startsWith(v)));
+      const named = routingSurfaceViolations(planted).some((v) => (v.text || "").includes(needle));
+      assert.ok(reported || named,
+        `${form}: a raw handler SERVES (200), is NOT in runtime.routes, and the routing-surface ` +
+        `tripwire does not name it — a live route invisible to classification, the original product failure`);
+    } else {
+      assert.equal(statuses[probe], 404,
+        `${form}: a raw handler neither served nor 404'd — some residual path half-handled it`);
+    }
+  }
+});
+
+test("the runtime source keeps every /api mention inside the routing surface", () => {
+  // The standing half of the bypass control: the tripwire that makes a raw arm
+  // unable to LAND in the repo. The control above proves this fires on a live
+  // bypass; this proves the real source is clean, so a violation is always a
+  // regression and never ambient noise.
+  const violations = routingSurfaceViolations(read("app", "serve-studio.mjs"));
+  assert.deepEqual(violations, [],
+    "an /api reference lives outside the fenced routing surface — routes are added as TABLE ROWS, " +
+    "never as raw arms; a raw arm serves without being enumerated or classified");
 });
 
 test("a PREFIX verb is matched as a prefix, and an exact verb is not", () => {

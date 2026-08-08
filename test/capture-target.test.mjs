@@ -266,6 +266,57 @@ test("two bindings resolving to the SAME location are ONE location, not ambiguit
   assert.equal(fs.realpathSync(r.body.target.path), fs.realpathSync(path.join(one, "proof")));
 });
 
+test("a MISSING target below an existing regular FILE is refused — the ancestor decides", async (t) => {
+  // QA finding, one level below the last one, and the same class: the fix checked
+  // whether the TARGET was a directory and never whether the path could BECOME
+  // one. A missing target whose deepest existing ancestor is a regular file was
+  // accepted at declaration; the consumer's `mkdir recursive` then failed ENOTDIR.
+  // The property is performability, not the final component: EVERY existing
+  // component of the resolved path must be a directory.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ancfile-"));
+  fs.mkdirSync(path.join(dir, "work"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "work", "file-parent"), "a regular file");
+  const s = await start({ roots: { work: path.join(dir, "work") } });
+  t.after(() => s.stop());
+
+  for (const p of ["file-parent/child", "file-parent/a/b/c"]) {
+    const r = await s.declare({ root: "work", path: p });
+    assert.equal(r.status, 400, `'${p}' was accepted — mkdir recursive under a regular file is ENOTDIR`);
+    assert.match(r.body.error, /not a directory/, `'${p}' refused without naming the blocking file`);
+  }
+  assert.equal((await s.read()).target, null, "a refused target was stored anyway");
+
+  // positive control: the same DEPTH under a real directory still resolves,
+  // so this is the ancestor check refusing, not depth.
+  fs.mkdirSync(path.join(dir, "work", "dir-parent"), { recursive: true });
+  assert.equal((await s.declare({ root: "work", path: "dir-parent/a/b/c" })).status, 200,
+    "the ancestor check refuses paths under real directories too");
+});
+
+test("multi-location: a file-blocked binding loses to a performable one — and blocked everywhere refuses", async (t) => {
+  // The class fix must compose with existence-decides: a binding whose ancestor is
+  // a regular file is unperformable and must not win the create-it-later fallback
+  // just by being FIRST — that is accepted-but-unperformable through the side door.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ancmulti-"));
+  const first = path.join(dir, "first"), second = path.join(dir, "second");
+  fs.mkdirSync(first, { recursive: true }); fs.mkdirSync(second, { recursive: true });
+  fs.writeFileSync(path.join(first, "proof"), "a file where a directory is needed");
+
+  const s = await start({ roots: { feedback: [first, second] } });
+  t.after(() => s.stop());
+  const r = await s.declare({ root: "feedback", path: "proof/shot" });
+  assert.equal(r.status, 200, `the performable second binding lost to a file-blocked first: ${r.body.error}`);
+  assert.ok(r.body.target.path.startsWith(fs.realpathSync(second) + path.sep),
+    "resolved under the file-blocked binding");
+
+  // blocked under EVERY binding: refuse, never accept the unperformable.
+  fs.writeFileSync(path.join(second, "blocked"), "also a file");
+  fs.writeFileSync(path.join(first, "blocked"), "also a file");
+  const r2 = await s.declare({ root: "feedback", path: "blocked/shot" });
+  assert.equal(r2.status, 400, "blocked under every binding was still accepted");
+  assert.match(r2.body.error, /not a directory/);
+});
+
 test("a SYMLINKED duplicate is also one location", async (t) => {
   // The same property through a different spelling: two paths that realpath to one
   // place are one place. Deduping by the RESOLVED target rather than the declared

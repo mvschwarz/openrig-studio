@@ -77,22 +77,63 @@ export const verbMatches = (declared, pathname) =>
 export const isRuntimeOwned = (pathname) =>
   RUNTIME_OWNED_VERBS.some((v) => verbMatches(v, pathname));
 
+// ---- the routing surface tripwire ------------------------------------------
+//
+// PM's ruling, third round on this class: OPT-IN DISCOVERY IS THE HOLE. A
+// registration wrapper (`serves()`) is a convention — a raw handler that never
+// calls it serves live while `runtime.routes` and the classifier stay blind.
+// The mechanism is now a TABLE the dispatcher consults at request time, and the
+// same table is what `runtime.routes` and classification enumerate: one
+// structure, two readers, so a route cannot serve without a row.
+//
+// What a table cannot prevent is a raw arm typed ABOVE the dispatch — JavaScript
+// is open text. That is what this tripwire is for: every textual `/api` mention
+// in the runtime source must live between the two markers that fence the table
+// and its dispatcher. A raw arm in ANY spelling — exact, prefix, regex — carries
+// the `/api` literal it routes on, so it trips this in all forms, and the fix it
+// forces is "add a table row", which is the mechanism. Over-blocking is safe;
+// silence is not.
+//
+// (Its predecessor here was `discoverApiRoutes`, a regex over source recognising
+// specific comparison spellings — an approximation of the router, exactly what
+// PM ruled against, and each new spelling was invisible until added. A negative
+// tripwire has no per-spelling blind spot: it needs no grammar of arms, only the
+// literal every arm must carry.)
+
+export const ROUTING_SURFACE_BEGIN = ">>> API ROUTING SURFACE";
+export const ROUTING_SURFACE_END = "<<< API ROUTING SURFACE";
+
+// Cut a trailing `//` comment, respecting string quotes so `"http://…"` and
+// route literals inside strings survive to be inspected.
+const stripLineComment = (line) => {
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) { if (ch === "\\") i++; else if (ch === q) q = null; continue; }
+    if (ch === '"' || ch === "'" || ch === "`") { q = ch; continue; }
+    if (ch === "/" && line[i + 1] === "/") return line.slice(0, i);
+  }
+  return line;
+};
+
 /**
- * Every `/api/` route a runtime source actually serves, in EVERY form it can be
- * written.
- *
- * **DISCOVERY IS THE STAGE THAT MATTERS AND IT WAS THE STAGE NOT UNDER TEST.** The
- * scanner recognised only `u.pathname === "/api/x"`. A live route written
- * `u.pathname.startsWith("/api/x/")` was INVISIBLE: it answered 200 while the
- * classification suite passed, because a route the scanner cannot see is a route
- * the classifier is never asked about.
- *
- * Shared with the test rather than written there, so the thing under test and the
- * thing that runs are the same function.
+ * Violations of "every `/api` mention lives inside the routing surface".
+ * Returns `[]` for a conforming source. Missing markers are themselves a
+ * violation — an absent fence must fail loud, not pass vacuous.
  */
-export function discoverApiRoutes(src) {
-  const exact = [...src.matchAll(/u\.pathname === "(\/api\/[^"]+)"/g)].map((m) => m[1]);
-  const prefix = [...src.matchAll(/u\.pathname\.startsWith\("(\/api\/[^"]+)"\)/g)].map((m) => m[1]);
-  // `/api/` itself is the catch-all 404 arm, not a served verb.
-  return [...new Set([...exact, ...prefix])].filter((r) => r !== "/api/");
+export function routingSurfaceViolations(src) {
+  const lines = src.split("\n");
+  const begin = lines.findIndex((l) => l.includes(ROUTING_SURFACE_BEGIN));
+  const end = lines.findIndex((l) => l.includes(ROUTING_SURFACE_END));
+  if (begin === -1 || end === -1 || end < begin) {
+    return [{ line: 0, text: null, reason: "routing-surface-markers-missing" }];
+  }
+  const out = [];
+  lines.forEach((raw, i) => {
+    if (i >= begin && i <= end) return;
+    if (stripLineComment(raw).includes("/api")) {
+      out.push({ line: i + 1, text: raw.trim(), reason: "api-reference-outside-routing-surface" });
+    }
+  });
+  return out;
 }

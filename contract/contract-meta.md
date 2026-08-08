@@ -106,12 +106,17 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
   eventually state the wrong one, and a wrong version is worse than an absent one
   precisely because it is stated to be acted on.
 
-- `runtime.routes` — the `/api` verbs this runtime **actually serves**, observed
-  from its own router rather than declared beside it. Informational, and it exists
-  so a consumer (or a test) can ask what is served instead of inferring it: a list
-  maintained separately from the routing table drifts from it, and the drift is
-  silent in the direction that matters — a verb that exists and is unclassified is
-  routed away from the runtime that implements it.
+- `runtime.routes` — the `/api` verbs this runtime **actually serves**: the
+  dispatch table itself, enumerated. The same rows request dispatch consults are
+  what this field reports, so a route cannot serve without appearing here — the
+  claim holds by construction, not by registration. (An earlier design had arms
+  *register* themselves on match; a handler that skipped registration served live
+  while this field stayed silent, which made this exact sentence false.)
+  Informational, and it exists so a consumer (or a test) can ask what is served
+  instead of inferring it: a list maintained separately from the routing table
+  drifts from it, and the drift is silent in the direction that matters — a verb
+  that exists and is unclassified is routed away from the runtime that
+  implements it.
 
 - `runtime.boot` — an opaque id, **stable for the life of this process and different
   after a restart**. It is how a surface knows its own CODE changed: a studio copies
