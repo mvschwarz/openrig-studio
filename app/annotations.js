@@ -1,5 +1,16 @@
 const NS = "http://www.w3.org/2000/svg";
 const SHAPES = new Set(["circle", "rect", "arrow", "text"]);
+
+// "persisted" is a promise the user acts on: their marks survive a restart. The
+// DISCLOSURE decides it, never the presence of a store. A memory-backed runtime
+// is write-capable — a store exists and saves work within the session — yet
+// loses everything on restart, so it must read "session only". Reducing this to
+// Boolean(store) was the defect: it showed "persisted" over marks that vanish.
+// Fail-safe by design: any disclosure not recognised as durable reads
+// "session only", because a false "persisted" costs the user their work while a
+// false "session only" costs nothing. `persistence` is meta.annotations.persistence
+// ("memory" | "file"); only "file" survives a restart today.
+export const marksPersist = (store, persistence) => Boolean(store) && persistence === "file";
 const KEYS = { c: "circle", b: "rect", a: "arrow", t: "text" };
 const clone = (value) => structuredClone(value);
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
@@ -40,14 +51,16 @@ function sheet() {
   return link;
 }
 
-export function attach(shell, { store } = {}) {
+export function attach(shell, { store, persistence = null } = {}) {
   if (!shell?.overlay || typeof shell.active !== "function" || typeof shell.onMarkup !== "function" || typeof shell.onSurface !== "function") {
     throw new TypeError("annotations need a studioShell with overlay, active(), onMarkup(), and onSurface()");
   }
   if (store && (typeof store?.load !== "function" || typeof store?.save !== "function")) {
     throw new TypeError("annotation store must provide both load(surfaceId) and save(surfaceId, records)");
   }
-  const persistent = Boolean(store);
+  // The label follows the runtime's persistence DISCLOSURE, not the presence of
+  // a store — see marksPersist above.
+  const persistent = marksPersist(store, persistence);
   sheet();
   const memory = new Map();
   const root = document.createElement("section");

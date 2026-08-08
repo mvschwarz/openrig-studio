@@ -839,7 +839,10 @@
       },
     } : null;
     const { attach } = await import("./annotations.js");
-    window.studioAnnotations = attach(window.studioShell, { store });
+    // The persistence DISCLOSURE, forwarded so the label reflects whether marks
+    // survive a restart — not merely that a store exists. A memory runtime is
+    // write-capable but volatile; passing store alone once showed it "persisted".
+    window.studioAnnotations = attach(window.studioShell, { store, persistence: meta?.annotations?.persistence ?? null });
   } catch (err) {
     // The shell keeps working without annotations. It must not take the studio
     // down with it, and it must not pretend it loaded.
