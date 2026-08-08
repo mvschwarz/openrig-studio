@@ -317,6 +317,65 @@ test("multi-location: a file-blocked binding loses to a performable one — and 
   assert.match(r2.body.error, /not a directory/);
 });
 
+test("a DANGLING symlink is refused at declaration — absent and broken are different", async (t) => {
+  // QA finding, and the only one of its round with a boundary consequence: the
+  // ancestor walk used realpathSync, which fails on a dangling symlink exactly
+  // like it fails on nothing-there — so the walk STEPPED OVER an existing,
+  // unresolvable component, settled on the root, and called the path
+  // performable. The declaration returned 200 while the link dangled; when the
+  // link's outside target later came into existence, the stored path resolved
+  // OUTSIDE the bound root and the consumer's mkdir succeeded there.
+  //
+  // The property, per PM: refuse at declaration what you cannot VERIFY at
+  // declaration. A component that exists but cannot be resolved is not absent —
+  // it is unverifiable, and containment is assigned to declaration by contract.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dangle-"));
+  const root = path.join(dir, "feedback");
+  const outside = path.join(dir, "outside-not-yet");
+  fs.mkdirSync(root, { recursive: true });
+  fs.symlinkSync(outside, path.join(root, "dangling"));
+  const s = await start({ roots: { feedback: root } });
+  t.after(() => s.stop());
+
+  // The link itself as target, and a child below it — both must refuse.
+  for (const p of ["dangling", "dangling/child"]) {
+    const r = await s.declare({ root: "feedback", path: p });
+    assert.equal(r.status, 400,
+      `'${p}' accepted while its link dangles — once the outside target exists, writes land outside the root`);
+    assert.ok(r.body.error, `'${p}' refused without saying why`);
+  }
+  assert.equal((await s.read()).target, null, "a refused target was stored anyway");
+
+  // QA's full scenario: even after the outside target exists, re-declaring must
+  // refuse — the resolved path is outside the root, which containment already
+  // catches. Both halves of the timeline are closed, not just the early one.
+  fs.mkdirSync(outside, { recursive: true });
+  const late = await s.declare({ root: "feedback", path: "dangling/child" });
+  assert.equal(late.status, 400, "a symlink out of the root was accepted once its target existed");
+
+  // positive control: a live symlink INSIDE the root still resolves.
+  fs.mkdirSync(path.join(root, "real-dir"), { recursive: true });
+  fs.symlinkSync(path.join(root, "real-dir"), path.join(root, "live-link"));
+  assert.equal((await s.declare({ root: "feedback", path: "live-link/sub" })).status, 200,
+    "the broken-link refusal also refuses resolvable in-root links");
+});
+
+test("multi-location: a broken-link binding loses to a performable one", async (t) => {
+  // Composes with existence/performability-decides exactly like the
+  // file-blocked case: unverifiable under one binding must not poison a kind
+  // that is genuinely performable under another, and must not win by being first.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "danglemulti-"));
+  const first = path.join(dir, "first"), second = path.join(dir, "second");
+  fs.mkdirSync(first, { recursive: true }); fs.mkdirSync(second, { recursive: true });
+  fs.symlinkSync(path.join(dir, "nowhere"), path.join(first, "proof"));
+  const s = await start({ roots: { feedback: [first, second] } });
+  t.after(() => s.stop());
+  const r = await s.declare({ root: "feedback", path: "proof/shot" });
+  assert.equal(r.status, 200, `the performable second binding lost to a broken-link first: ${r.body.error}`);
+  assert.ok(r.body.target.path.startsWith(fs.realpathSync(second) + path.sep),
+    "resolved under the broken-link binding");
+});
+
 test("a SYMLINKED duplicate is also one location", async (t) => {
   // The same property through a different spelling: two paths that realpath to one
   // place are one place. Deduping by the RESOLVED target rather than the declared

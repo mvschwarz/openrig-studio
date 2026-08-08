@@ -894,12 +894,32 @@ function resolveInRoot(kind, rel) {
     // slice's feedback/ before anything was captured) and realpath throws on a
     // missing path. Walking up validates a not-yet-created directory without
     // accepting one that escapes.
-    let probe = target, real = null;
+    //
+    // ABSENT AND BROKEN ARE DIFFERENT, and realpath alone cannot tell them
+    // apart: it throws the same way for nothing-there and for a DANGLING
+    // SYMLINK. The walk once stepped over a dangling link, settled on the root,
+    // and called the path performable — then the link's outside target came
+    // into existence and the stored path wrote OUTSIDE the bound root, because
+    // containment had been decided while there was nothing to check. So the
+    // walk may step over what does not exist, NEVER over what exists and
+    // cannot be resolved: an lstat-present, realpath-failing component
+    // (dangling link, link loop) is unverifiable at declaration, and the
+    // contract assigns containment to declaration — refuse what cannot be
+    // verified there.
+    let probe = target, real = null, unverifiable = null;
     for (;;) {
       try { real = fs.realpathSync(probe); break; } catch {}
+      let present = false;
+      try { fs.lstatSync(probe); present = true; } catch {}
+      if (present) { unverifiable = probe; break; }
       const up = path.dirname(probe);
       if (up === probe) break;
       probe = up;
+    }
+    if (unverifiable) {
+      candidates.push({ base: baseReal, path: target, exists: false, isDir: false,
+        performable: false, blockedBy: unverifiable });
+      continue;
     }
     if (!real) continue;
     const rest = path.relative(probe, target);
@@ -934,7 +954,8 @@ function resolveInRoot(kind, rel) {
   const blocked = candidates.filter((c) => !c.performable);
   if (blocked.length && !candidates.some((c) => c.performable)) {
     return { ok: false, error: `'${rel}' cannot be a capture target under '${kind}': ` +
-      `'${blocked[0].blockedBy}' is not a directory — a capture target is a directory to write into` };
+      `'${blocked[0].blockedBy}' is not a directory or cannot be resolved — a capture target ` +
+      `is a directory a consumer can verifiably write into, decided at declaration` };
   }
   // DEDUPE BY RESOLVED PATH before counting ambiguity. Two bindings that resolve to
   // the SAME real location are one location: `[first, first]`, or two paths through
@@ -1012,15 +1033,32 @@ function filesSearch(q) {
 // two markers, enforced by routingSurfaceViolations() in app/verbs.mjs and the
 // reserved-verbs tests. A mention outside the fence fails the suite.
 //
-// ONE STRUCTURE, TWO READERS — PM's ruling, third round on this class. This
-// table is what dispatch consults at request time AND what `runtime.routes` and
-// classification enumerate, so a route cannot serve without a row and
-// enumeration cannot be opt-in. The registration wrapper it replaces
-// (`serves()`) was a convention: a raw handler that never called it served live
-// while the classifier stayed blind — sdk-qa proved it in three spellings.
+// THE FENCE CONTAINS DATA, NOT DISPATCH — PM's ruling, fourth round on this
+// class, and the reason it is the last: every earlier fix defined a trusted
+// region (a spelling list, a fenced file region, a dispatcher body) and the
+// next raw arm simply moved inside the newest region. A trusted region is
+// always one special-case away from wrong. So the fence now holds three
+// constants and nothing executable with unbounded reach: the prefix, the
+// contract verb, and the table. Code inside a handler runs only AFTER its row
+// matched — bounded by the row that registered it.
+//
+// ROUTING is the single table lookup in handleRequest below — the ONLY
+// operation in the runtime that matches a pathname to a handler. DISPATCH
+// receives the resolved row. A special case in the dispatch path has no
+// pathname to branch on without typing an /api literal outside this fence,
+// which fails the suite. "A route cannot serve without a row" is therefore
+// structural: a served route IS a dispatched row.
+//
+// ONE STRUCTURE, TWO READERS: this table is what routing consults at request
+// time AND what `runtime.routes` and classification enumerate, so enumeration
+// cannot be opt-in. The registration wrapper it replaced (`serves()`) was a
+// convention: a raw handler that never called it served live while the
+// classifier stayed blind — sdk-qa proved it in three spellings, then proved
+// the dispatcher-body variant in a fourth.
 //
 // ADD A ROUTE BY ADDING A ROW, then classify the verb in app/verbs.mjs.
 // A verb ending in `/` is a PREFIX, per the shared grammar (verbMatches).
+const API_PREFIX = "/api/";
 const CONTRACT_VERB = "/api/contract";
 const API_ROUTES = [
   { verb: "/api/focus", handler: async (u, req, res) => {
@@ -1178,26 +1216,24 @@ const API_ROUTES = [
       return sendJson(res, 200, { ok: true, hits: q.length < 2 ? [] : filesSearch(q) });
   } },
 ];
-
-// The one door. Claims the WHOLE /api namespace: a row matches or the request
-// 404s here, so nothing after this dispatcher ever sees an /api path and a
-// handler cannot exist outside the table it is enumerated from.
-const dispatchApi = async (u, req, res) => {
-  if (!u.pathname.startsWith("/api/")) return false;
-  for (const r of API_ROUTES) {
-    if (verbMatches(r.verb, u.pathname)) { await r.handler(u, req, res); return true; }
-  }
-  sendJson(res, 404, { ok: false,
-    error: `no such contract route: ${u.pathname} — see GET ${CONTRACT_VERB} for capabilities and contract/runtime-api.md for the verb set` });
-  return true;
-};
 // <<< API ROUTING SURFACE
 
 const handleRequest = async (req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
-  try {
-    if (await dispatchApi(u, req, res)) return;
-  } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
+  // ROUTING, then DISPATCH — deliberately not a function, so there is no
+  // dispatcher body to trust. The find() below is the only operation in the
+  // runtime that matches a pathname to a handler; dispatch receives the
+  // resolved ROW. Claims the whole /api namespace: a row matches or the
+  // request 404s, so no later code ever sees an /api path.
+  if (u.pathname.startsWith(API_PREFIX)) {
+    const row = API_ROUTES.find((r) => verbMatches(r.verb, u.pathname));
+    try {
+      if (row) await row.handler(u, req, res);
+      else sendJson(res, 404, { ok: false,
+        error: `no such contract route: ${u.pathname} — see GET ${CONTRACT_VERB} for capabilities and contract/runtime-api.md for the verb set` });
+    } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
+    return;
+  }
 
   // the manifest is served as its VALIDATED projection, not the raw file —
   // this is where "invalid rows are excluded from the served rail" is true.

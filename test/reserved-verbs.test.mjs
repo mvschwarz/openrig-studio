@@ -209,8 +209,23 @@ test("BYPASS CONTROL: a raw handler that does not go through the table cannot la
     ["comment-cut evasion", '  { const cut = /\\/\\//; if (cut && u.pathname === "/api/qa-raw-evade") return sendJson(res, 200, { ok: true }); }\n',
       "/api/qa-raw-evade", "qa-raw-evade"],
   ];
+  // sdk-qa's fourth-round plant, kept as a STANDING control per PM: a raw arm at
+  // the MOST ORDINARY place — inside the routing block, after the namespace
+  // gate, where a competent author writes a special case by accident. Under the
+  // previous design this spot was INSIDE the fence and therefore trusted: the
+  // arm served 200, runtime.routes stayed empty, and every committed control
+  // passed. The fence now holds only data, so this spot is outside it and the
+  // literal is named. If this control ever stops firing, a trusted region has
+  // been reintroduced.
+  const routingAnchor = /if \(u\.pathname\.startsWith\(API_PREFIX\)\) \{\n/;
+  assert.match(src, routingAnchor, "the routing block moved — re-anchor sdk-qa's standing plant before trusting it");
+  forms.push(["inside the routing block (sdk-qa round 4)",
+    null, "/api/qa-inside-fence", "qa-inside-fence"]);
   for (const [form, arm, probe, needle] of forms) {
-    const planted = src.replace(anchor, (m) => m + arm);
+    const planted = arm !== null
+      ? src.replace(anchor, (m) => m + arm)
+      : src.replace(routingAnchor, (m) =>
+          m + '    if (u.pathname === "/api/qa-inside-fence") { sendJson(res, 200, { ok: true, source: "raw-dispatch-arm" }); return; }\n');
     assert.notEqual(planted, src, `${form}: the plant did not apply`);
     const { statuses, routes } = await bootMutated(planted, [probe]);
 

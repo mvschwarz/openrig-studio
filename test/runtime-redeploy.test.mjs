@@ -511,22 +511,29 @@ function stripStrings(text) {
     .replace(/'(?:[^'\\]|\\.)*'/g, "''");
 }
 
-// Remove `=> { … }` and `function … { … }` bodies: code inside a function does
-// NOT evaluate at module load, so its references belong to call time, not to
-// the initializer being scanned. Expects string-stripped input so brace
-// counting cannot be derailed by a brace in a message.
+// Remove `=> { … }` and `function … { … }` bodies — UNLESS the function is
+// immediately invoked. The property is "does this code evaluate at module
+// load", not "does this text look like a function": a deferred closure's body
+// belongs to call time and is dropped, but an IIFE's body RUNS DURING
+// INITIALIZER EVALUATION and must stay in for scanning. The previous version
+// stripped every body without asking, which is how
+// `const x = (() => later)();` crashed boot while the guard passed. The
+// invocation paren may sit after a wrapping close-paren: `(() => {…})()`.
+// Expects string-stripped input so brace counting cannot be derailed.
 function stripFunctionBodies(text) {
   let out = "", i = 0;
   for (;;) {
     const m = /(?:=>\s*\{|function\b[^{]*\{)/.exec(text.slice(i));
     if (!m) { out += text.slice(i); break; }
-    out += text.slice(i, i + m.index) + "{}";
     let depth = 1, j = i + m.index + m[0].length;
     while (j < text.length && depth > 0) {
       if (text[j] === "{") depth++;
       else if (text[j] === "}") depth--;
       j++;
     }
+    const invokedNow = /^\s*\)?\s*\(/.test(text.slice(j));
+    if (invokedNow) out += text.slice(i, j);
+    else out += text.slice(i, i + m.index) + m[0] + "}";
     i = j;
   }
   return out;
@@ -574,13 +581,23 @@ function startupOrderingViolations(src) {
     const line = lines[i];
     const decl = line.match(/^(?:const|let)\s+[^=]*=\s*(.*)$/);
     if (decl) {
-      const initStart = decl[1];
-      // A pure function expression: nothing but the closure evaluates at load.
-      if (/^(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(initStart) ||
-          /^(?:async\s+)?function\b/.test(initStart)) continue;
       const end = statementEnd(i);
-      const text = lines.slice(i, end + 1).join("\n");
-      initializers.push({ line: i + 1, text: stripFunctionBodies(stripStrings(text)) });
+      const raw = lines.slice(i, end + 1).join("\n");
+      const init = raw.slice(raw.indexOf("=") + 1).trim();
+      const stripped = stripStrings(init);
+      // Exempt only what PROVABLY defers: a BARE function expression. A bare
+      // arrow cannot be immediately invoked without first being parenthesized
+      // (which changes the leading shape), and a bare `function` expression is
+      // deferred only when the statement ends at its closing brace — ending in
+      // `)` means it was called. Anything else — including an IIFE, which
+      // textually BEGINS like a function expression and runs at load — is
+      // scanned. The previous exemption keyed on how the text STARTED, which is
+      // a spelling, not the property.
+      const bareArrow = /^(?:async\s+)?(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(init);
+      const bareFunction = /^(?:async\s+)?function\b/.test(init) && /\}\s*;?\s*$/.test(stripped);
+      if (!bareArrow && !bareFunction) {
+        initializers.push({ line: i + 1, text: stripFunctionBodies(stripped) });
+      }
       i = end;
       continue;
     }
@@ -659,17 +676,21 @@ test("positive control: the ordering checker fires on BOTH load-time spellings o
     "  { url: x },",
     ").catch(() => {});",
     "const qaInitializerProbe = handleThing;",
+    "const qaInitializerIife = (() => handleThing)();",
+    "const qaBraceIife = (function () { return handleThing; })();",
     "const notALoad = () => handleThing;",
+    "const notALoadBrace = () => { return handleThing; };",
     "const handleThing = async () => {};",
     "listenSomething();",
   ].join("\n");
   const { violations } = startupOrderingViolations(planted);
   const reach = violations.filter((v) => v.kind === "reachability");
   assert.deepEqual(reach.map((v) => [v.statement, v.binding]).sort((a, b) => a[0] - b[0]),
-    [[3, "handleThing"], [6, "handleThing"]],
-    `expected the STATEMENT plant and the INITIALIZER plant, exactly: ${JSON.stringify(reach)}`);
-  assert.ok(!reach.some((v) => v.statement === 7),
-    "a function-expression initializer was flagged — its body runs at call time, not load time, " +
+    [[3, "handleThing"], [6, "handleThing"], [7, "handleThing"], [8, "handleThing"]],
+    `expected the STATEMENT plant, the direct INITIALIZER, and BOTH IIFE spellings — an IIFE is not ` +
+    `a deferred closure, its body runs during initializer evaluation: ${JSON.stringify(reach)}`);
+  assert.ok(!reach.some((v) => v.statement === 9 || v.statement === 10),
+    "a bare function-expression initializer was flagged — its body runs at call time, not load time, " +
     "and over-firing there would force every helper above the binding it eventually calls");
   assert.ok(violations.some((v) => v.kind === "position"),
     "the position property must also fire on statements before the last binding");
