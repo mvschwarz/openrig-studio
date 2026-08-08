@@ -11,14 +11,22 @@ prefix are out of scope for everything downstream.** In this codebase that is
 implemented more strongly: the runtime's API flow in `app/serve-studio.mjs`
 never holds a pathname at all.
 
-- Routing happens in exactly one place: `resolveApi()` in `app/verbs.mjs`. It
+- Routing happens in exactly one place: `matchApi()` in `app/verbs.mjs`. It
   receives the raw request URL, constructs the URL object, matches the table,
-  and returns an `execute` closure.
+  and returns **data only**: a table index plus `{ rest, searchParams }`, or
+  `{ index: -1, notFound }` where `notFound` is a 404 *body object*.
+- **The path-bearing side holds no response authority** (round 6, sdk-qa). An
+  earlier shape returned an `execute` closure and took a respond callback — so
+  a resolver-internal special case could mint a 200 before the table lookup.
+  Now the resolver cannot mint a closure that runs (unknown fields are inert
+  downstream), cannot set a status (the miss branch is hardcoded 404 at the
+  dispatch site), and cannot reach a handler that is not a row (the executable
+  is fetched as `API_ROUTES[m.index]` — table membership is the only door).
 - Handlers receive `{ searchParams, verb, rest }` — never a pathname, never a
   URL object. A handler needing path data uses `rest`, which is already scoped
   to its own matched verb.
-- `handleRequest` calls `resolveApi` and executes the result. Neither `u` nor
-  `API_PREFIX` is a binding anywhere in that flow.
+- `handleRequest` calls `matchApi` and dispatches the indexed row. Neither `u`
+  nor `API_PREFIX` is a binding anywhere in that flow.
 - The static-file flow's `const u = new URL(...)` is constructed **after** the
   API branch has returned. That ordering is load-bearing: it is what guarantees
   no code that can see an API request ever holds a pathname.
@@ -60,17 +68,32 @@ to remove it:
   round-4 literal arm and round-5 derived-prefix arm at the top of the API flow
   and asserts each detonates as a `ReferenceError` naming the absent binding —
   and above all, never serves.
-- **Property tests on `resolveApi`**: with `routes=[]` every API path misses;
-  with one route, exactly its matches resolve; the resolved request carries no
-  pathname field.
+- **Resolver-boundary discriminator** (`test/reserved-verbs.test.mjs`): plants
+  special cases *inside* `matchApi` and asserts every response channel is dead —
+  a minted `{ execute }` is inert and never runs, a minted status loses to the
+  hardcoded 404, and nothing a resolver special case does can be enumerated.
+- **Property tests on `matchApi`**: with `routes=[]` every API path misses;
+  with one route, exactly its matches resolve; the match result carries no
+  pathname field and no function-valued field.
 - **The literal fence** (`routingSurfaceViolations`): every textual `/api`
   mention in `serve-studio.mjs` lives inside the marked data-only surface.
 - **Bypass control**: raw arms planted in the static flow demonstrably cannot
   serve API requests (404), in all the spellings sdk-qa used across rounds.
 
+## The stated residue
+
+The resolver's remaining freedom is exactly its charter: choosing which
+declared row a path maps to. A special case written into `matchApi` can
+mis-route a path to a *different declared row's* index — the discriminator pins
+this blast radius (the served response is a declared row's; nothing new is
+enumerated) — but it can never produce a response that is not a declared
+row's. A wrong routing decision must be written into the eight-line definition
+of routing, where review and the `routes=[]` property test see it.
+
 ## If you need to change this
 
-If a future feature genuinely needs path data downstream, extend the resolved
-`request` (e.g., a richer `rest`) inside `resolveApi` — do not reintroduce the
-pathname. If you believe the boundary itself must move, that is a PM-level
-design change: say so in the commit and update this note in the same change.
+If a future feature genuinely needs path data downstream, extend the match
+result (e.g., a richer `rest`) inside `matchApi` — do not reintroduce the
+pathname, and never return a function or a status. If you believe the boundary
+itself must move, that is a PM-level design change: say so in the commit and
+update this note in the same change.

@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup,
-         routingSurfaceViolations, verbMatches, isRuntimeOwned, resolveApi } from "../app/verbs.mjs";
+         routingSurfaceViolations, verbMatches, isRuntimeOwned, matchApi } from "../app/verbs.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...p) => fs.readFileSync(path.join(REPO, ...p), "utf8");
@@ -134,11 +134,11 @@ test("the safe primitive actually resists prototype keys", () => {
 
 // Boot a mutated copy of the runtime and probe it. Shared by the two controls
 // below, which differ only in WHAT they plant.
-async function bootMutated(plantedSrc, probes) {
+async function bootMutated(plantedSrc, probes, file = "serve-studio.mjs") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "routes-ctl-"));
   fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "app", "serve-studio.mjs"), plantedSrc);
+  fs.writeFileSync(path.join(dir, "app", file), plantedSrc);
   const port = 9960 + Math.floor(Math.random() * 30);
   const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port)],
     { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
@@ -147,10 +147,14 @@ async function bootMutated(plantedSrc, probes) {
       try { await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" }); break; }
       catch { await new Promise((r) => setTimeout(r, 50)); }
     }
-    const statuses = {};
-    for (const p of probes) statuses[p] = (await fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" })).status;
+    const statuses = {}, bodies = {};
+    for (const p of probes) {
+      const r = await fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" });
+      statuses[p] = r.status;
+      bodies[p] = await r.text();
+    }
     const c = await (await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" })).json();
-    return { statuses, routes: c.runtime.routes };
+    return { statuses, bodies, routes: c.runtime.routes };
   } finally { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -241,7 +245,7 @@ test("UNWRITABILITY CONTROL: sdk-qa's derived-prefix arm at the ordinary place i
   // naming the missing binding. If either ever boots again, a pathname has
   // been reintroduced into the api flow and the data boundary is gone.
   const src = read("app", "serve-studio.mjs");
-  const ordinary = /const api = resolveApi\(req\.url[^\n]*\n/;
+  const ordinary = /const m = matchApi\(req\.url[^\n]*\n/;
   assert.match(src, ordinary, "the api flow entry moved — re-anchor this control before trusting it");
 
   const plants = [
@@ -289,35 +293,102 @@ test("UNWRITABILITY CONTROL: sdk-qa's derived-prefix arm at the ordinary place i
   }
 });
 
-test("routing is exactly the table: routes=[] misses everything, routes=[X] resolves exactly X", async () => {
+test("routing is exactly the table: routes=[] misses everything, routes=[X] resolves exactly X", () => {
   // The property test the pure function enables — routing asserted against its
   // DEFINITION rather than against source text. A special case smuggled into
-  // resolveApi that does not consult the table would let some path resolve
-  // with an EMPTY table, which is the first assertion here.
+  // matchApi that does not consult the table would let some path resolve with
+  // an EMPTY table, which is the first assertion here.
   const BASE = "http://127.0.0.1:9999";
-  const sent = [];
-  const respond = (res, code, obj) => sent.push({ code, obj });
 
   for (const p of ["/api/focus", "/api/contract", "/api/anything/else", "/api/qa-derived"]) {
-    const decision = resolveApi(p, BASE, [], respond);
-    assert.ok(decision, `routes=[]: '${p}' left the api namespace unclaimed`);
-    decision.execute(null, null);
-    assert.equal(sent.at(-1).code, 404, `routes=[]: '${p}' resolved despite an empty table`);
+    const m = matchApi(p, BASE, []);
+    assert.ok(m, `routes=[]: '${p}' left the api namespace unclaimed`);
+    assert.equal(m.index, -1, `routes=[]: '${p}' resolved despite an empty table`);
+    assert.match(m.notFound.error, /no such contract route/);
   }
-  assert.equal(resolveApi("/not-api", BASE, [], respond), null, "a non-api path was claimed");
+  assert.equal(matchApi("/not-api", BASE, []), null, "a non-api path was claimed");
 
-  let got = null;
-  const X = [{ verb: "/api/export-status/", handler: (request) => { got = request; } }];
-  const hit = resolveApi("/api/export-status/42?a=b", BASE, X, respond);
-  await hit.execute(null, null);
-  assert.equal(got.verb, "/api/export-status/");
-  assert.equal(got.rest, "42", "the prefix remainder is not handed to the handler as rest");
-  assert.equal(got.searchParams.get("a"), "b");
-  assert.equal(got.pathname, undefined,
-    "the resolved request carries a pathname — the data boundary leaks the thing it exists to remove");
-  const miss = resolveApi("/api/export-status", BASE, X, respond);
-  miss.execute(null, null);
-  assert.equal(sent.at(-1).code, 404, "an exact path matched a prefix verb without the trailing slash");
+  const X = [{ verb: "/api/export-status/", handler: () => {} }];
+  const hit = matchApi("/api/export-status/42?a=b", BASE, X);
+  assert.equal(hit.index, 0);
+  assert.equal(hit.rest, "42", "the prefix remainder is not returned as rest");
+  assert.equal(hit.searchParams.get("a"), "b");
+  assert.equal(hit.pathname, undefined,
+    "the match result carries a pathname — the data boundary leaks the thing it exists to remove");
+  assert.equal(matchApi("/api/export-status", BASE, X).index, -1,
+    "an exact path matched a prefix verb without the trailing slash");
+
+  // AND THE RESULT IS DATA, NOT AUTHORITY (round 6): no closure to run, no
+  // status to set. A resolver special case has neither channel.
+  for (const m of [matchApi("/api/focus", BASE, X), matchApi("/api/export-status/1", BASE, X)]) {
+    for (const v of Object.values(m)) {
+      assert.notEqual(typeof v, "function",
+        "matchApi returned a function — the path-bearing side has response authority again");
+    }
+  }
+});
+
+test("RESOLVER-BOUNDARY DISCRIMINATOR: a special case inside matchApi cannot mint a public response", async () => {
+  // sdk-qa round 6: the trusted region had moved into the resolver — it held
+  // the pathname AND a respond callback AND returned executable closures, so a
+  // pre-lookup special case could mint a 200 that appeared in no enumeration
+  // (reproduced on 6fc145b: status 200, minted:true, absent from routes).
+  // Now the resolver returns DATA and this control plants special cases INSIDE
+  // it — at the precise boundary — and asserts each channel is dead:
+  //   closure-mint: an { execute } return is INERT — downstream never calls it;
+  //   status-mint:  there is no status channel — the miss branch is hardcoded
+  //                 404 at the dispatch site, whatever the resolver returns.
+  // The genuine registered routes stay the positive control (every other test
+  // in this file). THE STATED RESIDUE, asserted for exactly what it is: the
+  // resolver can still return a DIFFERENT DECLARED row's index — a wrong
+  // routing decision confined to enumerated rows, which is the routing
+  // definition's charter; what it can never do again is produce a response
+  // that is not a declared row's.
+  const src = read("app", "verbs.mjs");
+  const anchor = "  const index = routes.findIndex((r) => verbMatches(r.verb, u.pathname));";
+  assert.ok(src.includes(anchor), "matchApi's lookup moved — re-anchor this control before trusting it");
+
+  // closure-mint: the round-6 plant, verbatim shape. Must be inert: not 200,
+  // the canary body never served, the path absent from routes.
+  {
+    const planted = src.replace(anchor,
+      '  if (u.pathname === API_PREFIX + "qa-resolver-mint") return { execute: (req, res) => { throw new Error("canary"); }, minted: true };\n' + anchor);
+    assert.notEqual(planted, src, "closure-mint plant did not apply");
+    const { statuses, bodies, routes } = await bootMutated(planted, ["/api/qa-resolver-mint"], "verbs.mjs");
+    assert.notEqual(statuses["/api/qa-resolver-mint"], 200,
+      "a resolver-minted closure SERVED — the path-bearing side has response authority again");
+    assert.ok(!bodies["/api/qa-resolver-mint"].includes("canary"), "the minted closure ran");
+    assert.ok(!routes.some((v) => v.includes("qa-resolver-mint")), "the minted route was enumerated");
+  }
+
+  // status-mint: a crafted miss with a success-shaped body and a code field.
+  // The dispatch site's hardcoded 404 must win.
+  {
+    const planted = src.replace(anchor,
+      '  if (u.pathname === API_PREFIX + "qa-status-mint") return { index: -1, notFound: { ok: true, minted: true }, code: 200 };\n' + anchor);
+    assert.notEqual(planted, src, "status-mint plant did not apply");
+    const { statuses } = await bootMutated(planted, ["/api/qa-status-mint"], "verbs.mjs");
+    assert.equal(statuses["/api/qa-status-mint"], 404,
+      "the resolver set a response status — the miss branch is no longer pinned to 404");
+  }
+
+  // misbind: the stated residue, pinned to its exact blast radius — the
+  // response served is a DECLARED row's (the contract handler's), reported
+  // routes are unchanged, and the misbound path itself is not enumerated.
+  {
+    const src2 = read("app", "serve-studio.mjs");
+    const rows = [...src2.matchAll(/\{ verb: (?:"[^"]+"|CONTRACT_VERB)/g)];
+    const contractIndex = rows.findIndex((m2) => m2[0].includes("CONTRACT_VERB"));
+    assert.ok(contractIndex >= 0, "could not locate the contract row's index in the table");
+    const planted = src.replace(anchor,
+      `  if (u.pathname === API_PREFIX + "qa-misbind") return { index: ${contractIndex}, rest: "", searchParams: u.searchParams };\n` + anchor);
+    assert.notEqual(planted, src, "misbind plant did not apply");
+    const { statuses, bodies, routes } = await bootMutated(planted, ["/api/qa-misbind"], "verbs.mjs");
+    assert.equal(statuses["/api/qa-misbind"], 200, "the misbind residue changed shape — re-derive this control");
+    assert.ok(bodies["/api/qa-misbind"].includes("contractVersion"),
+      "misbind served something that is NOT a declared row's response — a new channel exists");
+    assert.ok(!routes.some((v) => v.includes("qa-misbind")), "the misbound path was enumerated");
+  }
 });
 
 test("the runtime source keeps every /api mention inside the routing surface", () => {

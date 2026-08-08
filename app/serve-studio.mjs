@@ -20,7 +20,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, resolveApi } from "./verbs.mjs";
+import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, matchApi } from "./verbs.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -1042,9 +1042,9 @@ function filesSearch(q) {
 // row matched, bounded by the row that registered it, and handlers receive
 // { searchParams, verb, rest } — never a pathname.
 //
-// ROUTING lives in resolveApi (app/verbs.mjs), the one place a pathname meets
-// this table. handleRequest hands over the raw URL and receives an execute
-// closure; the pathname is OUT OF SCOPE downstream by construction, so "a
+// ROUTING lives in matchApi (app/verbs.mjs), the one place a pathname meets
+// this table. handleRequest hands over the raw URL and receives a table
+// index; the pathname is OUT OF SCOPE downstream by construction, so "a
 // route cannot serve without a row" is a fact about the data flow. See
 // docs/design/routing-data-boundary.md for the load-bearing invariant.
 //
@@ -1217,20 +1217,27 @@ const API_ROUTES = [
 // <<< API ROUTING SURFACE
 
 const handleRequest = async (req, res) => {
-  // THE API FLOW HOLDS NO PATHNAME. Routing happens inside resolveApi (the
+  // THE API FLOW HOLDS NO PATHNAME. Routing happens inside matchApi (the
   // grammar module): this function hands over the raw request URL and receives
-  // either null (not the api namespace) or an execute closure that already
-  // carries its resolved row. Neither `u` nor the namespace prefix exists as a
+  // either null (not the api namespace) or a table INDEX plus request data —
+  // never a closure, never a status. Neither `u` nor the namespace prefix exists as a
   // binding anywhere in this flow — a pathname special-case here is a
   // ReferenceError, not a code-review question. THE ORDERING BELOW IS
   // LOAD-BEARING: the static-flow URL is deliberately constructed AFTER this
   // branch returns, so no code that could see an api request ever holds a
   // pathname. See docs/design/routing-data-boundary.md before "simplifying"
   // either fact away.
-  const api = resolveApi(req.url, `http://127.0.0.1:${PORT}`, API_ROUTES, sendJson);
-  if (api) {
-    try { await api.execute(req, res); }
-    catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
+  const m = matchApi(req.url, `http://127.0.0.1:${PORT}`, API_ROUTES);
+  if (m) {
+    try {
+      // TABLE MEMBERSHIP IS THE ONLY DOOR TO A HANDLER, and 404 is the only
+      // status the miss branch can have: the resolver returns an index and a
+      // body object — data — never a closure and never a status. See the
+      // resolver-boundary discriminator in test/reserved-verbs.test.mjs.
+      const row = API_ROUTES[m.index];
+      if (row) await row.handler({ searchParams: m.searchParams, verb: row.verb, rest: m.rest }, req, res);
+      else sendJson(res, 404, m.notFound);
+    } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
     return;
   }
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
