@@ -14,6 +14,13 @@
 // annotation exists. That division is the whole reason the app "ships zero drawing
 // UI" is achievable.
 
+// WHAT THIS DEPENDS ON, stated because it is invisible from in here: the files
+// verbs are ROOT-PINNED, so this renders only what a bound root covers. An app
+// whose files sit outside every bound root gets a viewer that opens nothing, and
+// the failure reads as a broken component rather than an unbound root. Measured on
+// a real install — the component was correct and had nothing reachable to open.
+// See contract/runtime-api.md.
+
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 const base = (p) => String(p ?? "").split("/").filter(Boolean).pop() || String(p ?? "");

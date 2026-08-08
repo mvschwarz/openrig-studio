@@ -128,6 +128,26 @@ fetch the `raw` URL for bytes.
 ### `GET /api/files/raw?path=<abs path>` — stable
 The file's bytes with a best-effort content-type.
 
+### The file viewer, and what it depends on (stable)
+
+The runtime serves `/file-viewer.js` — a component an app imports to render a file
+when someone clicks its name (image, video, audio, text, markdown, html). It runs
+in the APP's frame and reads through the verbs above.
+
+**IT IS ONLY AS REACHABLE AS THE ROOTS BOUND TO THESE VERBS, and that binding is
+the CONSUMER's composition, not this contract's.** The files verbs are root-pinned;
+a file outside every bound root is refused, so the viewer opens nothing and the
+failure looks like a broken viewer rather than an unbound root.
+
+**Measured on a real install:** an app rendered a chain of proof and feedback files
+living in a mission workspace that no bound root covered. The component was
+correct and had nothing reachable to open — every entry would have failed. The fix
+was binding the root, in the studio's own composition.
+
+**So an app adopting the viewer declares the root KIND its files live under**
+(`app.json` → `roots`, see `app-manifest.md`) and the box binds it. If the viewer
+fails on every entry, check the roots before checking the viewer.
+
 ### `GET /api/files/search?q=<term>` — stable
 Case-insensitive filename search under the root:
 `{ "ok": true, "hits": [{name, path, kind}] }`. Bounded result count; queries
