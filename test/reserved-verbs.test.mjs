@@ -202,6 +202,12 @@ test("BYPASS CONTROL: a raw handler that does not go through the table cannot la
       "/api/qa-raw-prefix/x", "/api/qa-raw-prefix"],
     ["parameterized", '  { const qm = u.pathname.match(/^\\/api\\/qa-raw-param\\/([^/]+)$/); if (qm) return sendJson(res, 200, { ok: true, id: qm[1] }); }\n',
       "/api/qa-raw-param/42", "qa-raw-param"],
+    // A regex literal containing `//` earlier on the line: the previous fence
+    // stripped trailing comments with a scanner that read that as a comment
+    // start and cut the live arm before inspection. Found by self-audit after
+    // two rounds of exactly this move from the other side.
+    ["comment-cut evasion", '  { const cut = /\\/\\//; if (cut && u.pathname === "/api/qa-raw-evade") return sendJson(res, 200, { ok: true }); }\n',
+      "/api/qa-raw-evade", "qa-raw-evade"],
   ];
   for (const [form, arm, probe, needle] of forms) {
     const planted = src.replace(anchor, (m) => m + arm);

@@ -103,23 +103,17 @@ export const isRuntimeOwned = (pathname) =>
 export const ROUTING_SURFACE_BEGIN = ">>> API ROUTING SURFACE";
 export const ROUTING_SURFACE_END = "<<< API ROUTING SURFACE";
 
-// Cut a trailing `//` comment, respecting string quotes so `"http://…"` and
-// route literals inside strings survive to be inspected.
-const stripLineComment = (line) => {
-  let q = null;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (q) { if (ch === "\\") i++; else if (ch === q) q = null; continue; }
-    if (ch === '"' || ch === "'" || ch === "`") { q = ch; continue; }
-    if (ch === "/" && line[i + 1] === "/") return line.slice(0, i);
-  }
-  return line;
-};
-
 /**
  * Violations of "every `/api` mention lives inside the routing surface".
  * Returns `[]` for a conforming source. Missing markers are themselves a
  * violation — an absent fence must fail loud, not pass vacuous.
+ *
+ * The exemption is PURE comment lines only, decided by line shape, never by
+ * scanning for a `//` inside the line. An earlier version stripped trailing
+ * comments with a quote-aware scanner, and a regex literal containing `//`
+ * (`/\/\//`) read as a comment start — everything after it, including a live
+ * raw arm, was cut before inspection. A code line that also mentions `/api` in
+ * a trailing comment gets flagged too: over-blocking is safe, a cut is a hole.
  */
 export function routingSurfaceViolations(src) {
   const lines = src.split("\n");
@@ -131,7 +125,8 @@ export function routingSurfaceViolations(src) {
   const out = [];
   lines.forEach((raw, i) => {
     if (i >= begin && i <= end) return;
-    if (stripLineComment(raw).includes("/api")) {
+    if (/^\s*\/\//.test(raw)) return;
+    if (raw.includes("/api")) {
       out.push({ line: i + 1, text: raw.trim(), reason: "api-reference-outside-routing-surface" });
     }
   });
