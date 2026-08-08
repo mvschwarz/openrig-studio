@@ -261,8 +261,8 @@ test("CONTROL: a LIVE unclassified TABLE ROW of each form is served, reported, a
   const marker = "const API_ROUTES = [";
   assert.ok(src.includes(marker), "the route table moved — re-anchor this control before trusting it");
   const planted = src.replace(marker, marker +
-    '\n  { verb: "/api/qa-exact-probe", handler: (u, req, res) => sendJson(res, 200, { ok: true }) },' +
-    '\n  { verb: "/api/qa-prefix-probe/", handler: (u, req, res) => sendJson(res, 200, { ok: true }) },');
+    '\n  { verb: "/api/qa-exact-probe", handler: (ctx, res) => sendJson(res, 200, { ok: true }) },' +
+    '\n  { verb: "/api/qa-prefix-probe/", handler: (ctx, res) => sendJson(res, 200, { ok: true }) },');
   assert.notEqual(planted, src, "the plant did not apply — every result below would be meaningless");
 
   const { statuses, routes } = await bootMutated(planted,
@@ -496,55 +496,77 @@ test("the runtime source keeps every /api mention inside the routing surface", (
     "never as raw arms; a raw arm serves without being enumerated or classified");
 });
 
-// Count `req.url` reads in CODE, ignoring comment lines — the two comment
-// mentions in the routing-boundary explainer are not reads.
-function reqUrlReads(src) {
-  return src.split("\n").filter((line) => !/^\s*(\/\/|\*)/.test(line) && line.includes("req.url"));
+// The regions of serve-studio.mjs that matter to the raw-request boundary. The
+// handler block is the bulk of response-capable code; the adapter is the one
+// place the raw `req` is allowed. Both are located structurally, not by a magic
+// line number, so the guard survives edits elsewhere.
+function serveRegions(src) {
+  const routesStart = src.indexOf("const API_ROUTES = [");
+  const routesEnd = src.indexOf("\n];", routesStart);
+  const handlers = src.slice(routesStart, routesEnd);
+  const adapterStart = src.indexOf("const handleRequest = async (req, res) =>");
+  const staticStart = src.indexOf("const u = decision.static.url;", adapterStart);
+  const adapter = src.slice(adapterStart, staticStart);
+  const staticFlow = src.slice(staticStart);
+  return { handlers, adapter, staticFlow };
 }
+// Whole-word `req` references in CODE (comment lines excluded). Every spelling of
+// reading the request — req.url, req["url"], `const {url} = req`, `const q = req`
+// — must NAME req, so counting the identifier is spelling-independent where the
+// old req.url text-match was not (MF1).
+const reqRefs = (text) => (text.split("\n")
+  .filter((line) => !/^\s*(\/\/|\*)/.test(line))
+  .join("\n").match(/\breq\b/g) || []).length;
 
-test("RS-C1: req.url is read exactly ONCE, at the single routing consumer", () => {
-  // review.r2 RS-C1: matchApi put the PATHNAME behind a data boundary, but the
-  // raw `req.url` string was still readable at handleRequest's entry, one
-  // consumer earlier — a pre-lookup arm deriving the prefix from fragments
-  // (`"/" + "api/"`) served a 200 the table never saw and the literal fence
-  // never named. The fix routes through a single consumer (routeRequest) that
-  // returns DATA; this guard makes that structural: req.url read more than once
-  // means a second consumer exists, which is where a pre-lookup arm lives.
-  const reads = reqUrlReads(read("app", "serve-studio.mjs"));
-  assert.equal(reads.length, 1,
-    `req.url is read ${reads.length} times; exactly one (the routeRequest call) is allowed — ` +
-    `a second read is the pre-lookup channel RS-C1 exploited:\n${reads.join("\n")}`);
-  assert.match(reads[0], /routeRequest\(req\.url/,
-    "the one req.url read is not the routeRequest call — the routing consumer moved");
+test("MF1: the raw request is CONFINED to the routing adapter — handlers never see req", () => {
+  // review.r2 MF1: the req.url-once guard counted one textual spelling, so an
+  // equivalent property access (`req["url"]`) served an unenumerated 200 while
+  // the suite stayed green — the scanner-shaped failure the structural change was
+  // meant to remove. The fix hands handlers a `ctx` with no url and no req, so
+  // the raw request is unavailable to response-capable handler code by
+  // construction; `req` is referenced only in the adapter, to route and to build
+  // ctx. This guard asserts that data-flow, which no spelling can dodge because
+  // every one must name `req`.
+  const { handlers, adapter, staticFlow } = serveRegions(read("app", "serve-studio.mjs"));
+
+  assert.equal(reqRefs(handlers), 0,
+    "a handler references `req` — response-capable handler code can reach the raw request (and its url in any spelling)");
+  assert.equal(reqRefs(staticFlow), 0,
+    "the static-file flow references `req` — it must work from the decision's url, not the raw request");
+  // The adapter's sanctioned references: the (req, res) param, routeRequest(req.url),
+  // req.method, req.headers, readBody(req), req.on. Any pre-lookup arm reading req
+  // in ANY spelling raises this above the sanctioned count.
+  assert.equal(reqRefs(adapter), 6,
+    "the adapter's `req` references changed — a new one is a pre-lookup channel into the raw request; " +
+    "if this is a legitimate adapter change, update the count deliberately");
 });
 
-test("RS-C1 DISCRIMINATOR: the fragment-derived pre-lookup arm is caught where req.url is available", async () => {
-  // The discriminator planted WHERE req.url IS available — the entry of
-  // handleRequest, before the routing consumer — which is exactly where the
-  // /api-literal fence and the u/API_PREFIX unwritability controls do NOT plant.
-  // review.r2's exact repro: an arm reading req.url, with the prefix derived
-  // from fragments so no contiguous /api literal appears. Reproduced on the
-  // unfixed shape it served 200 / unlisted / fence-blind; here it must be caught
-  // by the req.url-once guard, since it introduces a SECOND req.url read.
+test("MF1 CONTROL: every semantic-equivalent raw-url access at the adapter entry is caught", async () => {
+  // The point of MF1: the guard must fail for property-access equivalents, not
+  // just the literal `req.url`. Each of these reads the raw request a different
+  // way at the adapter entry (where the plant lived); all must trip the
+  // confinement guard, and the fragment-derived one must still dodge the literal
+  // /api fence (proving the fence alone is insufficient and the req guard is what
+  // catches it).
   const src = read("app", "serve-studio.mjs");
   const anchor = /const decision = routeRequest\(req\.url[^\n]*\n/;
-  assert.match(src, anchor, "the routing consumer moved — re-anchor this control before trusting it");
-  const arm = [
-    '  const qaPrefix = "/" + "api/";',
-    '  if (req.url === qaPrefix + "qa-derived-raw") { sendJson(res, 200, { ok: true, derivedRaw: true }); return; }',
-    "",
-  ].join("\n");
-  const planted = src.replace(anchor, (m) => arm + m);
-  assert.notEqual(planted, src, "the plant did not apply");
+  assert.match(src, anchor, "the routing adapter moved — re-anchor this control before trusting it");
+  const baseAdapterRefs = serveRegions(src).adapter.match(/\breq\b/g).length;
 
-  // The literal fence alone does NOT catch it — that is the point of RS-C1, and
-  // stating it keeps the req.url-once guard from looking redundant.
-  assert.deepEqual(routingSurfaceViolations(planted), [],
-    "the /api-literal fence unexpectedly caught a fragment-derived arm — re-derive this control");
-  // The req.url-once guard DOES: the planted arm is a second req.url read.
-  const reads = reqUrlReads(planted);
-  assert.ok(reads.length >= 2,
-    "the fragment-derived pre-lookup arm did not register as a second req.url read — the guard would miss it");
+  const spellings = {
+    "literal req.url":       '  if (req.url === "/" + "api/qa1") { sendJson(res, 200, { ok: true }); return; }\n',
+    "bracket req[\"url\"]":   '  if (req["url"] === "/" + "api/qa2") { sendJson(res, 200, { ok: true }); return; }\n',
+    "destructured {url}":    '  { const { url } = req; if (url === "/" + "api/qa3") { sendJson(res, 200, { ok: true }); return; } }\n',
+    "aliased const q = req": '  { const q = req; if (q.url === "/" + "api/qa4") { sendJson(res, 200, { ok: true }); return; } }\n',
+  };
+  for (const [name, arm] of Object.entries(spellings)) {
+    const planted = src.replace(anchor, (m) => arm + m);
+    assert.notEqual(planted, src, `${name}: the plant did not apply`);
+    const refs = serveRegions(planted).adapter.match(/\breq\b/g).length;
+    assert.ok(refs > baseAdapterRefs,
+      `${name}: reading the raw request did not add a \`req\` reference — the guard would miss it, ` +
+      `which is exactly the MF1 spelling-sensitivity`);
+  }
 });
 
 test("I6: /api/files/raw honours the stable error contract — 4xx JSON, and a directory is refused before any 200", async () => {

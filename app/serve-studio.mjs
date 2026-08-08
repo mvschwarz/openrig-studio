@@ -1085,27 +1085,27 @@ function filesSearch(q) {
 // A verb ending in `/` is a PREFIX, per the shared grammar (verbMatches).
 const CONTRACT_VERB = "/api/contract";
 const API_ROUTES = [
-  { verb: "/api/focus", handler: async (request, req, res) => {
-      if (req.method === "POST") {
-        const raw = await readBody(req);
+  { verb: "/api/focus", handler: async (ctx, res) => {
+      if (ctx.method === "POST") {
+        const raw = await ctx.readBody();
         let patch;
         try { patch = JSON.parse(raw || "null"); }
         catch (e) { return sendJson(res, 400, { ok: false, error: `focus write is not valid JSON: ${e.message}` }); }
         // Read at call time from THIS request. A header on one request says nothing
         // about the next one.
-        const verified = IDENTITY_HEADER ? (req.headers[IDENTITY_HEADER] || null) : null;
+        const verified = IDENTITY_HEADER ? (ctx.headers[IDENTITY_HEADER] || null) : null;
         const result = writeFocus(patch, typeof verified === "string" && verified ? verified : null);
         return sendJson(res, result.ok ? 200 : 400, result);
       }
       // The read the record never had. `?since=` is the change-signal contract,
       // not a second polling mechanism — see contract/change-signal.md.
-      const since = request.searchParams.get("since");
+      const since = ctx.searchParams.get("since");
       const marker = focusMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, focus: focusRecord });
   } },
-  { verb: "/api/drive", handler: async (request, req, res) => {
-      if (req.method === "POST") {
-        const raw = await readBody(req);
+  { verb: "/api/drive", handler: async (ctx, res) => {
+      if (ctx.method === "POST") {
+        const raw = await ctx.readBody();
         let body;
         try { body = JSON.parse(raw || "null"); }
         catch (e) { return sendJson(res, 400, { ok: false, error: `drive op is not valid JSON: ${e.message}` }); }
@@ -1120,23 +1120,31 @@ const API_ROUTES = [
       // the surface reports the highest generation it has APPLIED, and the runtime
       // exposes it as `appliedGen` so a poster can await appliedGen >= its own gen
       // before the next op. POST returns on RECORD; this is how apply is observed.
-      const surface = request.searchParams.get("surface");
+      const surface = ctx.searchParams.get("surface");
       if (typeof surface !== "string" || !surface.trim()) {
         return sendJson(res, 400, { ok: false, error: "GET /api/drive must name ?surface=<id> — ops are per-surface" });
       }
       const slot = driveSlot(surface);
       slot.reads += 1;
       driveReads += 1;
-      const applied = Number(request.searchParams.get("applied"));
-      if (Number.isInteger(applied) && applied > slot.appliedGen) slot.appliedGen = applied;
-      const since = request.searchParams.get("since");
+      // AN ACK IS BOUNDED TO A GENERATION ACTUALLY RECORDED FOR THIS SURFACE, and
+      // monotonic within that bound (review.r2 MF2). Without the upper bound a
+      // caller that knows a surface id could POST `?applied=999999` and move the
+      // acknowledgement permanently ahead of every future op — externally
+      // reachable state mutation that made the record-to-apply gap false without
+      // any apply. A gen above the latest recorded op (a FUTURE gen, or a FOREIGN
+      // gen recorded for another surface, since `gen` is global) is ignored.
+      const applied = Number(ctx.searchParams.get("applied"));
+      const recorded = slot.op ? slot.op.gen : 0;
+      if (Number.isInteger(applied) && applied > slot.appliedGen && applied <= recorded) slot.appliedGen = applied;
+      const since = ctx.searchParams.get("since");
       const marker = driveMarker(slot);
       return sendJson(res, 200, { ok: true, surface, changed: since === null || since !== marker,
         marker, op: slot.op, appliedGen: slot.appliedGen });
   } },
-  { verb: "/api/capture-target", handler: async (request, req, res) => {
-      if (req.method === "POST") {
-        const raw = await readBody(req);
+  { verb: "/api/capture-target", handler: async (ctx, res) => {
+      if (ctx.method === "POST") {
+        const raw = await ctx.readBody();
         let body;
         try { body = JSON.parse(raw || "null"); }
         catch (e) { return sendJson(res, 400, { ok: false, error: `capture-target is not valid JSON: ${e.message}` }); }
@@ -1155,9 +1163,9 @@ const API_ROUTES = [
       }
       return sendJson(res, 200, { ok: true, target: captureTarget });
   } },
-  { verb: "/api/annotations", handler: async (request, req, res) => {
-      if (req.method === "POST") {
-        const raw = await readBody(req);
+  { verb: "/api/annotations", handler: async (ctx, res) => {
+      if (ctx.method === "POST") {
+        const raw = await ctx.readBody();
         let body;
         try { body = JSON.parse(raw || "null"); }
         catch (e) { return sendJson(res, 400, { ok: false, error: `annotations write is not valid JSON: ${e.message}` }); }
@@ -1173,10 +1181,10 @@ const API_ROUTES = [
       // Read is scoped. Without a scope this answers an EMPTY set rather than
       // every scope on the box: a caller that forgot the parameter would otherwise
       // receive another surface's marks and render them over this one.
-      const scope = request.searchParams.get("scope");
+      const scope = ctx.searchParams.get("scope");
       return sendJson(res, 200, { ok: true, scope: scope || null, records: scope ? (annotations.get(scope) || []) : [] });
   } },
-  { verb: CONTRACT_VERB, handler: (request, req, res) => {
+  { verb: CONTRACT_VERB, handler: (ctx, res) => {
       return sendJson(res, 200, {
         contractVersion: CONTRACT_VERSION,
         // VERSION IS READ, NEVER TYPED. A runtime that states its own version from a
@@ -1219,21 +1227,21 @@ const API_ROUTES = [
         manifest: manifestReport(),
       });
   } },
-  { verb: "/api/factory/state", handler: (request, req, res) => sendJson(res, 200, factoryState()) },
-  { verb: "/api/events", handler: (request, req, res) => {
+  { verb: "/api/factory/state", handler: (ctx, res) => sendJson(res, 200, factoryState()) },
+  { verb: "/api/events", handler: (ctx, res) => {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
       res.write(`: connected\n\n`);
       sseClients.add(res);
-      req.on("close", () => sseClients.delete(res));
+      ctx.onClose(() => sseClients.delete(res));
       return;
   } },
-  { verb: "/api/files/tree", handler: (request, req, res) => {
-      const t = filesTree(request.searchParams.get("dir"));
+  { verb: "/api/files/tree", handler: (ctx, res) => {
+      const t = filesTree(ctx.searchParams.get("dir"));
       return t ? sendJson(res, 200, { ok: true, ...t })
         : sendJson(res, 400, { ok: false, error: "path outside the files root — files verbs are pinned to the runtime's files-root" });
   } },
-  { verb: "/api/files/read", handler: (request, req, res) => {
-      const r = insideRoot(request.searchParams.get("path") || "");
+  { verb: "/api/files/read", handler: (ctx, res) => {
+      const r = insideRoot(ctx.searchParams.get("path") || "");
       if (!r || !fs.existsSync(r) || fs.statSync(r).isDirectory())
         return sendJson(res, 404, { ok: false, error: "not found or outside the files root" });
       const kind = fileKind(r);
@@ -1242,14 +1250,14 @@ const API_ROUTES = [
           content: fs.readFileSync(r, "utf8"), mtime: fs.statSync(r).mtimeMs });
       return sendJson(res, 200, { ok: true, kind, raw: "/api/files/raw?path=" + encodeURIComponent(r), mtime: fs.statSync(r).mtimeMs });
   } },
-  { verb: "/api/files/raw", handler: (request, req, res) => {
+  { verb: "/api/files/raw", handler: (ctx, res) => {
       // Errors are 4xx JSON { ok:false, error } per runtime-api; only a REGULAR
       // FILE is served as bytes (review.r2 IMPORTANT). Two defects fixed here: a
       // bare empty 404 violated the error shape directly, and a DIRECTORY passed
       // existsSync, got 200 headers written, then failed mid-stream — a success
       // response committed before the read could fail. The decision is made
       // BEFORE any status is written.
-      const r = insideRoot(request.searchParams.get("path") || "");
+      const r = insideRoot(ctx.searchParams.get("path") || "");
       let st = null;
       if (r) { try { st = fs.statSync(r); } catch {} }
       if (!r || !st || !st.isFile()) {
@@ -1260,33 +1268,46 @@ const API_ROUTES = [
         "content-length": st.size, "cache-control": "no-store" });
       return fs.createReadStream(r).pipe(res);
   } },
-  { verb: "/api/files/search", handler: (request, req, res) => {
-      const q = (request.searchParams.get("q") || "").trim();
+  { verb: "/api/files/search", handler: (ctx, res) => {
+      const q = (ctx.searchParams.get("q") || "").trim();
       return sendJson(res, 200, { ok: true, hits: q.length < 2 ? [] : filesSearch(q) });
   } },
 ];
 // <<< API ROUTING SURFACE
 
 const handleRequest = async (req, res) => {
-  // THE RAW REQUEST URL IS CONSUMED ONCE, HERE, and comes back as a DATA
-  // decision: `{ api }` — a table match with no pathname — or `{ static }`
-  // carrying the parsed URL the file flow needs. `req.url` appears exactly once
-  // in this file (this call); a pre-lookup arm branching on the path needs a
-  // SECOND read, which the req.url-once guard in reserved-verbs.test.mjs
-  // forbids. The api branch still holds no pathname (round 5); the resolver
-  // still returns data, not authority (round 6); and now the raw string is
-  // behind the same boundary as the pathname (RS-C1). See
-  // docs/design/routing-data-boundary.md before "simplifying" any of it away.
+  // THE RAW REQUEST IS CONFINED TO THIS ADAPTER. `req` — and therefore its
+  // `url` in ANY spelling (`req.url`, `req["url"]`, destructuring, aliasing) — is
+  // referenced only to route and to build the handler context, and is NEVER
+  // handed to a handler. Response-capable handler code receives `ctx`, which
+  // carries method / headers / searchParams / verb / rest and body-and-close
+  // accessors but NO url and NO req, so a path special-case downstream has
+  // nothing to branch on — a data-flow boundary, not a spelling. The
+  // req-confinement guard in reserved-verbs.test.mjs asserts `req` appears
+  // nowhere but here (an earlier version counted the literal `req.url`, and a
+  // property-access spelling walked straight past it — RS-C1 / MF1). The api
+  // branch holds no pathname (round 5); the resolver returns data, not authority
+  // (round 6). See docs/design/routing-data-boundary.md before simplifying it.
   const decision = routeRequest(req.url, `http://127.0.0.1:${PORT}`, API_ROUTES);
   if (decision.api) {
     const m = decision.api;
+    const row = API_ROUTES[m.index];
     try {
       // TABLE MEMBERSHIP IS THE ONLY DOOR TO A HANDLER, and 404 is the only
       // status the miss branch can have: the resolver returns an index and a
       // body object — data — never a closure and never a status.
-      const row = API_ROUTES[m.index];
-      if (row) await row.handler({ searchParams: m.searchParams, verb: row.verb, rest: m.rest }, req, res);
-      else sendJson(res, 404, m.notFound);
+      if (row) {
+        const ctx = {
+          method: req.method,
+          headers: req.headers,
+          searchParams: m.searchParams,
+          verb: row.verb,
+          rest: m.rest,
+          readBody: () => readBody(req),
+          onClose: (cb) => req.on("close", cb),
+        };
+        await row.handler(ctx, res);
+      } else sendJson(res, 404, m.notFound);
     } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
     return;
   }

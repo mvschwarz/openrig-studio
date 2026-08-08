@@ -372,6 +372,37 @@ test("ADDRESSING IS MANDATORY: an unaddressed op is refused, so the fan-out defa
   assert.match(polled.error, /surface/);
 });
 
+test("SETTLE-ACK is BOUNDED: a future or foreign generation cannot be acked", async (t) => {
+  // review.r2 MF2, negative control BEFORE the positive record-to-apply test: the
+  // endpoint accepted an arbitrary future `applied`, so any caller knowing a
+  // surface id could move appliedGen permanently ahead of every future op — the
+  // record-to-apply gap was false with no apply. An ack must be bounded to a
+  // generation actually RECORDED for that surface.
+  const s = await start();
+  t.after(() => s.stop());
+
+  // A fresh slot, no op recorded: a future ack is ignored, appliedGen stays 0.
+  const fresh = await s.readAt("A", { applied: "999999" });
+  assert.equal(fresh.appliedGen, 0, "a future ack on a fresh slot was accepted — appliedGen moved with no recorded op");
+
+  // Record gen 1; an ack ABOVE the recorded gen is still ignored.
+  const posted = await s.driveTo("A", { play: true });
+  assert.equal(posted.gen, 1);
+  const over = await s.readAt("A", { applied: "999999" });
+  assert.equal(over.appliedGen, 0, "an ack above the recorded generation was accepted");
+
+  // A FOREIGN gen (recorded for another surface, since gen is global) is ignored.
+  await s.driveTo("B", { play: true }); // gen 2, recorded for B not A
+  const foreign = await s.readAt("A", { applied: "2" });
+  assert.equal(foreign.appliedGen, 0, "a generation recorded for another surface was acked on this one");
+
+  // The legitimate ack (== the recorded gen for A) is accepted and monotonic.
+  const ok = await s.readAt("A", { applied: "1" });
+  assert.equal(ok.appliedGen, 1, "a valid ack bounded to the recorded generation was refused");
+  const back = await s.readAt("A", { applied: "0" });
+  assert.equal(back.appliedGen, 1, "appliedGen went backwards — monotonicity lost");
+});
+
 test("SETTLE-ACK: appliedGen exposes a real posted-but-not-yet-applied window", async (t) => {
   // Q2 condition 3: the record-to-apply gap must be OBSERVABLE via appliedGen <
   // postedGen, or the ack is decoration. POST returns on RECORD; appliedGen only

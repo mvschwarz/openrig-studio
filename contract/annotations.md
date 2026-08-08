@@ -142,8 +142,13 @@ and wrong. Doing that walk in one place is the same rule as composing the scope 
 in one place.
 
 **Cross-origin stays spatial and honest.** A cross-origin nested frame cannot be
-read for element identity, so the target silently falls back to the surface
-document rather than pretending: the alternative is anchors that can never resolve.
+read for element identity, so a declared cross-origin target degrades to
+**spatial-only: a rect for spatial marks, and no element anchoring at all.** It
+does **not** fall back to resolving selectors against the surface document —
+that was itself a false anchor, because a record's selector meant for the
+cross-origin frame would match a same-named element in the host (a host and its
+nested document both carrying `#publish`, anchoring to the wrong one). A selector
+on such a surface stays unresolved rather than resolving against the wrong document.
 
 ## Re-measuring when the surface moves something (stable)
 
@@ -311,7 +316,7 @@ and verify pixels, or a capture of an empty frame reports as a success.
 | a scope-less read answering empty rather than everything | **yes**, with a control |
 | `{ t: "annotation-context" }` refining the scope | **yes** — verified in a live shell: a surface declaring one gets its own empty board, marks drawn there stay there, and declaring `null` restores the default board intact |
 | `{ t: "annotation-target" }` anchoring inside a same-origin nested frame | **yes** — browser-proven against a DECOY: a host surface and its nested document both carrying `#publish`, with the mark hit-tested to confirm it landed on the artifact's button and not the host's |
-| cross-origin nested frames degrading to the surface document rather than failing | **yes**, guarded; those surfaces stay spatial-only as they already were |
+| a cross-origin nested target degrading to **spatial-only (no element anchoring), never falling back to the surface document** | **yes**, guarded; a selector on such a surface stays unresolved rather than anchoring to a same-named element in the host |
 | `{ t: "annotation-refresh" }` and `refresh()` re-measuring a MOVED element | **yes** — measured before and after: an element moved 300×180px left the mark stale by exactly that offset, and both paths closed the gap to 0×0 without reloading the board |
 | the active-surface-only rule on those messages | **yes, but the committed check is STRUCTURAL** — it asserts the `e.source` guard is present in the shell, with a control proving the check can fail. The behaviour was verified by driving a live shell; this repository has no browser dependency to re-run that automatically |
 | the scope key composed by the shell and opaque to consumers | **yes** |
