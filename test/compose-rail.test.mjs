@@ -277,6 +277,22 @@ test("a malformed provider.json REFUSES rather than silently falling back", () =
     "a broken provider declaration quietly fell back to the app's copy");
 });
 
+test("I2: a self-served surface.url app composes as a URL row, with no entry to copy", () => {
+  // review.r2 IMPORTANT: the app contract defines surface.url for a self-served
+  // app, mutually exclusive with path and with no entry. Composition
+  // unconditionally joined m.surface.entry, so a schema-valid URL app could not
+  // compose at all — it either threw or was reported missing. It must produce a
+  // URL row and copy nothing.
+  const t = tree({ apps: { remote: { surface: { url: "https://example.test/app", glyph: "◆", hint: "remote" } } } });
+  const out = t.run(["remote"]);
+
+  assert.deepEqual(out.missing, [], `a schema-valid URL app failed to compose: ${out.missing.join(", ")}`);
+  const row = out.rows.find((r) => r.id === "remote");
+  assert.ok(row, "the URL app produced no rail row");
+  assert.equal(row.url, "https://example.test/app", "the URL row does not carry the self-served url");
+  assert.ok(!("path" in row), "a URL app emitted a path row — url and path are mutually exclusive");
+});
+
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
 });

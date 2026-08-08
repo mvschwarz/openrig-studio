@@ -112,28 +112,38 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
     if (!fs.existsSync(manifestPath)) { missing.push(`${id}: no app.json at ${appDir}`); continue; }
 
     const m = readJson(manifestPath);
-    const entry = path.join(appDir, m.surface.entry);
-    if (!fs.existsSync(entry)) { missing.push(`${id}: surface entry missing (${m.surface.entry})`); continue; }
+    // A SELF-SERVED app (`surface.url`) has no `entry` to copy and no overlay
+    // `path` — something else already serves it, and the contract makes `url` and
+    // `path` mutually exclusive (app-manifest.md). Composition emitted only a
+    // path row and unconditionally joined `m.surface.entry`, so a schema-valid
+    // URL app could not compose at all (review.r2). It gets a URL row and skips
+    // the copy; it may still declare a provider and calls below.
+    if (typeof m.surface.url === "string" && m.surface.url) {
+      rows.push({ id: m.id, name: m.name, glyph: m.surface.glyph, url: m.surface.url, hint: m.surface.hint });
+    } else {
+      const entry = path.join(appDir, m.surface.entry);
+      if (!fs.existsSync(entry)) { missing.push(`${id}: surface entry missing (${m.surface.entry})`); continue; }
 
-    // The seam resolves /surfaces/<file> to <overlay>/<file>, flat.
-    fs.copyFileSync(entry, path.join(surfacesOut, path.basename(m.surface.path)));
+      // The seam resolves /surfaces/<file> to <overlay>/<file>, flat.
+      fs.copyFileSync(entry, path.join(surfacesOut, path.basename(m.surface.path)));
 
-    // An app's vendored assets travel with it. canvas ships 3.4MB of tldraw
-    // deliberately so the box never calls a CDN.
-    const appVendor = path.join(appDir, "vendor");
-    if (fs.existsSync(appVendor)) {
-      for (const entryName of fs.readdirSync(appVendor)) {
-        fs.cpSync(path.join(appVendor, entryName), path.join(vendorOut, entryName), { recursive: true });
+      // An app's vendored assets travel with it. canvas ships 3.4MB of tldraw
+      // deliberately so the box never calls a CDN.
+      const appVendor = path.join(appDir, "vendor");
+      if (fs.existsSync(appVendor)) {
+        for (const entryName of fs.readdirSync(appVendor)) {
+          fs.cpSync(path.join(appVendor, entryName), path.join(vendorOut, entryName), { recursive: true });
+        }
       }
-    }
 
-    rows.push({
-      id: m.id,
-      name: m.name,
-      glyph: m.surface.glyph,
-      path: m.surface.path,
-      hint: m.surface.hint,
-    });
+      rows.push({
+        id: m.id,
+        name: m.name,
+        glyph: m.surface.glyph,
+        path: m.surface.path,
+        hint: m.surface.hint,
+      });
+    }
     // Carry the provider's RUN SPEC, not just its name. The box used to know
     // each provider by name and hardcode how to start it, which meant a sixth
     // app could not run without editing box code — the opposite of installable.

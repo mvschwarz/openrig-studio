@@ -781,21 +781,33 @@
       const outer = frames.get(activeId);
       if (!outer) return null;
       const outerRect = outer.getBoundingClientRect();
-      const fallback = () => {
+      // The surface's OWN document, element-anchorable. Used when no nested
+      // target is declared, or the declared one is not a frame.
+      const surfaceDoc = () => {
         try { return outer.contentDocument ? { doc: outer.contentDocument, rect: outerRect } : null; }
         catch { return null; }
       };
       const frameId = declaredTargets.get(activeId) ?? null;
-      if (!frameId) return fallback();
+      if (!frameId) return surfaceDoc();
       try {
         const nested = outer.contentDocument?.getElementById(frameId);
-        const doc = nested && nested.tagName === "IFRAME" ? nested.contentDocument : null;
-        if (!doc) return fallback();
-        const innerRect = nested.getBoundingClientRect();
-        return { doc, rect: {
-          left: outerRect.left + innerRect.left, top: outerRect.top + innerRect.top,
-          width: innerRect.width, height: innerRect.height } };
-      } catch { return fallback(); }
+        if (!nested || nested.tagName !== "IFRAME") return surfaceDoc();
+        let doc = null;
+        try { doc = nested.contentDocument; } catch { doc = null; }
+        if (doc) {
+          const innerRect = nested.getBoundingClientRect();
+          return { doc, rect: {
+            left: outerRect.left + innerRect.left, top: outerRect.top + innerRect.top,
+            width: innerRect.width, height: innerRect.height } };
+        }
+        // CROSS-ORIGIN declared target: SPATIAL-ONLY. Its document cannot be
+        // read for element identity, so it must NOT fall back to the surface
+        // document — a record's selector was meant for the cross-origin frame,
+        // and resolving it against the outer host is the exact false anchor the
+        // contract forbids (a host and its nested doc both carrying `#publish`
+        // would anchor to the wrong one). A rect for spatial marks, no doc.
+        return { spatialOnly: true, rect: outerRect };
+      } catch { return surfaceDoc(); }
     },
     scope: () => {
       const context = declaredContexts.get(activeId) ?? null;

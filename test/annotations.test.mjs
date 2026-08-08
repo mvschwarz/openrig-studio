@@ -232,8 +232,21 @@ test("the nested-frame target seam is wired, guarded, and falls back — STRUCTU
     "target() does not add the outer frame offset — nested anchors will be off by the surface frame's position");
   assert.match(target[1], /catch/,
     "target() does not guard the cross-origin read; a cross-origin nested frame would throw instead of degrading");
-  assert.match(target[1], /fallback\(\)/,
-    "target() has no fallback to the surface frame");
+  assert.match(target[1], /surfaceDoc\(\)/,
+    "target() has no fallback to the surface frame for the no-target / not-a-frame cases");
+  // review.r2 IMPORTANT — the cross-origin FALSE ANCHOR. A cross-origin declared
+  // target must degrade SPATIAL-ONLY (a rect, no readable doc), NOT fall back to
+  // the surface document: resolving a record's selector against the outer host
+  // when it was meant for the cross-origin frame is a false anchor (host and
+  // nested doc both carrying `#publish`). target() returns spatialOnly for that
+  // case, and the layer refuses to element-anchor a doc-less view.
+  assert.match(target[1], /spatialOnly:\s*true/,
+    "a cross-origin declared target still falls back to the surface document — the false anchor the contract forbids");
+  const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
+  assert.match(layer, /spatialOnly[\s\S]*return \{ doc: null/,
+    "the layer's view() does not honour spatialOnly — it would fall back to the surface document");
+  assert.match(layer, /if \(!v \|\| !v\.doc \|\| !selector\) return null/,
+    "elementAnchor no longer refuses a doc-less (spatial-only) view — a cross-origin selector could resolve");
 });
 
 test("the layer anchors through the shell's view, not the surface frame directly", () => {
@@ -265,12 +278,12 @@ test("positive control: the two checks above can fail", () => {
     "the offset survived being removed, so that assertion would pass with the chain walk gone");
 
   const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
-  const regressed = layer.replace(/const v = view\(\);\n    if \(!v \|\| !selector\) return null;/,
-    "const v = { doc: active().frame.contentDocument, rect: active().frame.getBoundingClientRect() };\n    if (!v || !selector) return null;");
-  const a = regressed.match(/const elementAnchor = \(selector\) => \{([\s\S]*?)\n  \};/);
-  assert.ok(a, "the mutation broke the elementAnchor extractor");
-  assert.match(a[1], /active\(\)\.frame/,
-    "the regression could not be planted, so the doesNotMatch assertion proves nothing");
+  // Regress the cross-origin doc-guard back to the pre-fix form (dropping the
+  // v.doc check), and prove the assertion that requires it would then fail.
+  const regressed = layer.replace("if (!v || !v.doc || !selector) return null;", "if (!v || !selector) return null;");
+  assert.notEqual(regressed, layer, "the v.doc guard could not be located to mutate — the assertion proves nothing");
+  assert.doesNotMatch(regressed, /if \(!v \|\| !v\.doc \|\| !selector\) return null/,
+    "the v.doc guard survived removal, so the doc-guard assertion above cannot fail");
 });
 
 test("the refresh hook re-measures WITHOUT reloading — STRUCTURAL", () => {

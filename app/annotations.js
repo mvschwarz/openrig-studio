@@ -124,7 +124,14 @@ export function attach(shell, { store, persistence = null } = {}) {
   // frame against a shell that predates the seam.
   const view = () => {
     if (typeof shell.target === "function") {
-      try { const v = shell.target(); if (v?.doc && v?.rect) return v; } catch {}
+      let v = null;
+      try { v = shell.target(); } catch { v = null; }
+      // A cross-origin declared target is SPATIAL-ONLY: a rect but no readable
+      // doc. Return it as-is and do NOT fall back to the surface document — the
+      // record's selector was meant for the cross-origin frame, and matching it
+      // against the outer host is the false anchor the contract forbids.
+      if (v?.spatialOnly && v?.rect) return { doc: null, rect: v.rect };
+      if (v?.doc && v?.rect) return v;
     }
     const frame = active().frame;
     try { return frame?.contentDocument ? { doc: frame.contentDocument, rect: frame.getBoundingClientRect() } : null; }
@@ -142,7 +149,10 @@ export function attach(shell, { store, persistence = null } = {}) {
   };
   const elementAnchor = (selector) => {
     const v = view();
-    if (!v || !selector) return null;
+    // No readable doc (a cross-origin spatial-only target) means NO element
+    // anchoring: the selector stays unresolved and the mark is spatial/missing,
+    // never falsely anchored to the wrong document.
+    if (!v || !v.doc || !selector) return null;
     let element;
     try { element = v.doc.querySelector(selector); } catch { return null; }
     if (!element) return null;
