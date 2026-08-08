@@ -47,12 +47,13 @@ Send from inside your iframe with `parent.postMessage(msg, "*")`:
 | `{ "t": "annotation-target", "frame": "<iframe element id>" }` | Names a **same-origin nested iframe** whose document annotations should anchor inside. For a surface that hosts its real content in a frame. `null` or omitted returns to the surface's own document. |
 | `{ "t": "open-markup" }` | Asks the shell to turn markup on (`{"on": false}` turns it off). A REQUEST, not a seizure: the shell owns the state and the header button stays the visible truth. For a surface that opens an artifact and knows the user is looking at something markable. |
 | `{ "t": "annotation-refresh" }` | "I moved something — re-measure." Repaints anchored marks without reloading the board or disturbing undo. Needed because an element that *moves* changes no size and no scroll, so nothing else fires. |
+| `{ "t": "capture-target", "id": "<opaque>", "root": "<kind>", "path": "<relative>" }` | Declares where captures from this surface should be written, as a bound root **KIND** plus a path **relative** to it (never an absolute directory — roots are kinds, per `app-manifest.md`). The shell forwards it to `POST /api/capture-target`, which resolves it against this box's bound roots and refuses anything that escapes, then replies **to the sender** with `{ "t": "capture-target-result", "id": "<echoed>", "ok": <bool>, "target": <resolved-or-null>, "error": <string-or-null> }`. The `id` correlates concurrent declarations so a reply cannot be matched to the wrong request. See `signal.js` `declareCaptureTarget`. |
 
 This message set is closed: the shell ignores any other `t` value. **New message
 types arrive as contract additions, never by surfaces inventing them** — which is
-why each of the two additions since v0.1 shipped was documented in this table in
-the same commit that implemented it, rather than being discovered later by reading
-the shell.
+why each addition since v0.1 shipped was documented in this table in the same
+commit that implemented it, rather than being discovered later by reading the
+shell.
 
 Every one of these is **additive and optional**. A surface that sends nothing at
 all is a correct surface: it gets a header from its manifest row, one board of

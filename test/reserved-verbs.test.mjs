@@ -112,11 +112,11 @@ test("EVERY declared route answers AS ITSELF — the per-route positive control 
     "/api/factory/state":  (s) => has(s.body, "seats"),
     "/api/events":         (s) => s.sse,
     "/api/files/tree":     (s) => has(s.body, "dirs"),
-    // read/raw with no path both 404, but read answers with a JSON error body
-    // and raw with an empty body — distinct from each other and from any 200
-    // handler a misbind would route them to.
-    "/api/files/read":     (s) => s.status === 404 && s.body?.ok === false,
-    "/api/files/raw":      (s) => s.status === 404 && s.body === null,
+    // read/raw with no path both 404 JSON { ok:false } (raw's error shape was
+    // fixed from a bare empty 404). Told apart by raw's error naming "raw" and
+    // read's not — mutually exclusive, so a read<->raw misbind is still caught.
+    "/api/files/read":     (s) => s.status === 404 && s.body?.ok === false && !/raw/.test(s.body?.error || ""),
+    "/api/files/raw":      (s) => s.status === 404 && s.body?.ok === false && /raw/.test(s.body?.error || ""),
     "/api/files/search":   (s) => has(s.body, "hits"),
   };
   // Probe query per route: enough to reach the route's own answer shape.
@@ -545,6 +545,41 @@ test("RS-C1 DISCRIMINATOR: the fragment-derived pre-lookup arm is caught where r
   const reads = reqUrlReads(planted);
   assert.ok(reads.length >= 2,
     "the fragment-derived pre-lookup arm did not register as a second req.url read — the guard would miss it");
+});
+
+test("I6: /api/files/raw honours the stable error contract — 4xx JSON, and a directory is refused before any 200", async () => {
+  // review.r2 IMPORTANT: a bare empty 404 violated "all client errors are 4xx
+  // JSON { ok:false, error }", and a directory passed existsSync, got 200 headers
+  // written, then failed mid-stream — a success response committed before the
+  // read could fail. Both must be a clean 4xx JSON refusal.
+  const port = 9700 + Math.floor(Math.random() * 250);
+  const proc = spawn(process.execPath,
+    [path.join(REPO, "app", "serve-studio.mjs"), "--port", String(port)],
+    { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    for (let i = 0; i < 120; i++) {
+      try { await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" }); break; }
+      catch { await new Promise((r) => setTimeout(r, 50)); }
+    }
+    const json = (p) => fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" });
+
+    // no path -> 4xx JSON, not a bare empty body
+    const missing = await json("/api/files/raw");
+    assert.equal(missing.status, 404);
+    assert.match(missing.headers.get("content-type") || "", /application\/json/,
+      "files/raw error is not JSON — the stable error contract is 4xx JSON { ok:false, error }");
+    assert.equal((await missing.json()).ok, false);
+
+    // a DIRECTORY -> refused with the same 4xx JSON, never a 200 that then fails
+    const tree = await (await json("/api/files/tree")).json();
+    const aDir = tree.dirs?.[0]?.path;
+    if (aDir) {
+      const dir = await json(`/api/files/raw?path=${encodeURIComponent(aDir)}`);
+      assert.equal(dir.status, 404, "a directory was served as a raw file — 200 committed before the stream failed");
+      assert.match(dir.headers.get("content-type") || "", /application\/json/);
+      assert.equal((await dir.json()).ok, false);
+    }
+  } finally { proc.kill(); }
 });
 
 test("a PREFIX verb is matched as a prefix, and an exact verb is not", () => {

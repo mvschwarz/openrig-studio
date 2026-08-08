@@ -193,7 +193,7 @@ nothing. A surface adopting this reads the address before its first render.
 | `at` server-set on every write | **yes** |
 | `POST` answering `{ok, marker, focus}` so a writer needs no follow-up read | **yes** |
 | the namespace advertised at `GET /api/contract` -> `capabilities` (`focus.read`, `focus.write`) | **yes** — and it was NOT, until an independent cold build followed the documented feature-detection path and concluded the verb was absent |
-| `by` overridden from a real caller identity | **no, and it cannot be here.** The reference runtime is single-process and loopback and has no identity for its caller, so `by` is what the caller declared. A runtime that HAS one must override it |
+| `by` overridden from a real caller identity | **yes when an identity header is configured** (`--identity-header <name>`): the runtime reads that header per request, uses it as the verified `by`, and reports `focus.attribution: "verified"` at `/api/contract`. **Caller-declared otherwise** — an unconfigured single-process loopback runtime has no identity to override it with, and reports `attribution: "caller-declared"` |
 | a provider declaring the verb in `signals.verbs` | **specified**; the reference runtime is single-process and declares nothing |
 | `readAddress` / `writeAddress`, hash-owned and query-untouched | **yes**, with controls |
 | a SHIPPED surface that actually addresses its state | **no.** None of the surfaces in this repository has view state worth addressing — the shell hosts, and the starter renders a fixture. The helper and its rules are contract and tested; **the first application with a view is what will exercise them**, and adding UI here purely to demonstrate it would be inventing a feature to satisfy a document |

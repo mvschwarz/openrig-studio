@@ -283,7 +283,7 @@ defect this repository has already paid for twice.
 | `runtime.boot` process identity at `GET /api/contract` | **yes** |
 | `/signal.js` serving `watchSignal` / `preserveAcross` / `deferWhileDirty` | **yes** |
 | latch-on-first-observation, marker-backwards-is-changed, degraded reporting | **yes**, with controls |
-| `?since=` on an observe verb | **not yet** — the reference runtime's verbs are fixture-backed and mint no marker. The consumer half is shipped and tested against a scripted transport |
+| `?since=` on an observe verb | **yes** — `/api/focus` and `/api/drive` mint a strictly-moving marker and honour `?since=` exactly as this shape describes (see `focus.md`, `drive.md`); the read half is served, not merely specified. The `factory/state` observe envelope remains fixture-backed and mints no marker. The consumer half (`watchSignal`) is also tested against a scripted transport |
 | `signals` in `provider.json`, carried through composition | **yes** — documented in `app-manifest.md`, carried by the composer, and a `signals.verbs` entry the provider does not answer is warned |
 | `preserve` accepted as contract on a surface row and carried to the shell | **yes** — schema and runtime validation kept in step by a committed test |
 | the helper reading `preserve` from the row and driving capture/restore from it | **yes** — `declaredKinds` + `preserveDeclared`, with controls |

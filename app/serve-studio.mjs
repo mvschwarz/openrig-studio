@@ -1243,10 +1243,21 @@ const API_ROUTES = [
       return sendJson(res, 200, { ok: true, kind, raw: "/api/files/raw?path=" + encodeURIComponent(r), mtime: fs.statSync(r).mtimeMs });
   } },
   { verb: "/api/files/raw", handler: (request, req, res) => {
+      // Errors are 4xx JSON { ok:false, error } per runtime-api; only a REGULAR
+      // FILE is served as bytes (review.r2 IMPORTANT). Two defects fixed here: a
+      // bare empty 404 violated the error shape directly, and a DIRECTORY passed
+      // existsSync, got 200 headers written, then failed mid-stream — a success
+      // response committed before the read could fail. The decision is made
+      // BEFORE any status is written.
       const r = insideRoot(request.searchParams.get("path") || "");
-      if (!r || !fs.existsSync(r)) { res.writeHead(404); return res.end(); }
+      let st = null;
+      if (r) { try { st = fs.statSync(r); } catch {} }
+      if (!r || !st || !st.isFile()) {
+        return sendJson(res, 404, { ok: false,
+          error: "raw file not found, not a regular file, or outside the files root" });
+      }
       res.writeHead(200, { "content-type": TYPES[path.extname(r).toLowerCase()] || "application/octet-stream",
-        "content-length": fs.statSync(r).size, "cache-control": "no-store" });
+        "content-length": st.size, "cache-control": "no-store" });
       return fs.createReadStream(r).pipe(res);
   } },
   { verb: "/api/files/search", handler: (request, req, res) => {

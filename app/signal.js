@@ -76,6 +76,15 @@ export function watchSignal({
         const res = await fetchImpl(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`${verb} responded ${res.status}`);
         const body = await res.json();
+        // A CONFORMING DEGRADED READ is HTTP 200 with { ok:false, degraded }
+        // (runtime-api.md): the honest-degradation shape. It does not throw, so
+        // without this it sailed past as a healthy poll — the contract defeated by
+        // its own consumer. Count it as a failure so `degraded` is reported, and
+        // do NOT deliver it as fresh data or advance the cursor on it.
+        if (body && body.ok === false) {
+          sawFailure = (typeof body.degraded === "string" && body.degraded) || `${verb} reported a degraded read (ok:false)`;
+          continue;
+        }
         // A marker that moved BACKWARDS or was reissued counts as changed.
         // Monotonicity is the provider's promise; a consumer that trusted it
         // blindly would go silent forever if it were broken, so a surprise fails
@@ -348,18 +357,25 @@ export function writeAddress(href, state) {
 // surface reports itself dirty, a refresh DEFERS. It does not merge and it does
 // not clobber. The deferred change is applied when the surface reports clean.
 export function deferWhileDirty(isDirty, apply) {
-  let pending = null;
+  // A DISTINCT SENTINEL, not null-as-both. Using `null` for "nothing pending" AND
+  // as the deferred value meant a deferred `null`, `false`, `0` or `""` reported
+  // "deferred" and then never applied — the flush guard `!pending` read the falsy
+  // value as nothing to do, and `deferred` reported false the instant a `null`
+  // was deferred. The change may be ANY value, so whether one is held is tracked
+  // separately from what it is.
+  let pending;
+  let hasPending = false;
   return {
     offer(change) {
-      if (isDirty()) { pending = change; return "deferred"; }
+      if (isDirty()) { pending = change; hasPending = true; return "deferred"; }
       apply(change); return "applied";
     },
     // Call when the surface becomes clean.
     flush() {
-      if (!pending || isDirty()) return false;
-      const c = pending; pending = null; apply(c); return true;
+      if (!hasPending || isDirty()) return false;
+      const c = pending; pending = undefined; hasPending = false; apply(c); return true;
     },
-    get deferred() { return pending !== null; },
+    get deferred() { return hasPending; },
   };
 }
 

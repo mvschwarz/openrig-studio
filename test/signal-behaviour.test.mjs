@@ -127,6 +127,29 @@ test("a failed poll is REPORTED, and recovery is reported too", async () => {
   assert.deepEqual(states, [true, false], `expected degraded then recovered: ${JSON.stringify(states)}`);
 });
 
+test("a CONFORMING degraded read (HTTP 200, ok:false) is reported degraded, not delivered as data", async () => {
+  // review.r2 IMPORTANT: the contract's honest-degradation shape is HTTP 200 with
+  // { ok:false, degraded } (runtime-api.md). watchSignal checked only HTTP status,
+  // so a degraded envelope did not throw and sailed past as a healthy poll —
+  // onDegraded never fired and onData delivered the degraded body as fresh data.
+  const states = [], data = [];
+  const t = transport([
+    { body: { runtime: { boot: "b1" } } },
+    // HTTP 200 but ok:false with a degraded reason, AND a moved marker — the
+    // trap: without inspecting ok, the moved marker would fire onData.
+    { body: { ok: false, degraded: "store unreachable", changed: true, marker: "m1" } },
+    { body: { runtime: { boot: "b1" } } },
+    { body: { ok: true, changed: true, marker: "m2" } }, // recovery, real data
+  ]);
+  const w = watchSignal({ verbs: ["/api/x"], interval: 5, fetchImpl: t.fetchImpl,
+    onDegraded: (d) => states.push(d.degraded), onData: (d) => data.push(d.marker) });
+  await settle(); await settle();
+  w.stop();
+  assert.deepEqual(states, [true, false], `a conforming degraded read was not reported/recovered: ${JSON.stringify(states)}`);
+  assert.ok(!data.includes("m1"), "the degraded body was delivered as fresh data — ok:false was ignored");
+  assert.ok(data.includes("m2"), "the recovered real data was not delivered");
+});
+
 // ------------------------------------------------------------ preserve
 
 function withSessionStorage(fn) {
@@ -411,6 +434,26 @@ test("a change offered while the human is mid-edit is DEFERRED, not applied and 
   dirty = false;
   assert.equal(g.flush(), true);
   assert.deepEqual(applied, [{ marker: "m1" }], "the deferred change was dropped rather than applied later");
+});
+
+test("a FALSY deferred change is held and applied, not silently dropped", () => {
+  // review.r2 MINOR: `null` was both the "nothing pending" sentinel and a legal
+  // deferred value, so deferring null/false/0/"" reported "deferred" and then the
+  // flush guard `!pending` read the falsy value as nothing to do — the change
+  // vanished. Every falsy value must survive a defer-then-flush.
+  for (const value of [null, false, 0, ""]) {
+    let dirty = true;
+    const applied = [];
+    const g = deferWhileDirty(() => dirty, (c) => applied.push(c));
+
+    assert.equal(g.offer(value), "deferred", `offering ${JSON.stringify(value)} while dirty did not defer`);
+    assert.equal(g.deferred, true, `deferred(${JSON.stringify(value)}) reported nothing pending`);
+
+    dirty = false;
+    assert.equal(g.flush(), true, `flush dropped the deferred ${JSON.stringify(value)}`);
+    assert.deepEqual(applied, [value], `the deferred ${JSON.stringify(value)} was dropped rather than applied`);
+    assert.equal(g.deferred, false, "still reports pending after a successful flush");
+  }
 });
 
 test("a change offered to a CLEAN surface applies immediately — the guard is not just a block", () => {
