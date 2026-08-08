@@ -70,6 +70,100 @@ test("positive control: the RUNTIME reports its routes and the classification is
   assert.ok(SUBSTITUTABLE_VERBS.length >= 4);
 });
 
+test("EVERY declared route answers AS ITSELF — the per-route positive control a misbind cannot hide behind", async () => {
+  // orch's condition (1) for accepting the misbind residue (a resolver that
+  // returns a DIFFERENT declared row's index): every declared route keeps a
+  // positive control, so a misbind is caught by a route no longer answering as
+  // itself. This is that control, and it is STRUCTURAL rather than a checklist:
+  // the verb list comes from the runtime's OWN runtime.routes, and a declared
+  // route with no discriminator here FAILS — so a new route cannot be added
+  // without giving it a positive control, which is the condition made
+  // self-enforcing rather than promised.
+  //
+  // Each discriminator is an OWN-KEY (or content-type) unique to that route's
+  // response. A misbind maps route X to route Y's handler, so X's response
+  // carries Y's discriminator, not X's — and this fails on X.
+  // Discriminators must be MUTUALLY EXCLUSIVE, because the misbind residue
+  // returns another DECLARED row's response — so route X's signature must be
+  // false for every other route's body. The trap that proves this: the
+  // /api/contract body itself carries top-level `focus`, `drive`, `capture` and
+  // `annotations` sub-blocks, so "focus in body" is TRUE for both focus and
+  // contract and would let a focus->contract misbind pass. Verified against a
+  // real planted misbind before trusting these. So focus/drive key on the
+  // { marker, own-key } pair that only their own response carries, and
+  // capture/annotations key on `target`/`records` (which contract does NOT use
+  // at top level).
+  // Discriminators take a pre-read snapshot { status, sse, body } where body is
+  // the parsed JSON (or null). They must be MUTUALLY EXCLUSIVE, because the
+  // misbind residue returns another DECLARED row's response — so route X's
+  // signature must be false for every other route's body. The trap that proves
+  // this: the /api/contract body itself carries top-level `focus`, `drive`,
+  // `capture` and `annotations` sub-blocks, so "focus in body" is TRUE for both
+  // focus and contract and would let a focus->contract misbind pass. Verified
+  // against a real planted misbind before trusting these — focus/drive key on
+  // the { marker, own-key } pair only their own response carries.
+  const has = (b, k) => b && typeof b === "object" && k in b;
+  const DISCRIMINATORS = {
+    "/api/focus":          (s) => has(s.body, "focus") && has(s.body, "marker"),
+    "/api/drive":          (s) => has(s.body, "op") && has(s.body, "marker"),
+    "/api/capture-target": (s) => has(s.body, "target"),
+    "/api/annotations":    (s) => has(s.body, "records"),
+    "/api/contract":       (s) => has(s.body, "contractVersion"),
+    "/api/factory/state":  (s) => has(s.body, "seats"),
+    "/api/events":         (s) => s.sse,
+    "/api/files/tree":     (s) => has(s.body, "dirs"),
+    // read/raw with no path both 404, but read answers with a JSON error body
+    // and raw with an empty body — distinct from each other and from any 200
+    // handler a misbind would route them to.
+    "/api/files/read":     (s) => s.status === 404 && s.body?.ok === false,
+    "/api/files/raw":      (s) => s.status === 404 && s.body === null,
+    "/api/files/search":   (s) => has(s.body, "hits"),
+  };
+  // Probe query per route: enough to reach the route's own answer shape.
+  const QUERY = { "/api/files/search": "?q=zz" };
+
+  const port = 9700 + Math.floor(Math.random() * 250);
+  const proc = spawn(process.execPath,
+    [path.join(REPO, "app", "serve-studio.mjs"), "--port", String(port)],
+    { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
+  try {
+    for (let i = 0; i < 120; i++) {
+      try { await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" }); break; }
+      catch { await new Promise((r) => setTimeout(r, 50)); }
+    }
+    const routes = (await (await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" })).json()).runtime.routes;
+    assert.ok(routes.length >= 6, `the runtime reported only ${routes.length} routes`);
+
+    const unmapped = routes.filter((v) => !(v in DISCRIMINATORS));
+    assert.deepEqual(unmapped, [],
+      `these declared routes have NO positive control — a misbind to them would hide (orch condition 1): ${unmapped.join(", ")}`);
+
+    const snapshot = async (verb) => {
+      const probePath = verb.endsWith("/") ? `${verb}probe` : verb;
+      const q = QUERY[verb] ?? "";
+      // /api/events holds the connection open (SSE) — abort once headers land.
+      const ctrl = new AbortController();
+      const r = await fetch(`http://127.0.0.1:${port}${probePath}${q}`, { cache: "no-store", signal: ctrl.signal });
+      const sse = (r.headers.get("content-type") || "").includes("text/event-stream");
+      let body = null;
+      if (!sse) { const t = await r.text(); try { body = t ? JSON.parse(t) : null; } catch { body = null; } }
+      ctrl.abort();
+      return { status: r.status, sse, body };
+    };
+
+    for (const verb of routes) {
+      const s = await snapshot(verb);
+      assert.ok(DISCRIMINATORS[verb](s),
+        `${verb} did not answer as itself — a misbind to another handler would look like this`);
+      // MUTUAL EXCLUSIVITY: no OTHER route's discriminator may match this
+      // route's own response, or a misbind toward that route would slip past.
+      const alsoMatch = routes.filter((other) => other !== verb && DISCRIMINATORS[other](s));
+      assert.deepEqual(alsoMatch, [],
+        `${verb}'s response also satisfies ${alsoMatch.join(", ")} — the discriminators are not exclusive, so a misbind could hide`);
+    }
+  } finally { proc.kill(); }
+});
+
 test("EVERY served verb is classified, from the RUNTIME account of its own routes", async () => {
   // The one that would have caught capture-target. A new route must be declared
   // runtime-owned or substitutable; there is no third state and no default, so a
