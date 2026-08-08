@@ -22,11 +22,19 @@ never holds a pathname at all.
   downstream), cannot set a status (the miss branch is hardcoded 404 at the
   dispatch site), and cannot reach a handler that is not a row (the executable
   is fetched as `API_ROUTES[m.index]` — table membership is the only door).
-- Handlers receive `{ searchParams, verb, rest }` — never a pathname, never a
-  URL object. A handler needing path data uses `rest`, which is already scoped
-  to its own matched verb.
-- `handleRequest` calls `matchApi` and dispatches the indexed row. Neither `u`
-  nor `API_PREFIX` is a binding anywhere in that flow.
+- **The raw request is CONFINED to the routing adapter** (MF1, sdk-qa).
+  `handleRequest` references `req` only to route (`routeRequest(req.url, …)`) and
+  to build a handler `ctx`. Handlers receive
+  `{ method, headers, searchParams, verb, rest, readBody, onClose }` — **no url
+  and no `req`** — so response-capable handler code cannot reach the raw request
+  in ANY spelling (`req.url`, `req["url"]`, destructuring, aliasing).
+  **This is the mechanism: the boundary is that the url is not in scope, not that
+  a guard forbids one spelling of reading it.** An earlier fix counted the literal
+  `req.url` and a property-access spelling walked straight past it.
+- Handlers receive `ctx`, never a pathname or a URL object. A handler needing
+  path data uses `rest`, which is already scoped to its own matched verb.
+- `handleRequest` calls `routeRequest` and dispatches the indexed row. Neither
+  `u` nor `API_PREFIX` nor the raw `req` is a binding in any handler.
 - The static-file flow's `const u = new URL(...)` is constructed **after** the
   API branch has returned. That ordering is load-bearing: it is what guarantees
   no code that can see an API request ever holds a pathname.
@@ -52,18 +60,29 @@ without a row" is a fact about the data flow, not a promise a guard checks.
   is live while API requests are in flight — the exact material of the round-5
   finding. The unwritability control in `test/reserved-verbs.test.mjs` will
   fail if you do this.
-- **Handlers take `request`, not `u`.** Widening the handler signature to pass
-  the URL object hands every handler a pathname again.
+- **Handlers take `ctx`, not `req` or `u`.** Widening a handler back to
+  `(request, req, res)` — or passing the URL object — hands it the raw request
+  and its url again, and the MF1 boundary is gone. The confinement guard fails.
 - **`matchApi` and `routeRequest` live in `app/verbs.mjs`, not beside the table.** The grammar
   module is the routing definition; a special case must be written into the
   definition of routing itself, where the `routes=[]` property test and review
   can see it.
 
-## The guards that police the residue
+## The guards are DEFENSE-IN-DEPTH, not the boundary
 
-None of these *create* the property — the structure does. They detect attempts
-to remove it:
+None of these *create* the property — the structure does (the confinement and
+data-only routing above). They detect an attempt to breach it. **Do not read a
+guard — least of all the identifier-count guard — AS the boundary.** If the
+confinement were removed and only a guard kept, a sufficiently obfuscated access
+could pass; the confinement exists to make the breach impossible, and the guards
+exist to catch a change that reintroduces it.
 
+- **req-confinement guard** (`test/reserved-verbs.test.mjs`): handlers and the
+  static flow are `req`-free, and the routing adapter's `req` references are
+  exactly the sanctioned set. Every spelling of reading the request must NAME
+  `req`, so the identifier count catches the property-access equivalents the old
+  `req.url` text-match missed (MF1). Its control plants literal, bracket,
+  destructured, and aliased raw-url reads and asserts each is caught.
 - **Unwritability control** (`test/reserved-verbs.test.mjs`): plants sdk-qa's
   round-4 literal arm and round-5 derived-prefix arm at the top of the API flow
   and asserts each detonates as a `ReferenceError` naming the absent binding —
