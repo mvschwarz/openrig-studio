@@ -120,7 +120,7 @@ test("EVERY declared route answers AS ITSELF — the per-route positive control 
     "/api/files/search":   (s) => has(s.body, "hits"),
   };
   // Probe query per route: enough to reach the route's own answer shape.
-  const QUERY = { "/api/files/search": "?q=zz" };
+  const QUERY = { "/api/files/search": "?q=zz", "/api/drive": "?surface=probe" };
 
   const port = 9700 + Math.floor(Math.random() * 250);
   const proc = spawn(process.execPath,

@@ -821,36 +821,51 @@ function persistAnnotations() {
   fs.writeFileSync(ANNOTATIONS_FILE, JSON.stringify({ scopes }, null, 2));
 }
 
-let driveOp = null;
-let driveSeq = 0;
-// HOW MANY TIMES A SURFACE HAS ACTUALLY POLLED. Not a declaration — an
-// observation. A runtime that has served ZERO drive reads since boot has nobody
-// listening, and it is the only party that can know that.
+// PER-SURFACE DELIVERY (review.r2 CRITICAL, PM ruling): one global op slot fanned
+// every op out to every kept-alive surface — including play/export/delete side
+// effects — because "which surface is open" was not expressible. Now each surface
+// has its OWN slot, keyed by the surface id, and a surface only ever reads its own
+// slot: a mis-addressed op lands in a slot the wrong surface never polls, so it is
+// STRUCTURALLY undeliverable there — not delivered-then-filtered (which would make
+// every adopter responsible for filtering correctly).
 //
-// The defect this exists for shipped and was found on a real box: an agent POSTed
-// an op to a hand-built surface that had never adopted the helper, got
-// { ok: true, gen: 2 }, and nothing happened. The agent did everything right. A
-// runtime is not allowed to report success for a delivery it cannot make.
-let driveReads = 0;
-const driveMarker = () => `${BOOT_ID}.${driveSeq}`;
+// `gen` stays global and strictly increasing across all surfaces; each slot holds
+// the latest op addressed to IT plus that surface's applied progress.
+const driveSlots = new Map(); // surfaceId -> { op, appliedGen, reads }
+let driveSeq = 0;
+let driveReads = 0;           // total polls across all surfaces (contract report)
+const driveSlot = (surface) => {
+  let slot = driveSlots.get(surface);
+  if (!slot) { slot = { op: null, appliedGen: 0, reads: 0 }; driveSlots.set(surface, slot); }
+  return slot;
+};
+// Per-surface marker: a surface watches its OWN slot's latest generation.
+const driveMarker = (slot) => `${BOOT_ID}.${slot.op ? slot.op.gen : 0}`;
 
-function writeDrive(op) {
+// POST RETURNS ON RECORD, NOT APPLY — record and apply are a near-synonym pair
+// the contract keeps explicitly apart. writeDrive records the op in the target
+// surface's slot and returns `recorded: true`. Whether the surface has APPLIED it
+// is a separate question answered by `appliedGen` on GET, which advances only when
+// the surface acks an apply that RESOLVED (the harder half — applied, not seen).
+function writeDrive(surface, op) {
+  // ADDRESSING IS MANDATORY (BREAKING, PM ruling): an unaddressed op is refused
+  // rather than fanned out. A warned unaddressed default still fans out, so the
+  // default that caused the defect is removed, not softened.
+  if (typeof surface !== "string" || !surface.trim()) {
+    return { ok: false, error: "a drive op must name its target surface — send { surface, ...intent }; " +
+      "an unaddressed op would reach every kept-alive surface, which is the fan-out this refuses" };
+  }
   if (!op || typeof op !== "object" || Array.isArray(op)) {
     return { ok: false, error: "a drive op must be a JSON object carrying intent for the surface" };
   }
   driveSeq += 1;
-  driveOp = { ...op, gen: driveSeq, at: new Date().toISOString() };
-  // ACCEPTED IS NOT DELIVERED, AND THE CALLER FINDS OUT HERE RATHER THAN LATER.
-  // `listening` is false when nothing has ever polled this verb: the op is
-  // recorded and no surface will act on it. Reported at the moment of the mistake,
-  // in the response the caller is already reading — a doc line only fires once
-  // somebody goes looking, which is after they have concluded the platform is
-  // broken.
-  //
-  // STILL NOT CLAIMED, and drive.md says so: listening does not mean HONOURED. A
-  // surface can poll, receive, and do nothing. That is the refusal shape, and it
-  // stays unspecified until a real application needs one.
-  return { ok: true, marker: driveMarker(), op: driveOp, listening: driveReads > 0 };
+  const slot = driveSlot(surface);
+  slot.op = { ...op, gen: driveSeq, at: new Date().toISOString() };
+  // ACCEPTED IS NOT DELIVERED, AND THE CALLER FINDS OUT HERE. `listening` is
+  // false when THIS surface has never polled: the op is recorded and that surface
+  // will not act on it. Reported in the response the caller is already reading.
+  return { ok: true, recorded: true, surface, marker: driveMarker(slot), op: slot.op,
+    gen: slot.op.gen, appliedGen: slot.appliedGen, listening: slot.reads > 0 };
 }
 
 const readBody = (req) => new Promise((resolve) => {
@@ -1091,19 +1106,33 @@ const API_ROUTES = [
   { verb: "/api/drive", handler: async (request, req, res) => {
       if (req.method === "POST") {
         const raw = await readBody(req);
-        let op;
-        try { op = JSON.parse(raw || "null"); }
+        let body;
+        try { body = JSON.parse(raw || "null"); }
         catch (e) { return sendJson(res, 400, { ok: false, error: `drive op is not valid JSON: ${e.message}` }); }
-        const result = writeDrive(op);
+        // `surface` is the ADDRESS envelope, reserved like `gen`/`at`; the rest is
+        // opaque intent for that surface.
+        const { surface, ...op } = (body && typeof body === "object" && !Array.isArray(body)) ? body : { surface: null };
+        const result = writeDrive(surface, op);
         return sendJson(res, result.ok ? 200 : 400, result);
       }
-      // The surface polls this. Same `?since=` shape as the change signal and
-      // focus, so a surface that already watches one is watching this with the
-      // primitive it has rather than a third mechanism of its own.
+      // The surface polls its OWN slot, addressed by ?surface=<id>. Same `?since=`
+      // shape as the change signal and focus. `?applied=<gen>` is the settle-ack:
+      // the surface reports the highest generation it has APPLIED, and the runtime
+      // exposes it as `appliedGen` so a poster can await appliedGen >= its own gen
+      // before the next op. POST returns on RECORD; this is how apply is observed.
+      const surface = request.searchParams.get("surface");
+      if (typeof surface !== "string" || !surface.trim()) {
+        return sendJson(res, 400, { ok: false, error: "GET /api/drive must name ?surface=<id> — ops are per-surface" });
+      }
+      const slot = driveSlot(surface);
+      slot.reads += 1;
       driveReads += 1;
+      const applied = Number(request.searchParams.get("applied"));
+      if (Number.isInteger(applied) && applied > slot.appliedGen) slot.appliedGen = applied;
       const since = request.searchParams.get("since");
-      const marker = driveMarker();
-      return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, op: driveOp });
+      const marker = driveMarker(slot);
+      return sendJson(res, 200, { ok: true, surface, changed: since === null || since !== marker,
+        marker, op: slot.op, appliedGen: slot.appliedGen });
   } },
   { verb: "/api/capture-target", handler: async (request, req, res) => {
       if (req.method === "POST") {
@@ -1167,7 +1196,7 @@ const API_ROUTES = [
         capabilities: CAPABILITIES,
         // Inspectable without posting: an agent can ask whether anything is
         // listening before it drives, rather than learning from a no-op.
-        drive: { listening: driveReads > 0, reads: driveReads, ops: driveSeq },
+        drive: { listening: driveReads > 0, reads: driveReads, ops: driveSeq, surfaces: driveSlots.size },
         // WHICH KIND OF `by` THIS RUNTIME PRODUCES. focus.md tells a consumer not
         // to build a trust decision on `by` without knowing which kind of runtime
         // made it — and until now there was no way to ask. The header NAME is

@@ -18,19 +18,34 @@ application built on this SDK, and it is the reason that application can be
 watched rather than merely instructed. What was missing is the SDK offering it, so
 that two applications do not invent two incompatible versions of the same thing.
 
-## The op (stable)
+> **⚠️ REDLINE — REVISION 2026-08-08 (per-surface delivery + settle-ack). PM
+> review pending.** Sections marked **(stable — REVISED)** below change a
+> previously-stable contract, and one change is **BREAKING** (an unaddressed
+> `POST` is now refused). Every changed section is marked so PM reviews the diff,
+> not the memory of it. Reason: one global channel delivered every op to every
+> kept-alive surface — including `play`/`export`/`delete` — because the op could
+> not name which surface it was for. The revision makes delivery per-surface
+> (structurally undeliverable to the wrong surface) and adds a settle-ack.
 
-An op carries **intent**, and the runtime attaches two fields:
+## The op (stable — REVISED: `surface` address added)
+
+An op carries **intent**, and the runtime attaches two fields. The **agent**
+supplies one required envelope field, `surface`, naming which surface the op is
+for:
 
 ```json
-{ "gen": 7, "at": "<ISO timestamp>", "...": "whatever this surface's intent IS" }
+{ "surface": "<surface id>", "gen": 7, "at": "<ISO timestamp>", "...": "whatever this surface's intent IS" }
 ```
 
 | field | stability | meaning |
 |---|---|---|
-| `gen` | stable | server-assigned generation, strictly increasing |
+| `surface` | **stable — NEW** | the target surface id, supplied by the agent; **required** |
+| `gen` | stable | server-assigned generation, strictly increasing across all surfaces |
 | `at` | stable | ISO timestamp the runtime recorded the op |
 | everything else | **the surface's** | intent, interpreted by the surface alone |
+
+`surface` is a reserved envelope field like `gen`/`at`: it addresses the op and
+is not part of the opaque intent.
 
 ### The op is opaque to the runtime, and is never a list of DOM operations (stable)
 
@@ -46,22 +61,48 @@ and would force every drivable surface to freeze its DOM as an interface it neve
 agreed to publish. This is the same decision, for the same reason, as `selection`
 being typed by its surface in `focus.md`.
 
-## The channel (stable)
+## The channel (stable — REVISED: per-surface addressing + settle-ack)
 
-**`POST /api/drive`** — an agent posts an op. The runtime assigns `gen` and
-answers `{ ok, marker, op }`.
+**`POST /api/drive`** — an agent posts an op **addressed to a surface**:
+`{ surface, ...intent }`. The runtime records it in that surface's slot, assigns
+`gen`, and **returns on RECORD** — the response is
+`{ ok, recorded: true, surface, gen, marker, op, appliedGen, listening }`.
 
-**`GET /api/drive`** — the surface polls. It answers the change-signal shape:
+**Record and apply are kept explicitly apart.** `recorded: true` means the op is
+stored in the surface's slot. It does **not** mean the surface has applied it —
+that is `appliedGen` (below). A `POST` never blocks on a surface applying;
+coupling the agent to surface liveness would let a dead or backgrounded-then-killed
+surface hang every driver.
+
+**⚠️ BREAKING — an unaddressed `POST` is refused with `400`.** Previously an op
+had no `surface` and was delivered to whoever polled; that is the fan-out this
+revision removes. A warned unaddressed default would still fan out, so the default
+is removed, not softened. The refusal names the required `surface` field.
+
+**`GET /api/drive?surface=<id>`** — the surface polls **its own slot**. It answers
+the change-signal shape plus the settle-ack:
 
 ```json
-{ "ok": true, "changed": true, "marker": "<opaque>", "op": { "...": "the latest op" } }
+{ "ok": true, "surface": "<id>", "changed": true, "marker": "<opaque>",
+  "op": { "...": "the latest op for THIS surface" }, "appliedGen": 6 }
 ```
 
-`?since=<marker>` is honoured exactly as `change-signal.md` describes. A surface
-already watching the change signal or focus is watching this **with the primitive
-it already has**, rather than a third polling mechanism of its own.
+A `GET` without `?surface=` is refused with `400`: ops are per-surface, and an
+unaddressed poll could hand a surface another surface's ops.
 
-A runtime nobody has driven answers `op: null`. That is not an error.
+**Settle-ack.** A surface reports the highest generation it has **applied** via
+`?applied=<gen>` on its poll; the runtime exposes it as `appliedGen`. It advances
+only when the surface's application has **resolved** — `appliedGen` names the
+harder half (applied, not received). An agent that needs to sequence ops awaits
+`appliedGen >= <the gen its POST returned>` before the next op; one that does not
+care stays fast. A posted-but-not-yet-applied op is observable as
+`appliedGen < gen`.
+
+`?since=<marker>` is honoured exactly as `change-signal.md` describes, per surface.
+A surface already watching the change signal or focus is watching this **with the
+primitive it already has**.
+
+A surface nobody has driven answers `op: null`. That is not an error.
 
 ### Latest intent wins; superseded ops are DROPPED (stable)
 
@@ -108,12 +149,13 @@ overlapping applications interleave their writes and leave the surface in a stat
 **neither op described**. An op arriving mid-flight is held, and when the flight
 lands only the newest held op runs — so serialising never reintroduces a queue.
 
-## Adopting it (stable)
+## Adopting it (stable — REVISED: `surface` required)
 
 ```js
 import { driveSurface } from "/signal.js";
 
 const drive = driveSurface({
+  surface: mySurfaceId,                    // which surface this receives ops for — required
   apply: async (op) => {
     if (op.show !== undefined) await showTake(op.show);
     if (op.say) narrate(op.say);          // let the agent say WHY, where the surface talks
@@ -121,9 +163,13 @@ const drive = driveSurface({
 });
 ```
 
-`apply` is awaited, so returning a promise is how a surface tells the helper that
-it is still working. `offer(op)` hands an op in directly for a surface driven by
-something other than the verb, and `stop()` ends the polling.
+`surface` is the id this surface receives ops for; the helper polls that slot and
+never sees another surface's ops. `apply` is awaited, so returning a promise is how
+a surface tells the helper that it is still working — and the settle-ack only
+advances once that promise resolves. `offer(op)` hands an op in directly for a
+surface driven by something other than the verb; `applied` reads the highest
+generation whose `apply` has resolved, `accepted` the highest offered; `stop()`
+ends the polling.
 
 **Narrate the change.** An op may carry a line of text the surface shows where it
 normally talks to the user. A watcher then sees a narrated change rather than
@@ -145,6 +191,9 @@ feels driven and one that feels haunted.
 | specified | shipped |
 |---|---|
 | `POST` / `GET /api/drive`, opaque ops, server-assigned `gen` | **yes**, in the reference runtime |
+| **per-surface delivery: `{ surface, ...intent }` on `POST`, `?surface=` on `GET`; an op reaches only its addressed surface** | **yes** (REVISED), with a control that drives A while B and C are kept alive and asserts `delete`/`export`/`play` never fire on B or C |
+| **an unaddressed `POST` or `GET` refused `400`** (BREAKING) | **yes** (REVISED), with a control |
+| **settle-ack: `POST` returns on RECORD; `appliedGen` advances only when `apply` resolves; the record-to-apply gap is observable** | **yes** (REVISED), with a control asserting `appliedGen < gen` during a blocked application and catch-up after |
 | the namespace advertised at `GET /api/contract` -> `capabilities` (`drive.read`, `drive.write`) | **yes** |
 | the change-signal `?since=` shape on the read | **yes** |
 | `driveSurface` dropping superseded ops | **yes**, with a control that plants a queue and fails |

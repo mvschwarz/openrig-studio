@@ -43,12 +43,22 @@ async function start() {
       await new Promise((r) => setTimeout(r, 100));
     }
   }
+  // Ops are per-surface now: POST carries { surface, ...intent }, GET addresses
+  // ?surface=<id>. The single-surface tests use a fixed default id "s"; the
+  // per-surface control drives distinct ids.
+  const post = (body) => fetch(`${base}/api/drive`,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+  const get = (surface, params = {}) => {
+    const q = new URLSearchParams({ surface, ...params });
+    return fetch(`${base}/api/drive?${q}`, { cache: "no-store" }).then((r) => r.json());
+  };
   return {
     dir, base,
-    drive: async (op) => (await fetch(`${base}/api/drive`,
-      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(op) })).json(),
-    read: async (since) => (await fetch(`${base}/api/drive${since === undefined ? "" : `?since=${encodeURIComponent(since)}`}`,
-      { cache: "no-store" })).json(),
+    drive: async (op, surface = "s") => post({ surface, ...op }),
+    driveTo: async (surface, op) => post({ surface, ...op }),
+    postRaw: async (body) => post(body),
+    read: async (since, surface = "s") => get(surface, since === undefined ? {} : { since }),
+    readAt: async (surface, params = {}) => get(surface, params),
     stop: () => proc.kill(),
   };
 }
@@ -113,9 +123,11 @@ test("a malformed op is refused by name rather than silently accepted", async (t
   const s = await start();
   t.after(() => s.stop());
 
-  const arr = await s.drive(["not", "an", "object"]);
+  // A non-object body cannot carry a surface address, so it is refused by name
+  // at the addressing gate (op-must-be-object is now defensive behind it).
+  const arr = await s.postRaw(["not", "an", "object"]);
   assert.equal(arr.ok, false);
-  assert.match(arr.error, /JSON object/);
+  assert.match(arr.error, /surface|JSON object/);
 });
 
 // ------------------------------------------------- the surface half
@@ -130,6 +142,7 @@ test("SUPERSEDED OPS ARE DROPPED, not replayed — the whole reason for a counte
   const gate = new Promise((r) => { release = r; });
 
   const d = driveSurface({
+    surface: "s",
     apply: async (op) => { applied.push(op.gen); if (op.gen === 1) await gate; },
     fetchImpl: async () => ({ json: async () => ({ ok: true, changed: false, marker: "x", op: null }) }),
   });
@@ -148,6 +161,7 @@ test("SUPERSEDED OPS ARE DROPPED, not replayed — the whole reason for a counte
 test("an OLDER op arriving late is ignored — order is by generation, not arrival", async (t) => {
   const applied = [];
   const d = driveSurface({
+    surface: "s",
     apply: (op) => { applied.push(op.gen); },
     fetchImpl: async () => ({ json: async () => ({ ok: true, changed: false, marker: "x", op: null }) }),
   });
@@ -168,6 +182,7 @@ test("two applications never overlap — a mid-flight op waits rather than inter
   // than by trusting the ordering of the results.
   let inFlight = 0, maxConcurrent = 0;
   const d = driveSurface({
+    surface: "s",
     apply: async () => {
       inFlight += 1;
       maxConcurrent = Math.max(maxConcurrent, inFlight);
@@ -208,6 +223,7 @@ test("an op posted BEFORE the surface loaded is not replayed", async (t) => {
   // `play`, `export` or `delete`, firing again in every new tab.
   const applied = [];
   const d = driveSurface({
+    surface: "s",
     apply: (op) => { applied.push(op.gen); },
     intervalMs: 5,
     // The runtime keeps the last op forever, so a fresh surface always sees one.
@@ -217,7 +233,7 @@ test("an op posted BEFORE the surface loaded is not replayed", async (t) => {
 
   await new Promise((r) => setTimeout(r, 40));
   assert.deepEqual(applied, [], `an op that predates the surface was applied: ${applied.join(",")}`);
-  assert.equal(d.applied, 9, "the baseline was not adopted, so a later op could not be told from this one");
+  assert.equal(d.accepted, 9, "the baseline was not adopted, so a later op could not be told from this one");
 });
 
 test("...but an op posted AFTER it loaded still applies — the baseline is not a mute button", async (t) => {
@@ -227,6 +243,7 @@ test("...but an op posted AFTER it loaded still applies — the baseline is not 
   const applied = [];
   let current = { gen: 9, select: "old" };
   const d = driveSurface({
+    surface: "s",
     apply: (op) => { applied.push(op.select); },
     intervalMs: 5,
     fetchImpl: async () => ({ json: async () => ({ ok: true, changed: true, marker: "m", op: current }) }),
@@ -244,6 +261,7 @@ test("...but an op posted AFTER it loaded still applies — the baseline is not 
 test("resumeLatestOnLoad opts back IN to catching up, for surfaces that want it", async (t) => {
   const applied = [];
   const d = driveSurface({
+    surface: "s",
     apply: (op) => { applied.push(op.select); },
     intervalMs: 5,
     resumeLatestOnLoad: true,
@@ -260,6 +278,7 @@ test("the poll survives the runtime going away", async (t) => {
   // reload to become drivable again — the exact state this primitive removes.
   let calls = 0;
   const d = driveSurface({
+    surface: "s",
     apply: () => {},
     intervalMs: 5,
     fetchImpl: async () => { calls += 1; throw new Error("runtime is down"); },
@@ -279,6 +298,7 @@ test("end to end: an agent POSTs and an adopting surface applies it", async (t) 
 
   const applied = [];
   const d = driveSurface({
+    surface: "s",
     apply: (op) => { applied.push(op); },
     endpoint: `${s.base}/api/drive`,
     intervalMs: 20,
@@ -300,6 +320,94 @@ test("end to end: an agent POSTs and an adopting surface applies it", async (t) 
 
   assert.equal(applied.length, 1, "the surface never received the op an agent posted");
   assert.equal(applied[0].show, "take-3");
+});
+
+// ---------------------------------------- per-surface delivery + settle-ack
+
+test("PER-SURFACE DELIVERY: an op addressed to A never reaches kept-alive B or C", async (t) => {
+  // review.r2 CRITICAL / PM's control shape. The shell keeps backgrounded
+  // surfaces ALIVE and polling; one global channel fanned every op to all of
+  // them — including the play/export/delete side-effect classes the contract
+  // names. The fixture MUST keep B and C alive: that is the exact condition, and
+  // a fixture that closed them would prove nothing about the defect.
+  const s = await start();
+  t.after(() => s.stop());
+
+  const appliedA = [], appliedB = [], appliedC = [];
+  const mk = (surface, sink) => driveSurface({
+    surface, apply: (op) => { sink.push(op); }, endpoint: `${s.base}/api/drive`, intervalMs: 15,
+  });
+  const A = mk("A", appliedA), B = mk("B", appliedB), C = mk("C", appliedC);
+  t.after(() => { A.stop(); B.stop(); C.stop(); });
+
+  await new Promise((r) => setTimeout(r, 80)); // all three take their baselines
+
+  // Space the ops past a poll interval so each is applied before the next —
+  // otherwise the generation counter correctly supersedes them down to the last
+  // (that behaviour has its own test above; this control is about ADDRESSING).
+  for (const op of [{ delete: "take-3" }, { export: "reel" }, { play: true }]) {
+    await s.driveTo("A", op);
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  await new Promise((r) => setTimeout(r, 120)); // well past several poll intervals
+
+  assert.equal(appliedA.length, 3, "A did not receive its own ops — per-surface delivery dropped them");
+  assert.deepEqual(appliedB, [],
+    "a kept-alive B received an op addressed to A — delete/export/play fired on the wrong surface, the exact defect");
+  assert.deepEqual(appliedC, [], "a kept-alive C received an op addressed to A");
+});
+
+test("ADDRESSING IS MANDATORY: an unaddressed op is refused, so the fan-out default cannot return", async (t) => {
+  // Q3 breaking-now: a warned unaddressed default still fans out. POST and GET
+  // both refuse an unaddressed op by name.
+  const s = await start();
+  t.after(() => s.stop());
+
+  const posted = await s.postRaw({ delete: "everything" }); // no surface
+  assert.equal(posted.ok, false, "an unaddressed op was accepted — the fan-out default is back");
+  assert.match(posted.error, /surface/);
+
+  const polled = await fetch(`${s.base}/api/drive`, { cache: "no-store" }).then((x) => x.json());
+  assert.equal(polled.ok, false, "an unaddressed poll was answered — a surface could receive another's ops");
+  assert.match(polled.error, /surface/);
+});
+
+test("SETTLE-ACK: appliedGen exposes a real posted-but-not-yet-applied window", async (t) => {
+  // Q2 condition 3: the record-to-apply gap must be OBSERVABLE via appliedGen <
+  // postedGen, or the ack is decoration. POST returns on RECORD; appliedGen only
+  // advances when the surface's apply() has RESOLVED (the harder half).
+  const s = await start();
+  t.after(() => s.stop());
+
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const d = driveSurface({
+    surface: "A", endpoint: `${s.base}/api/drive`, intervalMs: 10,
+    apply: async () => { await gate; }, // hold the application open
+  });
+  t.after(() => d.stop());
+  await new Promise((r) => setTimeout(r, 50)); // baseline
+
+  const posted = await s.driveTo("A", { play: true });
+  assert.equal(posted.recorded, true, "POST did not report it RETURNS ON RECORD");
+  const postedGen = posted.gen;
+
+  // apply() is blocked, so appliedGen must lag postedGen — the observable gap
+  await new Promise((r) => setTimeout(r, 60));
+  const mid = await s.readAt("A");
+  assert.ok(mid.appliedGen < postedGen,
+    `no observable gap: appliedGen ${mid.appliedGen} is not < postedGen ${postedGen} — the ack is decoration`);
+
+  release(); // let it settle; appliedGen must catch up
+  const deadline = Date.now() + 3000;
+  let settled;
+  do {
+    settled = await s.readAt("A");
+    if (settled.appliedGen >= postedGen) break;
+    await new Promise((r) => setTimeout(r, 20));
+  } while (Date.now() < deadline);
+  assert.ok(settled.appliedGen >= postedGen,
+    "appliedGen never reached postedGen after apply resolved — settle is unobservable");
 });
 
 test("positive control: this suite is capable of failing", () => {

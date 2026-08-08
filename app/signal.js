@@ -392,6 +392,7 @@ export function deferWhileDirty(isDirty, apply) {
 // are pure view state and which genuinely want a fresh page to catch up.
 export function driveSurface({
   apply,
+  surface,
   fetchImpl = fetch,
   endpoint = "/api/drive",
   intervalMs = 350,
@@ -399,9 +400,17 @@ export function driveSurface({
   onError = () => {},
 } = {}) {
   if (typeof apply !== "function") throw new TypeError("driveSurface needs an apply(op) function");
+  // PER-SURFACE DELIVERY: a surface receives ops from its OWN slot, addressed by
+  // the id it supplies about itself. A backgrounded surface polling its own slot
+  // is exactly why a foreground op never reaches it — there is no unaddressed
+  // channel left to poll.
+  if (typeof surface !== "string" || !surface.trim()) {
+    throw new TypeError("driveSurface needs the `surface` id it receives ops for — ops are per-surface");
+  }
 
   let marker = null;      // last marker seen, so `?since=` can be honest
-  let seen = 0;           // highest generation already applied
+  let seen = 0;           // highest generation ACCEPTED (dedup), not yet proven applied
+  let appliedGen = 0;     // highest generation whose apply() RESOLVED — the ack we report
   let next = null;        // newest op that arrived while one was being applied
   let baselined = false;  // has the first poll established what counts as "already there"?
   let flying = false;
@@ -415,6 +424,10 @@ export function driveSurface({
         // Re-read `next` AFTER the await, not before: anything that arrived
         // during this application supersedes what we were about to do next.
         await apply(op);
+        // APPLIED, not merely accepted: the ack advances only once apply() has
+        // RESOLVED, so appliedGen names the harder half. A poster reading
+        // appliedGen < its gen is seeing a real posted-but-not-yet-applied window.
+        appliedGen = op.gen;
         op = next;
         next = null;
       }
@@ -436,8 +449,11 @@ export function driveSurface({
   async function poll() {
     if (stopped) return;
     try {
-      const url = marker === null ? endpoint : `${endpoint}?since=${encodeURIComponent(marker)}`;
-      const r = await (await fetchImpl(url, { cache: "no-store" })).json();
+      // Address our own slot, and ack the highest generation we have APPLIED so
+      // the runtime can expose appliedGen to a poster awaiting settle.
+      const params = new URLSearchParams({ surface, applied: String(appliedGen) });
+      if (marker !== null) params.set("since", marker);
+      const r = await (await fetchImpl(`${endpoint}?${params}`, { cache: "no-store" })).json();
       if (r && r.ok) {
         marker = r.marker ?? marker;
         // The baseline is taken from the FIRST answer, before anything is applied.
@@ -460,7 +476,12 @@ export function driveSurface({
   return {
     offer,
     stop() { stopped = true; if (timer) clearTimeout(timer); },
-    get applied() { return seen; },
+    // `applied` is the SETTLE-ACK value: the highest generation whose apply()
+    // resolved. `accepted` is the dedup high-water (highest offered/baselined) —
+    // it moves ahead of `applied` while an application is in flight, which is the
+    // observable posted-but-not-yet-applied window.
+    get applied() { return appliedGen; },
+    get accepted() { return seen; },
   };
 }
 

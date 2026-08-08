@@ -55,7 +55,7 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
   "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read",
                    "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write",
                    "annotations.read", "annotations.write", "capture.target"],
-  "drive": { "listening": false, "reads": 0, "ops": 0 },
+  "drive": { "listening": false, "reads": 0, "ops": 0, "surfaces": 0 },
   "focus": { "attribution": "caller-declared", "identityHeader": null },
   "annotations": { "persistence": "memory", "scopes": 0, "writes": 0 },
   "capture": { "target": null, "roots": ["feedback"], "consumedBy": null },
@@ -178,6 +178,16 @@ Every route, field, and message type in this contract carries one of:
 
 Additive fields and new routes are non-breaking. Breaking changes move
 `contractVersion` and are named in a changelog entry.
+
+### Changelog
+
+- **2026-08-08 — drive per-surface delivery (BREAKING).** `POST /api/drive` now
+  requires a `surface` field and refuses an unaddressed op with `400`; `GET
+  /api/drive` requires `?surface=<id>`. Previously one global channel delivered
+  every op to every polling surface, including `play`/`export`/`delete` side
+  effects on backgrounded-but-alive surfaces. Additive in the same revision (not
+  breaking): the `surface` and `appliedGen` response fields, and the settle-ack
+  `?applied=` poll parameter. See `drive.md` (redline pending PM review).
 
 ## How a surface should decide compatibility
 
