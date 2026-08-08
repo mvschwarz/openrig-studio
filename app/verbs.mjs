@@ -115,6 +115,26 @@ export function matchApi(rawUrl, base, routes) {
   return { index, rest: u.pathname.slice(routes[index].verb.length), searchParams: u.searchParams };
 }
 
+// THE SINGLE CONSUMER OF THE RAW REQUEST URL (RS-C1, review.r2): matchApi put
+// the PATHNAME behind a data boundary, but `req.url` — the raw request string —
+// was still readable at handleRequest's entry, one consumer earlier, before the
+// match ran. A pre-lookup arm deriving the prefix from fragments (`"/" + "api/"`)
+// served a 200 the table never saw and the literal fence never named.
+//
+// So routeRequest is now the ONE place a raw request URL is consumed, and it
+// returns DATA: `{ api }` — a matchApi result, no url, no pathname — or
+// `{ static }` carrying the parsed URL the file flow legitimately needs. Because
+// handleRequest reads `req.url` exactly once (this call), a pre-lookup arm
+// branching on the path needs a SECOND `req.url` read, which the req.url-once
+// guard in reserved-verbs.test.mjs forbids. Same standard as matchApi, applied
+// to the raw string rather than the pathname. The api branch still holds no
+// pathname (round 5); the resolver still returns data, not authority (round 6).
+export function routeRequest(rawUrl, base, routes) {
+  const m = matchApi(rawUrl, base, routes);
+  if (m) return { api: m };
+  return { static: { url: new URL(rawUrl, base) } };
+}
+
 // ---- the routing surface tripwire ------------------------------------------
 //
 // PM's ruling, third round on this class: OPT-IN DISCOVERY IS THE HOLE. A

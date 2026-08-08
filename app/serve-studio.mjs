@@ -20,7 +20,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, matchApi } from "./verbs.mjs";
+import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, routeRequest } from "./verbs.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -191,6 +191,17 @@ function validateManifest(raw, label = "", keep = null) {
   let doc;
   try { doc = JSON.parse(raw); }
   catch (e) { return { errors: [`${tag}surfaces.json is not valid JSON: ${e.message}`], warnings, valid, doc: null }; }
+  // VALID JSON IS NOT A VALID MANIFEST. `null`, a number, a string, or an array
+  // all parse — and `null.surfaces` THREW at load, killing warn-first startup
+  // (RS-C2, review.r2): the process exited 1 and /api/contract never came up,
+  // exactly the crash the warn-first contract exists to prevent. A manifest that
+  // is not a plain object is refused the same visible, still-serving way a
+  // syntactically invalid one is — a named error, an empty rail, and the runtime
+  // stays up. (An array reaches the surfaces[] check below harmlessly; null and
+  // primitives are what throw, so the object gate must come first.)
+  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
+    return { errors: [`${tag}surfaces.json must be a JSON object with a top-level surfaces[] array (got ${doc === null ? "null" : Array.isArray(doc) ? "an array" : typeof doc})`], warnings, valid, doc: null };
+  }
   if (!Array.isArray(doc.surfaces)) {
     return { errors: [`${tag}surfaces.json must carry a top-level surfaces[] array`], warnings, valid, doc };
   }
@@ -1217,30 +1228,29 @@ const API_ROUTES = [
 // <<< API ROUTING SURFACE
 
 const handleRequest = async (req, res) => {
-  // THE API FLOW HOLDS NO PATHNAME. Routing happens inside matchApi (the
-  // grammar module): this function hands over the raw request URL and receives
-  // either null (not the api namespace) or a table INDEX plus request data —
-  // never a closure, never a status. Neither `u` nor the namespace prefix exists as a
-  // binding anywhere in this flow — a pathname special-case here is a
-  // ReferenceError, not a code-review question. THE ORDERING BELOW IS
-  // LOAD-BEARING: the static-flow URL is deliberately constructed AFTER this
-  // branch returns, so no code that could see an api request ever holds a
-  // pathname. See docs/design/routing-data-boundary.md before "simplifying"
-  // either fact away.
-  const m = matchApi(req.url, `http://127.0.0.1:${PORT}`, API_ROUTES);
-  if (m) {
+  // THE RAW REQUEST URL IS CONSUMED ONCE, HERE, and comes back as a DATA
+  // decision: `{ api }` — a table match with no pathname — or `{ static }`
+  // carrying the parsed URL the file flow needs. `req.url` appears exactly once
+  // in this file (this call); a pre-lookup arm branching on the path needs a
+  // SECOND read, which the req.url-once guard in reserved-verbs.test.mjs
+  // forbids. The api branch still holds no pathname (round 5); the resolver
+  // still returns data, not authority (round 6); and now the raw string is
+  // behind the same boundary as the pathname (RS-C1). See
+  // docs/design/routing-data-boundary.md before "simplifying" any of it away.
+  const decision = routeRequest(req.url, `http://127.0.0.1:${PORT}`, API_ROUTES);
+  if (decision.api) {
+    const m = decision.api;
     try {
       // TABLE MEMBERSHIP IS THE ONLY DOOR TO A HANDLER, and 404 is the only
       // status the miss branch can have: the resolver returns an index and a
-      // body object — data — never a closure and never a status. See the
-      // resolver-boundary discriminator in test/reserved-verbs.test.mjs.
+      // body object — data — never a closure and never a status.
       const row = API_ROUTES[m.index];
       if (row) await row.handler({ searchParams: m.searchParams, verb: row.verb, rest: m.rest }, req, res);
       else sendJson(res, 404, m.notFound);
     } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
     return;
   }
-  const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
+  const u = decision.static.url;
 
   // the manifest is served as its VALIDATED projection, not the raw file —
   // this is where "invalid rows are excluded from the served rail" is true.

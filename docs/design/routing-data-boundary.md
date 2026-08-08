@@ -54,7 +54,7 @@ without a row" is a fact about the data flow, not a promise a guard checks.
   fail if you do this.
 - **Handlers take `request`, not `u`.** Widening the handler signature to pass
   the URL object hands every handler a pathname again.
-- **`resolveApi` lives in `app/verbs.mjs`, not beside the table.** The grammar
+- **`matchApi` and `routeRequest` live in `app/verbs.mjs`, not beside the table.** The grammar
   module is the routing definition; a special case must be written into the
   definition of routing itself, where the `routes=[]` property test and review
   can see it.

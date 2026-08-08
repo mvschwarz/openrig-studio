@@ -327,6 +327,35 @@ test("starts and warn-firsts when the manifest is INVALID at boot", async (t) =>
   assert.equal(m.recoveries, 0, "booting broken is not a recovery");
 });
 
+test("VALID JSON that is not a manifest OBJECT still warn-firsts, never crashes boot", async (t) => {
+  // review.r2 RS-C2: the invalid-at-boot control above uses only SYNTACTICALLY
+  // invalid JSON, which hits the guarded JSON.parse catch. `null` is valid JSON,
+  // parses fine, then `null.surfaces` THREW at load — the process exited 1 and
+  // /api/contract never came up, the exact crash warn-first exists to prevent.
+  // The whole semantic-invalid family (null, primitives, arrays, and a plain
+  // object missing surfaces[]) must warn-first: named error, empty rail, still
+  // serving — one repro value is not the family.
+  for (const [raw, why] of [
+    ["null\n", "null"],
+    ["42", "a number"],
+    ['"a string"', "a string"],
+    ["[1, 2, 3]", "an array"],
+    ['{ "not_surfaces": true }', "an object with no surfaces[]"],
+  ]) {
+    const { dir, manifestPath } = instance(ONE);
+    fs.writeFileSync(manifestPath, raw);
+    const srv = await start(dir);
+    try {
+      const m = await srv.contract();
+      assert.equal(m.state, "invalid", `${why}: manifest state is not "invalid"`);
+      assert.ok(m.errors[0], `${why}: no named error`);
+      assert.equal(await srv.status("/api/contract"), 200,
+        `${why}: /api/contract is not serving — warn-first was bypassed and the runtime likely crashed at boot`);
+      assert.equal(await srv.status("/"), 200, `${why}: the shell is not serving`);
+    } finally { srv.stop(); }
+  }
+});
+
 test("starts when the manifest's whole directory is missing at boot", async (t) => {
   // The most hostile boot: mid-redeploy, the tree is not there yet.
   const { dir, manifestPath } = instance(ONE);

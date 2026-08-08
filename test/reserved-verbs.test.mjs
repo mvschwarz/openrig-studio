@@ -290,8 +290,8 @@ test("BYPASS CONTROL: a raw handler that does not go through the table cannot la
   //     must NAME the planted line — otherwise the table is not the only door and
   //     this test fails, which is the correct verdict on that design.
   const src = read("app", "serve-studio.mjs");
-  const anchor = /const u = new URL\(req\.url[^\n]*\n/;
-  assert.match(src, anchor, "handleRequest's entry moved — re-anchor this control before trusting it");
+  const anchor = /const u = decision\.static\.url;\n/;
+  assert.match(src, anchor, "handleRequest's static-flow entry moved — re-anchor this control before trusting it");
 
   const forms = [
     ["exact", '  if (u.pathname === "/api/qa-raw-exact") return sendJson(res, 200, { ok: true });\n',
@@ -334,12 +334,12 @@ test("UNWRITABILITY CONTROL: sdk-qa's derived-prefix arm at the ordinary place i
   // (the literal arm inside the dispatcher, then the derived-prefix arm built
   // from the public constant) both go at the most ordinary place: the top of
   // the api flow, where the namespace is established. Since round 5 neither
-  // `u` nor `API_PREFIX` is a binding there — routing lives in resolveApi and
+  // `u` nor `API_PREFIX` is a binding there — routing lives in matchApi/routeRequest and
   // the api flow holds no pathname — so both plants must fail to EVALUATE,
   // naming the missing binding. If either ever boots again, a pathname has
   // been reintroduced into the api flow and the data boundary is gone.
   const src = read("app", "serve-studio.mjs");
-  const ordinary = /const m = matchApi\(req\.url[^\n]*\n/;
+  const ordinary = /const decision = routeRequest\(req\.url[^\n]*\n/;
   assert.match(src, ordinary, "the api flow entry moved — re-anchor this control before trusting it");
 
   const plants = [
@@ -494,6 +494,57 @@ test("the runtime source keeps every /api mention inside the routing surface", (
   assert.deepEqual(violations, [],
     "an /api reference lives outside the fenced routing surface — routes are added as TABLE ROWS, " +
     "never as raw arms; a raw arm serves without being enumerated or classified");
+});
+
+// Count `req.url` reads in CODE, ignoring comment lines — the two comment
+// mentions in the routing-boundary explainer are not reads.
+function reqUrlReads(src) {
+  return src.split("\n").filter((line) => !/^\s*(\/\/|\*)/.test(line) && line.includes("req.url"));
+}
+
+test("RS-C1: req.url is read exactly ONCE, at the single routing consumer", () => {
+  // review.r2 RS-C1: matchApi put the PATHNAME behind a data boundary, but the
+  // raw `req.url` string was still readable at handleRequest's entry, one
+  // consumer earlier — a pre-lookup arm deriving the prefix from fragments
+  // (`"/" + "api/"`) served a 200 the table never saw and the literal fence
+  // never named. The fix routes through a single consumer (routeRequest) that
+  // returns DATA; this guard makes that structural: req.url read more than once
+  // means a second consumer exists, which is where a pre-lookup arm lives.
+  const reads = reqUrlReads(read("app", "serve-studio.mjs"));
+  assert.equal(reads.length, 1,
+    `req.url is read ${reads.length} times; exactly one (the routeRequest call) is allowed — ` +
+    `a second read is the pre-lookup channel RS-C1 exploited:\n${reads.join("\n")}`);
+  assert.match(reads[0], /routeRequest\(req\.url/,
+    "the one req.url read is not the routeRequest call — the routing consumer moved");
+});
+
+test("RS-C1 DISCRIMINATOR: the fragment-derived pre-lookup arm is caught where req.url is available", async () => {
+  // The discriminator planted WHERE req.url IS available — the entry of
+  // handleRequest, before the routing consumer — which is exactly where the
+  // /api-literal fence and the u/API_PREFIX unwritability controls do NOT plant.
+  // review.r2's exact repro: an arm reading req.url, with the prefix derived
+  // from fragments so no contiguous /api literal appears. Reproduced on the
+  // unfixed shape it served 200 / unlisted / fence-blind; here it must be caught
+  // by the req.url-once guard, since it introduces a SECOND req.url read.
+  const src = read("app", "serve-studio.mjs");
+  const anchor = /const decision = routeRequest\(req\.url[^\n]*\n/;
+  assert.match(src, anchor, "the routing consumer moved — re-anchor this control before trusting it");
+  const arm = [
+    '  const qaPrefix = "/" + "api/";',
+    '  if (req.url === qaPrefix + "qa-derived-raw") { sendJson(res, 200, { ok: true, derivedRaw: true }); return; }',
+    "",
+  ].join("\n");
+  const planted = src.replace(anchor, (m) => arm + m);
+  assert.notEqual(planted, src, "the plant did not apply");
+
+  // The literal fence alone does NOT catch it — that is the point of RS-C1, and
+  // stating it keeps the req.url-once guard from looking redundant.
+  assert.deepEqual(routingSurfaceViolations(planted), [],
+    "the /api-literal fence unexpectedly caught a fragment-derived arm — re-derive this control");
+  // The req.url-once guard DOES: the planted arm is a second req.url read.
+  const reads = reqUrlReads(planted);
+  assert.ok(reads.length >= 2,
+    "the fragment-derived pre-lookup arm did not register as a second req.url read — the guard would miss it");
 });
 
 test("a PREFIX verb is matched as a prefix, and an exact verb is not", () => {
