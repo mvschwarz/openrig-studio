@@ -228,3 +228,54 @@ test("PROTOTYPE-NAMED root kinds 400 like any unbound kind, never 500", async (t
   // positive control: a real kind still resolves
   assert.equal((await s.declare({ root: "feedback", path: "ok" })).status, 200);
 });
+
+test("an existing FILE is refused as a capture target, at DECLARATION", async (t) => {
+  // QA finding: the check asked whether the path EXISTED and never whether it was
+  // a DIRECTORY, so a regular file at the target was accepted and stored — and the
+  // real consumer then failed `EEXIST … mkdir`. Accepted-but-unperformable, and
+  // this contract puts the refusal at declaration precisely so a consumer cannot
+  // inherit one.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "isfile-"));
+  fs.mkdirSync(path.join(dir, "work"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "work", "shot.png"), "not a directory");
+  const s = await start({ roots: { work: path.join(dir, "work") } });
+  t.after(() => s.stop());
+
+  const r = await s.declare({ root: "work", path: "shot.png" });
+  assert.equal(r.status, 400, "a regular file was accepted as a capture target directory");
+  assert.match(r.body.error, /not a directory/);
+  assert.equal((await s.read()).target, null, "the refused target was stored anyway");
+
+  // positive control: a real directory beside it still resolves
+  fs.mkdirSync(path.join(dir, "work", "real"), { recursive: true });
+  assert.equal((await s.declare({ root: "work", path: "real" })).status, 200,
+    "the directory check refuses directories too");
+});
+
+test("two bindings resolving to the SAME location are ONE location, not ambiguity", async (t) => {
+  // QA medium: `[first, first]` refused as ambiguous. There is only one resolved
+  // location, so there is nothing to be ambiguous between. Two DISTINCT roots
+  // holding the same relative target stay an honest refusal — checked below.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dupe-"));
+  const one = path.join(dir, "one");
+  fs.mkdirSync(path.join(one, "proof"), { recursive: true });
+  const s = await start({ roots: { feedback: [one, one] } });
+  t.after(() => s.stop());
+  const r = await s.declare({ root: "feedback", path: "proof" });
+  assert.equal(r.status, 200, `duplicate bindings refused as ambiguous: ${r.body.error}`);
+  assert.equal(fs.realpathSync(r.body.target.path), fs.realpathSync(path.join(one, "proof")));
+});
+
+test("a SYMLINKED duplicate is also one location", async (t) => {
+  // The same property through a different spelling: two paths that realpath to one
+  // place are one place. Deduping by the RESOLVED target rather than the declared
+  // string is what makes this hold.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dupe-"));
+  const real = path.join(dir, "real");
+  fs.mkdirSync(path.join(real, "proof"), { recursive: true });
+  fs.symlinkSync(real, path.join(dir, "alias"));
+  const s = await start({ roots: { feedback: [real, path.join(dir, "alias")] } });
+  t.after(() => s.stop());
+  assert.equal((await s.declare({ root: "feedback", path: "proof" })).status, 200,
+    "a symlinked duplicate binding was treated as a second location");
+});

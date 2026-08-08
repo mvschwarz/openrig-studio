@@ -34,6 +34,21 @@ namespace are the provider's own and need no permission. Shadowing a documented
 name with a different answer is the one move that is out of bounds, because it
 turns a contract into a coin flip decided by what happens to be installed.
 
+**SUBSTITUTING AN IMPLEMENTATION INHERITS ITS WHOLE CONTRACT, INCLUDING THE PARTS
+YOUR OWN CONSUMER NEVER EXERCISES.** This is the half that is easy to miss, because
+nothing in your app fails while you build it.
+
+Measured: a provider replaced `/api/files/read` and returned `raw` for `html` with
+no `content`. The SDK's own runtime has always listed `html` among its kinds, and
+the shared file viewer renders html into a sandboxed `srcdoc` — so the viewer
+opened, reported `kind: "html"`, and rendered nothing. Every part looked healthy:
+the verb answered, the kind was right, the component was correct.
+
+A provider author has no way to discover which documented behaviours they silently
+dropped, so the rule has to be stated rather than inferred: **implement the verb as
+documented, not as your own surfaces happen to use it.** The kinds, the degraded
+shapes and the error contracts are all part of the name you took.
+
 Three verbs cannot be substituted at all, and it is worth knowing why they are
 different in kind rather than more important: `GET /api/contract`,
 `GET /api/events` and `GET /api/factory/state` are the runtime **describing

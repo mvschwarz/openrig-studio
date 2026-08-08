@@ -51,7 +51,7 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
 ```json
 {
   "contractVersion": "0.1",
-  "runtime": { "name": "openrig-studio", "version": "<this runtime package's version, or null>", "flavor": "reference-fixture", "boot": "<opaque id, stable for this process>" },
+  "runtime": { "name": "openrig-studio", "version": "<this runtime package's version, or null>", "flavor": "reference-fixture", "boot": "<opaque id, stable for this process>", "routes": ["/api/contract", "…"] },
   "capabilities": ["contract.meta", "observe.factory-state", "stream.events", "files.read",
                    "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write",
                    "annotations.read", "annotations.write", "capture.target"],
@@ -105,6 +105,13 @@ Two schemas sit beside them: `surface-row.schema.json` for a manifest row, and
   known*; a runtime that states a version it was told rather than one it read will
   eventually state the wrong one, and a wrong version is worse than an absent one
   precisely because it is stated to be acted on.
+
+- `runtime.routes` — the `/api` verbs this runtime **actually serves**, observed
+  from its own router rather than declared beside it. Informational, and it exists
+  so a consumer (or a test) can ask what is served instead of inferring it: a list
+  maintained separately from the routing table drifts from it, and the drift is
+  silent in the direction that matters — a verb that exists and is unclassified is
+  routed away from the runtime that implements it.
 
 - `runtime.boot` — an opaque id, **stable for the life of this process and different
   after a restart**. It is how a surface knows its own CODE changed: a studio copies

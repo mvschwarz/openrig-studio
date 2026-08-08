@@ -181,7 +181,7 @@ test("zero-config: the contract answer is additive — one field gained, none lo
   // requires each to be DECLARED here, so a third field appearing unannounced
   // still fails. `version` was added 2026-08-06 and documented in contract-meta.md
   // in the same change — this line is the record of that intent, not a rubber stamp.
-  assert.deepEqual(gained.sort(), ["boot", "version"],
+  assert.deepEqual(gained.sort(), ["boot", "routes", "version"],
     `unexpected addition(s) to the runtime block: ${gained.join(", ")}`);
   assert.deepEqual(lost, [], `the runtime block LOST field(s): ${lost.join(", ")}`);
 });

@@ -23,7 +23,7 @@ import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { composeRail, writeOverlayManifest } from "./compose-rail.mjs";
-import { RUNTIME_OWNED_VERBS } from "../app/verbs.mjs";
+import { RUNTIME_OWNED_VERBS, isRuntimeOwned } from "../app/verbs.mjs";
 import { resolveRoster, resolveRig, DECLARED } from "./seat-roster.mjs";
 
 const STUDIO = path.resolve(process.env.OPENRIG_STUDIO_DIR || process.cwd());
@@ -626,7 +626,11 @@ const studioServer = http.createServer((req, res) => {
   // websocket upgrade as well as HTTP, handled below.
   if (seatPort && (url.pathname === "/chat" || url.pathname.startsWith("/chat/"))) return proxyTerminal(req, res);
   for (const [prefix, p] of serves) if (url.pathname.startsWith(prefix)) return proxy(p)(req, res);
-  if (url.pathname.startsWith("/api/") && !SDK_OWNED.has(url.pathname)) {
+  // PREFIX-AWARE, not Set.has(). An exact-only check cannot express a
+  // parameterized runtime verb, and the verb vocabulary this shares with providers
+  // says a trailing `/` is a prefix — so an exact check would let the next
+  // /api/thing/<id> route fall through to a sole provider that never declared it.
+  if (url.pathname.startsWith("/api/") && !isRuntimeOwned(url.pathname)) {
     const p = routeVerb(url.pathname) ?? soleProvider;
     if (p) return proxy(p)(req, res);
   }

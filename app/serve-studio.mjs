@@ -20,7 +20,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup } from "./verbs.mjs";
+import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches } from "./verbs.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -146,6 +146,34 @@ const CAPABILITIES = ["contract.meta", "observe.factory-state", "stream.events",
 const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json", ".css": "text/css",
   ".js": "text/javascript", ".mjs": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png",
   ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8" };
+
+// THE ROUTING TABLE IS THE CLASSIFICATION SOURCE.
+//
+// Every `/api` arm goes through `serves()`, which MATCHES using the verb grammar
+// (a trailing `/` is a prefix) and RECORDS the verb it matched on. So the set of
+// routes this runtime serves is OBSERVED FROM THE ROUTER ITSELF rather than
+// approximated by reading the file.
+//
+// The previous guard scanned source with a regex that recognised only
+// `u.pathname === "..."`. A live `startsWith("/api/qa-added-prefix/")` route was
+// INVISIBLE to it: the route answered 200 while the classification suite passed,
+// because a route the scanner cannot see is a route the classifier is never asked
+// about. A regex over source is an approximation of the router; this is the router.
+//
+// SERVED_ROUTES is exposed at `/api/contract` under `runtime.routes` so a test can
+// compare what is SERVED against what is CLASSIFIED without parsing anything.
+const SERVED_ROUTES = new Set();
+const serves = (pathname, verb) => {
+  SERVED_ROUTES.add(verb);
+  return verbMatches(verb, pathname);
+};
+
+// ⚠️ THE CHAIN IS ORDERED, SO A MATCH STOPS IT. A request that matches an early
+// arm never reaches the later ones, and they would go unregistered — an observed
+// set that is silently PARTIAL is worse than a declared one, because it looks
+// derived. So the chain is walked ONCE at boot with a path that matches nothing,
+// which reaches every arm and registers all of them before anyone can read it.
+const ENUMERATE_PATH = "/api/\u0000enumerate-routes";
 
 const sendJson = (res, code, obj) =>
   { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
@@ -903,12 +931,38 @@ function resolveInRoot(kind, rel) {
     const rest = path.relative(probe, target);
     const resolved = rest ? path.join(real, rest) : real;
     if (resolved !== baseReal && !resolved.startsWith(baseReal + path.sep)) continue;
-    candidates.push({ base: baseReal, path: resolved, exists: fs.existsSync(resolved) });
+    // EXISTS IS NOT ENOUGH — IT MUST BE A DIRECTORY. A capture target is a place
+    // to write files into, and an existing regular file at that path was accepted
+    // and stored: the declaration returned 200 and the real consumer then failed
+    // with EEXIST on mkdir. Accepted-but-unperformable, and this contract puts the
+    // refusal AT DECLARATION precisely so a consumer cannot inherit one.
+    let stat = null;
+    try { stat = fs.statSync(resolved); } catch {}
+    candidates.push({ base: baseReal, path: resolved,
+      exists: !!stat, isDir: !!stat && stat.isDirectory() });
   }
   if (!candidates.length) {
     return { ok: false, error: `'${rel}' resolves outside every location bound to '${kind}'` };
   }
-  const existing = candidates.filter((c) => c.exists);
+  // A path that exists as a NON-directory is a refusal, not a candidate to skip:
+  // skipping it would silently resolve to a different binding and land captures
+  // somewhere the caller did not name.
+  const blocked = candidates.filter((c) => c.exists && !c.isDir);
+  if (blocked.length && !candidates.some((c) => c.isDir)) {
+    return { ok: false, error: `'${rel}' exists under '${kind}' but is not a directory ` +
+      `(${blocked[0].path}) — a capture target is a directory to write into` };
+  }
+  // DEDUPE BY RESOLVED PATH before counting ambiguity. Two bindings that resolve to
+  // the SAME real location are one location: `[first, first]`, or two paths through
+  // a symlink, are not a genuine choice. Two DISTINCT roots holding the same
+  // relative target remain an honest refusal.
+  const seen = new Set();
+  const existing = candidates.filter((c) => {
+    if (!c.isDir) return false;
+    if (seen.has(c.path)) return false;
+    seen.add(c.path);
+    return true;
+  });
   // AMBIGUOUS IS A REFUSAL, not a coin flip. If the same relative path exists
   // under two bindings there is no honest way to choose, and choosing silently is
   // the defect this whole function was rewritten for.
@@ -990,10 +1044,20 @@ loadManifest();
 // this line exists.
 loadAnnotations();
 
-http.createServer(async (req, res) => {
+// WALK THE CHAIN ONCE, so `runtime.routes` is COMPLETE rather than "whatever has
+// been hit so far". The sentinel matches no arm, so every `serves()` runs and
+// registers. A partial observed set would look derived and be a lie of exactly the
+// kind this mechanism exists to remove.
+await handleRequest(
+  { url: ENUMERATE_PATH, method: "GET", headers: {}, on() {}, once() {}, removeListener() {} },
+  { writeHead() {}, end() {}, write() {}, setHeader() {}, on() {}, once() {} },
+).catch(() => {});
+
+
+const handleRequest = async (req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
   try {
-    if (u.pathname === "/api/focus") {
+    if (serves(u.pathname, "/api/focus")) {
       if (req.method === "POST") {
         const raw = await readBody(req);
         let patch;
@@ -1011,7 +1075,7 @@ http.createServer(async (req, res) => {
       const marker = focusMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, focus: focusRecord });
     }
-    if (u.pathname === "/api/drive") {
+    if (serves(u.pathname, "/api/drive")) {
       if (req.method === "POST") {
         const raw = await readBody(req);
         let op;
@@ -1028,7 +1092,7 @@ http.createServer(async (req, res) => {
       const marker = driveMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, op: driveOp });
     }
-    if (u.pathname === "/api/capture-target") {
+    if (serves(u.pathname, "/api/capture-target")) {
       if (req.method === "POST") {
         const raw = await readBody(req);
         let body;
@@ -1049,7 +1113,7 @@ http.createServer(async (req, res) => {
       }
       return sendJson(res, 200, { ok: true, target: captureTarget });
     }
-    if (u.pathname === "/api/annotations") {
+    if (serves(u.pathname, "/api/annotations")) {
       if (req.method === "POST") {
         const raw = await readBody(req);
         let body;
@@ -1070,7 +1134,7 @@ http.createServer(async (req, res) => {
       const scope = u.searchParams.get("scope");
       return sendJson(res, 200, { ok: true, scope: scope || null, records: scope ? (annotations.get(scope) || []) : [] });
     }
-    if (u.pathname === "/api/contract") {
+    if (serves(u.pathname, "/api/contract")) {
       return sendJson(res, 200, {
         contractVersion: CONTRACT_VERSION,
         // VERSION IS READ, NEVER TYPED. A runtime that states its own version from a
@@ -1079,7 +1143,12 @@ http.createServer(async (req, res) => {
         // consumers can act on it, which makes a stale value worse than none. Read
         // from the package this file is part of; null if that cannot be read, because
         // "I do not know" is an answer and a guess is not.
-        runtime: { name: "openrig-studio", version: SDK_VERSION, flavor: "reference-fixture", boot: BOOT_ID },
+        runtime: { name: "openrig-studio", version: SDK_VERSION, flavor: "reference-fixture", boot: BOOT_ID,
+          // OBSERVED from the router, not declared: every verb an arm has matched
+          // on. A test compares this against the classification, so a route that
+          // exists but is unclassified is caught by the runtime's own account of
+          // itself rather than by reading the source.
+          routes: [...SERVED_ROUTES].sort() },
         capabilities: CAPABILITIES,
         // Inspectable without posting: an agent can ask whether anything is
         // listening before it drives, rather than learning from a no-op.
@@ -1106,20 +1175,20 @@ http.createServer(async (req, res) => {
         manifest: manifestReport(),
       });
     }
-    if (u.pathname === "/api/factory/state") return sendJson(res, 200, factoryState());
-    if (u.pathname === "/api/events") {
+    if (serves(u.pathname, "/api/factory/state")) return sendJson(res, 200, factoryState());
+    if (serves(u.pathname, "/api/events")) {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
       res.write(`: connected\n\n`);
       sseClients.add(res);
       req.on("close", () => sseClients.delete(res));
       return;
     }
-    if (u.pathname === "/api/files/tree") {
+    if (serves(u.pathname, "/api/files/tree")) {
       const t = filesTree(u.searchParams.get("dir"));
       return t ? sendJson(res, 200, { ok: true, ...t })
         : sendJson(res, 400, { ok: false, error: "path outside the files root — files verbs are pinned to the runtime's files-root" });
     }
-    if (u.pathname === "/api/files/read") {
+    if (serves(u.pathname, "/api/files/read")) {
       const r = insideRoot(u.searchParams.get("path") || "");
       if (!r || !fs.existsSync(r) || fs.statSync(r).isDirectory())
         return sendJson(res, 404, { ok: false, error: "not found or outside the files root" });
@@ -1129,14 +1198,14 @@ http.createServer(async (req, res) => {
           content: fs.readFileSync(r, "utf8"), mtime: fs.statSync(r).mtimeMs });
       return sendJson(res, 200, { ok: true, kind, raw: "/api/files/raw?path=" + encodeURIComponent(r), mtime: fs.statSync(r).mtimeMs });
     }
-    if (u.pathname === "/api/files/raw") {
+    if (serves(u.pathname, "/api/files/raw")) {
       const r = insideRoot(u.searchParams.get("path") || "");
       if (!r || !fs.existsSync(r)) { res.writeHead(404); return res.end(); }
       res.writeHead(200, { "content-type": TYPES[path.extname(r).toLowerCase()] || "application/octet-stream",
         "content-length": fs.statSync(r).size, "cache-control": "no-store" });
       return fs.createReadStream(r).pipe(res);
     }
-    if (u.pathname === "/api/files/search") {
+    if (serves(u.pathname, "/api/files/search")) {
       const q = (u.searchParams.get("q") || "").trim();
       return sendJson(res, 200, { ok: true, hits: q.length < 2 ? [] : filesSearch(q) });
     }
@@ -1255,7 +1324,9 @@ http.createServer(async (req, res) => {
   }
   res.writeHead(200, { "content-type": TYPES[path.extname(file)] || "application/octet-stream", "cache-control": "no-store" });
   res.end(fs.readFileSync(file));
-}).listen(PORT, "127.0.0.1", () => {
+};
+
+http.createServer(handleRequest).listen(PORT, "127.0.0.1", () => {
   console.log(`openrig studio runtime: http://127.0.0.1:${PORT}/  (contract v${CONTRACT_VERSION})`);
   console.log(`fixtures: ${FIXTURES}`);
   const report = manifestReport();

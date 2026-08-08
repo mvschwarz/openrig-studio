@@ -56,3 +56,43 @@ export const openVocabMap = (entries = []) => {
 /** Own-property lookup. Returns `undefined` for anything inherited. */
 export const lookup = (map, key) =>
   (map && typeof key === "string" && Object.hasOwn(map, key)) ? map[key] : undefined;
+
+/**
+ * Does a request path match a declared verb?
+ *
+ * **A verb ending in `/` is a PREFIX**, exactly as `app-manifest.md` defines it for
+ * provider verbs — `/api/export-status/` matches `/api/export-status/<jobId>`.
+ * Anything else matches exactly.
+ *
+ * This exists because the compositor matched reserved verbs with `Set.has()`, i.e.
+ * EXACT ONLY, while the verb contract it shares a vocabulary with supports
+ * prefixes. A runtime-owned parameterized route would therefore have fallen
+ * through to a sole provider — the original shadowing defect, reopened by a shape
+ * the guard could not express.
+ */
+export const verbMatches = (declared, pathname) =>
+  declared.endsWith("/") ? pathname.startsWith(declared) : pathname === declared;
+
+/** True when any runtime-owned verb claims this path. */
+export const isRuntimeOwned = (pathname) =>
+  RUNTIME_OWNED_VERBS.some((v) => verbMatches(v, pathname));
+
+/**
+ * Every `/api/` route a runtime source actually serves, in EVERY form it can be
+ * written.
+ *
+ * **DISCOVERY IS THE STAGE THAT MATTERS AND IT WAS THE STAGE NOT UNDER TEST.** The
+ * scanner recognised only `u.pathname === "/api/x"`. A live route written
+ * `u.pathname.startsWith("/api/x/")` was INVISIBLE: it answered 200 while the
+ * classification suite passed, because a route the scanner cannot see is a route
+ * the classifier is never asked about.
+ *
+ * Shared with the test rather than written there, so the thing under test and the
+ * thing that runs are the same function.
+ */
+export function discoverApiRoutes(src) {
+  const exact = [...src.matchAll(/u\.pathname === "(\/api\/[^"]+)"/g)].map((m) => m[1]);
+  const prefix = [...src.matchAll(/u\.pathname\.startsWith\("(\/api\/[^"]+)"\)/g)].map((m) => m[1]);
+  // `/api/` itself is the catch-all 404 arm, not a served verb.
+  return [...new Set([...exact, ...prefix])].filter((r) => r !== "/api/");
+}
