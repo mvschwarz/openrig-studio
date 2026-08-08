@@ -569,6 +569,30 @@ test("MF1 CONTROL: every semantic-equivalent raw-url access at the adapter entry
   }
 });
 
+test("MF1 CONFINEMENT: a handler cannot read the request URL through the response object", async () => {
+  // review.r2 MF1 re-round: the ctx confinement was real, but handlers still
+  // received Node's `res`, which back-references the request as `res.req` — an
+  // ordinary handler read the url through `res.req.url` (reproduced on the prior
+  // tip). The response the handler receives is now a FACADE that exposes only
+  // response methods and retains no reference to the request. This control plants
+  // the back-reference read into a real handler, boots, and asserts the url is
+  // unreachable through every path off the response object.
+  const src = read("app", "serve-studio.mjs");
+  const anchor = 'return sendJson(res, 200, { ok: true, hits: q.length < 2 ? [] : filesSearch(q) });';
+  assert.ok(src.includes(anchor), "the files/search handler moved — re-anchor this control before trusting it");
+  const planted = src.replace(anchor,
+    'return sendJson(res, 200, { ok: true, hits: [], ' +
+    'qaLeak: (res.req && res.req.url) || (res.socket && res.socket.parser && res.socket.parser.incoming && res.socket.parser.incoming.url) || (res.connection && res.connection.parser) || null });');
+  assert.notEqual(planted, src, "the leak plant did not apply");
+
+  const { statuses, bodies } = await bootMutated(planted, ["/api/files/search?secret=leak-me"]);
+  assert.equal(statuses["/api/files/search?secret=leak-me"], 200, "the planted handler did not answer");
+  const body = JSON.parse(bodies["/api/files/search?secret=leak-me"]);
+  assert.equal(body.qaLeak, null,
+    `a handler read the request URL through the response object (${JSON.stringify(body.qaLeak)}) — ` +
+    `the confinement leaks around ctx via the response's request back-reference`);
+});
+
 test("I6: /api/files/raw honours the stable error contract — 4xx JSON, and a directory is refused before any 200", async () => {
   // review.r2 IMPORTANT: a bare empty 404 violated "all client errors are 4xx
   // JSON { ok:false, error }", and a directory passed existsSync, got 200 headers

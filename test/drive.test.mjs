@@ -396,11 +396,22 @@ test("SETTLE-ACK is BOUNDED: a future or foreign generation cannot be acked", as
   const foreign = await s.readAt("A", { applied: "2" });
   assert.equal(foreign.appliedGen, 0, "a generation recorded for another surface was acked on this one");
 
-  // The legitimate ack (== the recorded gen for A) is accepted and monotonic.
+  // The legitimate ack (a gen recorded for A) is accepted and monotonic.
   const ok = await s.readAt("A", { applied: "1" });
-  assert.equal(ok.appliedGen, 1, "a valid ack bounded to the recorded generation was refused");
+  assert.equal(ok.appliedGen, 1, "a valid ack of a recorded generation was refused");
   const back = await s.readAt("A", { applied: "0" });
   assert.equal(back.appliedGen, 1, "appliedGen went backwards — monotonicity lost");
+
+  // THE INTERLEAVED DISCRIMINATOR (sdk-qa re-round): A=1, B=2, A=3. Gen 2 is
+  // below A's latest recorded gen (3) but was NEVER recorded for A — membership,
+  // not just an upper bound. Acking 2 on A must be refused; acking 3 (A's own)
+  // accepted.
+  await s.driveTo("A", { play: true }); // A now has gen 3 (B's gen 2 sits between)
+  const interleaved = await s.readAt("A", { applied: "2" });
+  assert.equal(interleaved.appliedGen, 1,
+    "gen 2 (recorded for B, below A's latest) was acked on A — monotonic+bounded is not membership");
+  const own = await s.readAt("A", { applied: "3" });
+  assert.equal(own.appliedGen, 3, "A's own recorded generation 3 was refused");
 });
 
 test("SETTLE-ACK: appliedGen exposes a real posted-but-not-yet-applied window", async (t) => {

@@ -25,12 +25,18 @@ never holds a pathname at all.
 - **The raw request is CONFINED to the routing adapter** (MF1, sdk-qa).
   `handleRequest` references `req` only to route (`routeRequest(req.url, …)`) and
   to build a handler `ctx`. Handlers receive
-  `{ method, headers, searchParams, verb, rest, readBody, onClose }` — **no url
-  and no `req`** — so response-capable handler code cannot reach the raw request
-  in ANY spelling (`req.url`, `req["url"]`, destructuring, aliasing).
-  **This is the mechanism: the boundary is that the url is not in scope, not that
-  a guard forbids one spelling of reading it.** An earlier fix counted the literal
-  `req.url` and a property-access spelling walked straight past it.
+  `{ method, headers, searchParams, verb, rest, readBody, onClose }` — no url and
+  no `req` — **and a RESPONSE FACADE, not the raw `res`.** The facade matters:
+  Node's `ServerResponse` back-references the request as `res.req`, so a handler
+  holding the real `res` could read `res.req.url` around the ctx — the ctx
+  confinement was real but the response object leaked. The facade exposes only
+  `writeHead`/`setHeader`/`write`/`end`/`pipeFrom`, closes over `res` in a scope
+  the handler cannot reach, and every method returns the facade, a primitive, or
+  `undefined` — never `res`. So **no object in handler scope retains the
+  request.** This is the mechanism: the boundary is that neither the url nor
+  anything reaching it is in handler scope. (Two earlier fixes were narrower — one
+  counted the literal `req.url` and a property-access spelling walked past it;
+  one removed `req` from ctx but left the request reachable through `res.req`.)
 - Handlers receive `ctx`, never a pathname or a URL object. A handler needing
   path data uses `rest`, which is already scoped to its own matched verb.
 - `handleRequest` calls `routeRequest` and dispatches the indexed row. Neither
@@ -60,9 +66,11 @@ without a row" is a fact about the data flow, not a promise a guard checks.
   is live while API requests are in flight — the exact material of the round-5
   finding. The unwritability control in `test/reserved-verbs.test.mjs` will
   fail if you do this.
-- **Handlers take `ctx`, not `req` or `u`.** Widening a handler back to
-  `(request, req, res)` — or passing the URL object — hands it the raw request
-  and its url again, and the MF1 boundary is gone. The confinement guard fails.
+- **Handlers take `ctx` and a response FACADE, not `req`, `u`, or the raw `res`.**
+  Widening a handler back to `(request, req, res)`, passing the URL object, or
+  handing it the raw `res` (whose `res.req` back-references the request) all
+  reopen the MF1 leak. The confinement guard and the response-back-reference
+  control fail.
 - **`matchApi` and `routeRequest` live in `app/verbs.mjs`, not beside the table.** The grammar
   module is the routing definition; a special case must be written into the
   definition of routing itself, where the `routes=[]` property test and review
@@ -83,6 +91,10 @@ exist to catch a change that reintroduces it.
   `req`, so the identifier count catches the property-access equivalents the old
   `req.url` text-match missed (MF1). Its control plants literal, bracket,
   destructured, and aliased raw-url reads and asserts each is caught.
+- **response-back-reference control** (`test/reserved-verbs.test.mjs`): plants a
+  handler that tries to read the url through the response object (`res.req.url`,
+  the socket's parser, the connection) and asserts every path yields nothing —
+  the runtime proof that the facade retains no reference to the request.
 - **Unwritability control** (`test/reserved-verbs.test.mjs`): plants sdk-qa's
   round-4 literal arm and round-5 derived-prefix arm at the top of the API flow
   and asserts each detonates as a `ReferenceError` naming the absent binding —

@@ -836,7 +836,11 @@ let driveSeq = 0;
 let driveReads = 0;           // total polls across all surfaces (contract report)
 const driveSlot = (surface) => {
   let slot = driveSlots.get(surface);
-  if (!slot) { slot = { op: null, appliedGen: 0, reads: 0 }; driveSlots.set(surface, slot); }
+  // `recorded` is the set of generations actually recorded FOR THIS surface,
+  // above its applied watermark — an ack must be a MEMBER of it, not merely
+  // monotonic and below the latest gen. `gen` is global, so A=1, B=2, A=3 leaves
+  // A's recorded set {1,3}: acking 2 (B's gen) is a foreign gen and refused.
+  if (!slot) { slot = { op: null, appliedGen: 0, reads: 0, recorded: new Set() }; driveSlots.set(surface, slot); }
   return slot;
 };
 // Per-surface marker: a surface watches its OWN slot's latest generation.
@@ -861,6 +865,7 @@ function writeDrive(surface, op) {
   driveSeq += 1;
   const slot = driveSlot(surface);
   slot.op = { ...op, gen: driveSeq, at: new Date().toISOString() };
+  slot.recorded.add(driveSeq); // this generation IS recorded for this surface
   // ACCEPTED IS NOT DELIVERED, AND THE CALLER FINDS OUT HERE. `listening` is
   // false when THIS surface has never polled: the op is recorded and that surface
   // will not act on it. Reported in the response the caller is already reading.
@@ -1127,16 +1132,19 @@ const API_ROUTES = [
       const slot = driveSlot(surface);
       slot.reads += 1;
       driveReads += 1;
-      // AN ACK IS BOUNDED TO A GENERATION ACTUALLY RECORDED FOR THIS SURFACE, and
-      // monotonic within that bound (review.r2 MF2). Without the upper bound a
-      // caller that knows a surface id could POST `?applied=999999` and move the
-      // acknowledgement permanently ahead of every future op — externally
-      // reachable state mutation that made the record-to-apply gap false without
-      // any apply. A gen above the latest recorded op (a FUTURE gen, or a FOREIGN
-      // gen recorded for another surface, since `gen` is global) is ignored.
+      // AN ACK MUST BE A GENERATION ACTUALLY RECORDED FOR THIS SURFACE — MEMBERSHIP,
+      // not merely monotonic and below the latest gen (review.r2 MF2, re-round).
+      // `gen` is global, so bounding by the surface's own latest gen still admits
+      // a FOREIGN gen: A=1, B=2, A=3 leaves A's recorded set {1,3}, and 2 <= 3 —
+      // acking 2 on A once passed. Now the ack must be IN A's recorded set and
+      // forward of the watermark; a future gen (never recorded) and a foreign gen
+      // (recorded for another surface) are both refused. Once acked, generations
+      // at or below the watermark are pruned — monotonicity keeps them un-ackable.
       const applied = Number(ctx.searchParams.get("applied"));
-      const recorded = slot.op ? slot.op.gen : 0;
-      if (Number.isInteger(applied) && applied > slot.appliedGen && applied <= recorded) slot.appliedGen = applied;
+      if (Number.isInteger(applied) && applied > slot.appliedGen && slot.recorded.has(applied)) {
+        slot.appliedGen = applied;
+        for (const g of slot.recorded) if (g <= slot.appliedGen) slot.recorded.delete(g);
+      }
       const since = ctx.searchParams.get("since");
       const marker = driveMarker(slot);
       return sendJson(res, 200, { ok: true, surface, changed: since === null || since !== marker,
@@ -1266,7 +1274,7 @@ const API_ROUTES = [
       }
       res.writeHead(200, { "content-type": TYPES[path.extname(r).toLowerCase()] || "application/octet-stream",
         "content-length": st.size, "cache-control": "no-store" });
-      return fs.createReadStream(r).pipe(res);
+      return res.pipeFrom(fs.createReadStream(r));
   } },
   { verb: "/api/files/search", handler: (ctx, res) => {
       const q = (ctx.searchParams.get("q") || "").trim();
@@ -1306,7 +1314,23 @@ const handleRequest = async (req, res) => {
           readBody: () => readBody(req),
           onClose: (cb) => req.on("close", cb),
         };
-        await row.handler(ctx, res);
+        // A RESPONSE FACADE, not the raw `res` (MF1, sdk-qa re-round). Node's
+        // ServerResponse back-references the request as `res.req` (and via the
+        // socket), so handing handlers `res` let an ordinary handler read the
+        // url through `res.req.url` — the ctx confinement was real but the
+        // response object leaked around it. This facade exposes ONLY the
+        // response methods handlers use and closes over `res` in a scope they
+        // cannot reach; every method returns `resFacade`, a primitive, or
+        // undefined — NEVER `res` — so no object in handler scope retains the
+        // request. `sendJson(resFacade, …)` works (writeHead + end).
+        const resFacade = {
+          writeHead(...a) { res.writeHead(...a); return resFacade; },
+          setHeader(...a) { res.setHeader(...a); return resFacade; },
+          write(...a) { return res.write(...a); },
+          end(...a) { res.end(...a); },
+          pipeFrom(readable) { readable.pipe(res); },
+        };
+        await row.handler(ctx, resFacade);
       } else sendJson(res, 404, m.notFound);
     } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
     return;
