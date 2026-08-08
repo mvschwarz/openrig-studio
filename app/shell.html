@@ -457,6 +457,9 @@
       const current = frames.get(activeId);
       if (current && e.source === current.contentWindow) {
         const src = e.source;
+        // Echo the caller's id back so concurrent declarations can tell their own
+        // answer from someone else's.
+        const rid = typeof e.data.id === "string" ? e.data.id : null;
         fetch("/api/capture-target", { method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ root: e.data.root ?? null, path: e.data.path ?? null }) })
@@ -466,12 +469,12 @@
             // overflow does: the app is the only party that can adapt, and a
             // declaration that silently did not take is the shape this whole
             // seam exists to avoid.
-            try { src.postMessage({ t: "capture-target-result", ok: !!j?.ok,
+            try { src.postMessage({ t: "capture-target-result", id: rid, ok: !!j?.ok,
               target: j?.target ?? null, error: j?.error ?? null }, "*"); } catch {}
             if (!j?.ok) console.warn(`studio shell: capture target refused — ${j?.error || "unknown reason"}`);
           })
           .catch((err) => {
-            try { src.postMessage({ t: "capture-target-result", ok: false, target: null,
+            try { src.postMessage({ t: "capture-target-result", id: rid, ok: false, target: null,
               error: String(err && err.message || err) }, "*"); } catch {}
           });
       }

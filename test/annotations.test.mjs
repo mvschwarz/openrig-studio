@@ -168,16 +168,15 @@ test("negative control: a MEMORY runtime genuinely loses them, so the test above
     "an unconfigured runtime persisted marks anyway — then the survival test above cannot distinguish file from memory");
 });
 
-test("the annotations verbs are NOT reserved — stored marks are data on the box", async (t) => {
+test("the annotations verbs are NOT reserved — stored marks are data on the box", async () => {
   // The retraction from the focus/drive slice, applied forward rather than
   // relearned. focus and drive answer state held in THIS process and nothing else
   // can answer them. Marks are storage: a real studio should be able to keep them
   // in its own database, exactly as it serves its own real directories.
-  const src = fs.readFileSync(path.join(REPO, "tools", "studio.mjs"), "utf8");
-  const m = src.match(/const SDK_OWNED = new Set\(\[([\s\S]*?)\]\);/);
-  assert.ok(m, "tools/studio.mjs no longer declares SDK_OWNED — this test cannot find what it checks");
-  const reserved = [...m[1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
-  assert.ok(!reserved.includes("/api/annotations"),
+  // SDK_OWNED is DERIVED from app/verbs.mjs now, so read the classification at its
+  // source rather than re-parsing a literal that no longer exists.
+  const { RUNTIME_OWNED_VERBS } = await import("../app/verbs.mjs");
+  assert.ok(!RUNTIME_OWNED_VERBS.includes("/api/annotations"),
     "reserving /api/annotations forbids the substitution that is the point of a provider");
 });
 

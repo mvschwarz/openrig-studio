@@ -478,19 +478,42 @@ export function driveSurface({
 //
 // Resolves to { ok, target, error }. A refusal is worth acting on: the kind may
 // not be bound on this box, which is a configuration answer the app can show.
+let captureSeq = 0;
+
 export function declareCaptureTarget(spec) {
   const { root = null, path = null } = spec || {};
+  // EVERY CALL CARRIES ITS OWN ID. One indistinguishable listener per call meant
+  // every outstanding promise accepted the FIRST result that arrived: two
+  // concurrent declarations both resolved to page A's target, and page B was told
+  // its declaration succeeded carrying the previous screen's path. This helper's
+  // own guidance is to redeclare on every screen load, so rapid navigation is the
+  // expected case rather than an invented one.
+  const id = `ct-${++captureSeq}-${Math.random().toString(36).slice(2, 8)}`;
   return new Promise((resolve) => {
-    const onResult = (e) => {
-      if (e.data?.t !== "capture-target-result") return;
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
       window.removeEventListener("message", onResult);
-      resolve({ ok: !!e.data.ok, target: e.data.target ?? null, error: e.data.error ?? null });
+      clearTimeout(timer);
+      resolve(v);
+    };
+    const onResult = (e) => {
+      // Only the SHELL, and only THIS request. Without the source check any frame
+      // able to postMessage here could answer on the shell's behalf; without the
+      // id, a concurrent declaration's answer is indistinguishable from your own.
+      if (e.source !== parent) return;
+      if (e.data?.t !== "capture-target-result") return;
+      if (e.data.id !== id) return;
+      finish({ ok: !!e.data.ok, target: e.data.target ?? null, error: e.data.error ?? null });
     };
     window.addEventListener("message", onResult);
-    parent.postMessage({ t: "capture-target", root, path }, "*");
-    // A shell that predates this seam never answers. Resolving rather than
-    // hanging keeps an app that awaits this from stalling its own load.
-    setTimeout(() => { window.removeEventListener("message", onResult);
-      resolve({ ok: false, target: null, error: "no answer from the shell" }); }, 4000);
+    parent.postMessage({ t: "capture-target", id, root, path }, "*");
+    // A shell that predates this seam never answers. Resolving rather than hanging
+    // keeps an app that awaits this from stalling its own load — and it is
+    // reported as an unanswered declaration, never as a success.
+    const timer = setTimeout(() => finish({
+      ok: false, target: null, error: "no answer from the shell (timed out)",
+    }), 4000);
   });
 }

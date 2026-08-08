@@ -37,6 +37,17 @@ let host = null;      // the modal element, created once
 let onKey = null;     // the ESC handler, so it can be removed
 let lastFocus = null; // where focus was before opening
 
+// WHICH OPEN IS CURRENT. The modal is SHARED, and a read is async: click a slow
+// file then a fast one and the slow response arrives LAST, writing its body under
+// the newer file's title. For a review viewer that labels one artifact with
+// another artifact's filename — the worst shape available, because it is complete,
+// consistent and wrong.
+//
+// A counter rather than an AbortController because the stale response must be
+// DISCARDED whether or not the fetch can be cancelled: aborting is an
+// optimisation, ignoring is the correctness property.
+let generation = 0;
+
 function sheet() {
   if (document.querySelector("link[data-studio-file-viewer]")) return;
   const link = document.createElement("link");
@@ -149,6 +160,7 @@ function ensureHost() {
 /** Open a file in the modal viewer. Returns when the content has rendered. */
 export async function openFile(path, { title } = {}) {
   const h = ensureHost();
+  const mine = ++generation;
   lastFocus = document.activeElement;
   h.querySelector("[data-fv-name]").textContent = title || base(path);
   h.querySelector("[data-fv-kind]").textContent = "";
@@ -163,11 +175,17 @@ export async function openFile(path, { title } = {}) {
 
   try {
     const doc = await readFile(path);
+    // SUPERSEDED — say so and write nothing. Returning the doc would be a lie of a
+    // different kind (the caller thinks it is on screen), so the result is marked.
+    if (mine !== generation) return { ...doc, superseded: true };
     h.querySelector("[data-fv-icon]").textContent = ICONS[doc.kind] || ICONS.other;
     h.querySelector("[data-fv-kind]").textContent = doc.kind;
     h.querySelector("[data-fv-body]").innerHTML = bodyFor(doc, path);
     return doc;
   } catch (err) {
+    // A stale FAILURE must not overwrite a newer success either — the error pane is
+    // as wrong under the newer title as the body was.
+    if (mine !== generation) throw Object.assign(err, { superseded: true });
     h.querySelector("[data-fv-body]").innerHTML =
       `<p class="fv-error">${esc(err.message)}</p>` +
       `<p class="fv-note">The viewer reached the runtime and was refused, or the file is gone. ` +
@@ -178,6 +196,9 @@ export async function openFile(path, { title } = {}) {
 
 export function closeViewer() {
   if (!host) return;
+  // Invalidate in-flight reads too: a response landing after the modal closed
+  // would otherwise write into a hidden body and be there on the next open.
+  generation++;
   host.classList.remove("open");
   host.querySelector("[data-fv-body]").innerHTML = "";  // stop any playing media
   if (onKey) { window.removeEventListener("keydown", onKey); onKey = null; }

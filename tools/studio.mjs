@@ -23,6 +23,7 @@ import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { composeRail, writeOverlayManifest } from "./compose-rail.mjs";
+import { RUNTIME_OWNED_VERBS } from "../app/verbs.mjs";
 import { resolveRoster, resolveRig, DECLARED } from "./seat-roster.mjs";
 
 const STUDIO = path.resolve(process.env.OPENRIG_STUDIO_DIR || process.cwd());
@@ -582,8 +583,14 @@ const proxyTerminal = (req, res) => {
 // a real substitution case ever appears, is method-scoped routing — a provider
 // declaring WHICH methods it implements and the rest falling through — and that
 // wants its own gate rather than being invented here.
-const SDK_OWNED = new Set(["/api/contract", "/api/factory/state", "/api/events",
-  "/api/focus", "/api/drive"]);
+// KEEP IN STEP WITH `RUNTIME_OWNED_VERBS` IN app/serve-studio.mjs — a committed
+// test asserts this set contains every one of them, because the last time a verb
+// was added here it was not, and a one-provider studio 404'd a verb the public
+// contract advertised while the runtime answered it internally.
+// DERIVED, never restated. The last time this was a literal list, a verb added to
+// the runtime was not added here and a one-provider studio 404'd it publicly while
+// the runtime answered it internally. One declaration, in app/verbs.mjs.
+const SDK_OWNED = new Set(RUNTIME_OWNED_VERBS);
 // A provider is not only its /api/ verbs — byte routes are prefixes, declared
 // by the app. Leaving them out is why media listed and would not play.
 // Routing /api/* to "the first provider" only works with one. With three, the

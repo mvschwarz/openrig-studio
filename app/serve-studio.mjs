@@ -20,6 +20,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup } from "./verbs.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -97,7 +98,13 @@ const BOUND_ROOTS = (() => {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
-    const out = {};
+    // NULL-PROTOTYPE. Root kinds are an OPEN vocabulary, so `constructor` and
+    // `toString` are valid spellings — and on a plain object they are INHERITED,
+    // so an unbound kind named `constructor` returned Object's constructor rather
+    // than undefined and turned an honest 400 into a 500 (`roots is not iterable`).
+    // This class is already guarded in the SDK's other root-binding code; the new
+    // map reintroduced it, which is the same shape as the verb above.
+    const out = openVocabMap();
     for (const [kind, v] of Object.entries(parsed || {})) {
       const list = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string" && x);
       if (list.length) out[kind] = list;
@@ -857,19 +864,34 @@ const insideRoot = (p) => {
 // silent fallback to somewhere else — landing captures in an unexpected
 // directory is worse than not capturing.
 function resolveInRoot(kind, rel) {
-  const roots = BOUND_ROOTS[kind];
-  if (!roots) return { ok: false, error: `no root bound for kind '${kind}' — bind it in studio.json roots{}` };
+  // OWN-PROPERTY ONLY, belt and braces with the null prototype above: either
+  // alone fixes it, and the pair says the intent rather than relying on one.
+  const roots = lookup(BOUND_ROOTS, kind) ?? null;
+  if (!Array.isArray(roots) || !roots.length) return { ok: false, error: `no root bound for kind '${kind}' — bind it in studio.json roots{}` };
   if (typeof rel !== "string" || !rel || path.isAbsolute(rel)) {
     return { ok: false, error: `path must be a non-empty RELATIVE path inside the '${kind}' root` };
   }
+  // WHICH BINDING, when a kind binds several.
+  //
+  // This used to take the FIRST binding whose containment held — and containment
+  // holds for a path that does not exist yet, which is a case that must stay
+  // allowed. So the first location swallowed every relative path and every later
+  // binding was unreachable EVEN WHEN THE TARGET EXISTED THERE: bound
+  // [first, second] with the directory present only in second, it returned 200
+  // resolved to an absent path under first. Accepted-but-misdirected, and this
+  // contract's own line is that landing somewhere unexpected is worse than
+  // refusing.
+  //
+  // So: candidates are gathered from EVERY binding first, and existence decides.
+  const candidates = [];
   for (const base of roots) {
     let baseReal;
     try { baseReal = fs.realpathSync(base); } catch { continue; }
     const target = path.resolve(baseReal, rel);
-    // Resolve the deepest EXISTING ancestor: the target directory legitimately
-    // may not exist yet (a slice's feedback/ before anything was captured), and
-    // realpath on a missing path throws. Walking up is what lets a not-yet-
-    // created directory be validated without accepting one that escapes.
+    // Deepest EXISTING ancestor: the target legitimately may not exist yet (a
+    // slice's feedback/ before anything was captured) and realpath throws on a
+    // missing path. Walking up validates a not-yet-created directory without
+    // accepting one that escapes.
     let probe = target, real = null;
     for (;;) {
       try { real = fs.realpathSync(probe); break; } catch {}
@@ -880,11 +902,24 @@ function resolveInRoot(kind, rel) {
     if (!real) continue;
     const rest = path.relative(probe, target);
     const resolved = rest ? path.join(real, rest) : real;
-    if (resolved === baseReal || resolved.startsWith(baseReal + path.sep)) {
-      return { ok: true, root: kind, base: baseReal, path: resolved };
-    }
+    if (resolved !== baseReal && !resolved.startsWith(baseReal + path.sep)) continue;
+    candidates.push({ base: baseReal, path: resolved, exists: fs.existsSync(resolved) });
   }
-  return { ok: false, error: `'${rel}' resolves outside every location bound to '${kind}'` };
+  if (!candidates.length) {
+    return { ok: false, error: `'${rel}' resolves outside every location bound to '${kind}'` };
+  }
+  const existing = candidates.filter((c) => c.exists);
+  // AMBIGUOUS IS A REFUSAL, not a coin flip. If the same relative path exists
+  // under two bindings there is no honest way to choose, and choosing silently is
+  // the defect this whole function was rewritten for.
+  if (existing.length > 1) {
+    return { ok: false, error: `'${rel}' exists under ${existing.length} locations bound to '${kind}' ` +
+      `(${existing.map((c) => c.base).join(", ")}) — declare a kind that binds one, or remove the ambiguity` };
+  }
+  // Exactly one existing wins. None existing is the create-it-later case, and the
+  // FIRST binding is the deliberate choice there — stated rather than incidental.
+  const chosen = existing[0] ?? candidates[0];
+  return { ok: true, root: kind, base: chosen.base, path: chosen.path, existed: chosen.exists };
 }
 
 // The declared capture target, or null. MODULE STATE — this runtime's own answer

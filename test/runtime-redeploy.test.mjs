@@ -333,6 +333,11 @@ test("starts when the manifest's whole directory is missing at boot", async (t) 
   fs.rmSync(path.dirname(manifestPath), { recursive: true, force: true });
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
   fs.cpSync(path.join(REPO, "app", "serve-studio.mjs"), path.join(dir, SERVER));
+  // THE RUNTIME IS NO LONGER ONE FILE. It imports ./verbs.mjs — the single
+  // declaration of which verbs it owns, shared with the compositor so the two
+  // cannot drift. A harness that copies the server alone gets ERR_MODULE_NOT_FOUND,
+  // which is how this was found rather than by reading.
+  fs.cpSync(path.join(REPO, "app", "verbs.mjs"), path.join(dir, "app", "verbs.mjs"));
 
   const srv = await start(dir);
   t.after(() => srv.stop());

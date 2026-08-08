@@ -163,3 +163,68 @@ test("THIS VERB WRITES NOTHING — the contract still has no write verbs", async
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
 });
+
+test("MULTI-LOCATION ROOT: existence decides the binding, not order", async (t) => {
+  // QA finding. Containment holds for a path that does not exist yet — which must
+  // stay allowed — so the FIRST binding swallowed every relative path and later
+  // bindings were unreachable even when the target existed there. Accepted-but-
+  // misdirected, and this contract's own line is that landing somewhere
+  // unexpected is worse than refusing.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-"));
+  const first = path.join(dir, "first"), second = path.join(dir, "second");
+  fs.mkdirSync(path.join(second, "proof", "shot"), { recursive: true });
+  fs.mkdirSync(first, { recursive: true });
+
+  const s = await start({ roots: { feedback: [first, second] } });
+  t.after(() => s.stop());
+  const r = await s.declare({ root: "feedback", path: "proof/shot" });
+  assert.equal(r.status, 200);
+  assert.equal(fs.realpathSync(r.body.target.path), fs.realpathSync(path.join(second, "proof", "shot")),
+    "resolved to the first binding where the target does NOT exist, ignoring the one where it does");
+  assert.ok(fs.existsSync(r.body.target.path), "resolved to a path that does not exist");
+});
+
+test("multi-location: a target existing NOWHERE still resolves, to the first binding", async (t) => {
+  // The create-it-later case must keep working; this is the positive control that
+  // stops the fix above from becoming "refuse unless it already exists".
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-"));
+  const first = path.join(dir, "first"), second = path.join(dir, "second");
+  fs.mkdirSync(first, { recursive: true }); fs.mkdirSync(second, { recursive: true });
+  const s = await start({ roots: { feedback: [first, second] } });
+  t.after(() => s.stop());
+  const r = await s.declare({ root: "feedback", path: "slice-99/feedback" });
+  assert.equal(r.status, 200, `refused a not-yet-created target: ${r.body.error}`);
+  assert.equal(fs.realpathSync(path.dirname(path.dirname(r.body.target.path))), fs.realpathSync(first));
+});
+
+test("multi-location: AMBIGUOUS refuses rather than picking", async (t) => {
+  // Existing under two bindings has no honest answer, and choosing silently is the
+  // defect this was rewritten for.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-"));
+  const first = path.join(dir, "first"), second = path.join(dir, "second");
+  fs.mkdirSync(path.join(first, "proof"), { recursive: true });
+  fs.mkdirSync(path.join(second, "proof"), { recursive: true });
+  const s = await start({ roots: { feedback: [first, second] } });
+  t.after(() => s.stop());
+  const r = await s.declare({ root: "feedback", path: "proof" });
+  assert.equal(r.status, 400, "picked one of two equally valid locations instead of refusing");
+  assert.match(r.body.error, /exists under 2 locations/);
+});
+
+test("PROTOTYPE-NAMED root kinds 400 like any unbound kind, never 500", async (t) => {
+  // Root kinds are an OPEN vocabulary, so `constructor` is a valid spelling. On a
+  // plain object it is INHERITED — the lookup answered with Object's constructor
+  // and the 400 became a 500. Guarded elsewhere in the SDK already; the newer map
+  // reopened it, which is why the primitive is now shared.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "proto-"));
+  fs.mkdirSync(path.join(dir, "feedback"), { recursive: true });
+  const s = await start({ roots: { feedback: path.join(dir, "feedback") } });
+  t.after(() => s.stop());
+  for (const kind of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+    const r = await s.declare({ root: kind, path: "x" });
+    assert.equal(r.status, 400, `'${kind}' did not 400 — an inherited key answered the lookup`);
+    assert.match(r.body.error, /no root bound/, `'${kind}' 400'd for the wrong reason`);
+  }
+  // positive control: a real kind still resolves
+  assert.equal((await s.declare({ root: "feedback", path: "ok" })).status, 200);
+});

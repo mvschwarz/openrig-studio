@@ -6,6 +6,19 @@ Base: the runtime's own origin (default `http://127.0.0.1:8890`). All routes
 are GET unless noted. Start every integration by reading `GET /api/contract`
 (shape in `contract-meta.md`) and checking `capabilities`.
 
+### Proving a verb: use a SINGLE-PROVIDER composition (stable method)
+
+**A multi-provider studio masks the failure this rule exists for.** With several
+providers installed, a verb the compositor routes away still finds *something* that
+answers, and the surface looks healthy. With one provider, a reserved verb that was
+not reserved goes to the only provider present, which never declared it — and the
+result is a **public 404 over a capability `/api/contract` advertises, while the
+runtime answers 200 internally.**
+
+So a proof for any verb in this document includes a minimal single-provider studio
+**and a public-versus-internal port check**. Measured on a rich dev box, that class
+is invisible.
+
 ## Who may answer a verb (stable)
 
 **The documented shape binds whoever serves it.** In a studio running apps, a
