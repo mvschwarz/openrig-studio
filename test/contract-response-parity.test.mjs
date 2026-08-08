@@ -175,15 +175,17 @@ test("every namespace with a served verb is advertised", async (t) => {
   // doc and the runtime in step with each other; both could still agree while
   // omitting a verb the runtime answers.
   //
-  // Keyed on the ROUTES THE RUNTIME ACTUALLY HANDLES, read out of its source, so a
-  // verb added without a capability fails here rather than being found by whoever
-  // tries to use it.
+  // Keyed on the ROUTES THE RUNTIME ACTUALLY HANDLES, read from its own routing
+  // table (`runtime.routes` at /api/contract), so a verb added without a
+  // capability fails here rather than being found by whoever tries to use it.
+  // This used to be a regex over source recognising only `u.pathname === "..."`;
+  // it broke the moment the arms were rewritten to `serves()` — a regex is an
+  // approximation of the router, and this is the router.
   const s = await start(false);
   t.after(() => s.stop());
 
-  const src = fs.readFileSync(path.join(REPO, "app", "serve-studio.mjs"), "utf8");
-  const routes = [...src.matchAll(/u\.pathname === "(\/api\/[a-z/-]+)"/g)].map((m) => m[1]);
-  assert.ok(routes.length >= 4, `positive control: parsed ${routes.length} routes from the runtime`);
+  const routes = s.response.runtime.routes.map((r) => r.replace(/\/$/, ""));
+  assert.ok(routes.length >= 4, `positive control: the runtime reports ${routes.length} routes`);
 
   // namespace -> the capability prefix that advertises it
   const NAMESPACE = { "/api/contract": "contract", "/api/factory/state": "observe",

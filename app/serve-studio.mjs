@@ -723,10 +723,6 @@ function integrityCheck() {
   }
 }
 
-setInterval(integrityCheck, 1000).unref?.();
-
-setInterval(() => { for (const res of sseClients) { try { res.write(`: heartbeat\n\n`); } catch {} } }, 25000).unref();
-
 // ---- focus: what the user is looking at ------------------------------------
 // Held in memory, not on disk, and that is the point rather than a shortcut: the
 // measured defect is a write verb with no matching read, which forces every
@@ -1023,37 +1019,6 @@ function filesSearch(q) {
 }
 
 // ---- HTTP ------------------------------------------------------------------
-// ---- init: everything above is declarations -------------------------------
-// Ordering here is a correctness property, not a style preference. This block
-// sits after EVERY module binding — verified by a test, not by reading — so
-// startup cannot land in a temporal dead zone no matter what these functions
-// grow to touch later.
-//
-// The weaker arrangement — init partway down, "safe" because the current call
-// graph happens not to reach the later bindings — is a temporal dead zone
-// waiting for the next edit. Hoisting the one binding that trips only moves the
-// tripwire; the position is what makes it safe. Add new startup work HERE, not
-// next to the function it calls.
-watchForChanges();
-loadManifest();
-// Marks written by a previous run of this file-backed runtime. Omitting this call
-// is not a visible failure: writing works, the board looks healthy, and the loss
-// only appears on the next restart. A test restarts the runtime rather than
-// reading back within one process, because a write and a read in the same process
-// are both served by the in-memory map and agree with each other whether or not
-// this line exists.
-loadAnnotations();
-
-// WALK THE CHAIN ONCE, so `runtime.routes` is COMPLETE rather than "whatever has
-// been hit so far". The sentinel matches no arm, so every `serves()` runs and
-// registers. A partial observed set would look derived and be a lie of exactly the
-// kind this mechanism exists to remove.
-await handleRequest(
-  { url: ENUMERATE_PATH, method: "GET", headers: {}, on() {}, once() {}, removeListener() {} },
-  { writeHead() {}, end() {}, write() {}, setHeader() {}, on() {}, once() {} },
-).catch(() => {});
-
-
 const handleRequest = async (req, res) => {
   const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
   try {
@@ -1325,6 +1290,43 @@ const handleRequest = async (req, res) => {
   res.writeHead(200, { "content-type": TYPES[path.extname(file)] || "application/octet-stream", "cache-control": "no-store" });
   res.end(fs.readFileSync(file));
 };
+
+// ---- init: everything above is declarations -------------------------------
+// Ordering here is a correctness property, not a style preference. This block
+// sits after EVERY module binding — verified by a test, not by reading — so
+// startup cannot land in a temporal dead zone no matter what these statements
+// grow to touch later. Being last is NOT the same as being after everything you
+// touch: the walk below calls `handleRequest`, so it must follow that binding
+// specifically, and it once sat in an init block that was "at the bottom" of the
+// declarations it happened to know about while `handleRequest` was declared
+// beneath it. The test asserts both properties — position AND reachability.
+//
+// The weaker arrangement — init partway down, "safe" because the current call
+// graph happens not to reach the later bindings — is a temporal dead zone
+// waiting for the next edit. Hoisting the one binding that trips only moves the
+// tripwire; the position is what makes it safe. Add new startup work HERE, not
+// next to the function it calls.
+watchForChanges();
+loadManifest();
+setInterval(integrityCheck, 1000).unref?.();
+setInterval(() => { for (const res of sseClients) { try { res.write(`: heartbeat\n\n`); } catch {} } }, 25000).unref();
+// Marks written by a previous run of this file-backed runtime. Omitting this call
+// is not a visible failure: writing works, the board looks healthy, and the loss
+// only appears on the next restart. A test restarts the runtime rather than
+// reading back within one process, because a write and a read in the same process
+// are both served by the in-memory map and agree with each other whether or not
+// this line exists.
+loadAnnotations();
+
+// WALK THE CHAIN ONCE, so `runtime.routes` is COMPLETE rather than "whatever has
+// been hit so far". The sentinel matches no arm, so every `serves()` runs and
+// registers. A partial observed set would look derived and be a lie of exactly the
+// kind this mechanism exists to remove. It runs after `handleRequest` — which it
+// calls — and before `.listen()`, so the first real request sees the complete set.
+await handleRequest(
+  { url: ENUMERATE_PATH, method: "GET", headers: {}, on() {}, once() {}, removeListener() {} },
+  { writeHead() {}, end() {}, write() {}, setHeader() {}, on() {}, once() {} },
+).catch(() => {});
 
 http.createServer(handleRequest).listen(PORT, "127.0.0.1", () => {
   console.log(`openrig studio runtime: http://127.0.0.1:${PORT}/  (contract v${CONTRACT_VERSION})`);

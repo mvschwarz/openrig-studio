@@ -480,30 +480,126 @@ test("the SSE change-signal still fires on a manifest change", async (t) => {
 // fourth, the comparison became structural and descends everywhere. Its controls
 // plant a field at all four levels and assert the path each is reported at.
 
-test("startup runs after EVERY module binding, so the TDZ class cannot return", () => {
+// The startup-ordering analysis, extracted so a control can run it against a
+// PLANTED violation. The previous guard asserted POSITION only — "startup after
+// every module binding" — and it invited exactly the fix that reproduces the
+// defect it exists to prevent: startup work was moved "to the bottom" of the
+// init block, below every binding the mover knew about, and directly into the
+// temporal dead zone of a `const` declared beneath it. Being last is not the
+// same as being after everything you TOUCH. So this checks two properties:
+//
+//   REACHABILITY — no module-level executable statement references a `let`/
+//   `const` binding declared later. This is the property whose violation IS the
+//   boot-time ReferenceError, checked against what each statement actually
+//   touches rather than against line order.
+//
+//   POSITION — every executable statement still follows every binding. This is
+//   deliberately broader than reachability: it also covers what the functions
+//   startup CALLS may grow to touch later, which no textual reference scan of
+//   the call site can see.
+//
+// It also recognises EVERY module-level executable statement — bare calls,
+// top-level awaits, method chains — where the old guard matched two whitelisted
+// call names and never saw the statement that carried the defect. A checker that
+// cannot see the statement is a checker nothing runs, for that statement.
+function startupOrderingViolations(src) {
+  const lines = src.split("\n");
+
+  // Module-level bindings (column 0), including simple destructuring.
+  const bindings = []; // { name, line }
+  lines.forEach((line, i) => {
+    const m = line.match(/^(?:const|let)\s+(?:\{([^}]*)\}|\[([^\]]*)\]|([A-Za-z_$][\w$]*))/);
+    if (!m) return;
+    const names = m[3] ? [m[3]]
+      : (m[1] || m[2]).split(",").map((s) => s.split(/[:=]/)[0].trim()).filter(Boolean);
+    for (const name of names) bindings.push({ name, line: i + 1 });
+  });
+
+  // Module-level executable statements (column 0): anything that RUNS at load
+  // time rather than declaring. A statement spans lines until one closes at
+  // column 0 with `;`.
+  const executables = []; // { line, text }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!/^(?:await\s+|[A-Za-z_$][\w$]*\s*[.(])/.test(line)) continue;
+    if (/^(?:import|export|const|let|var|function|class|async\s+function)\b/.test(line)) continue;
+    let text = line;
+    let j = i;
+    while (j < lines.length - 1 && !/;\s*$/.test(lines[j]) ) { j++; text += "\n" + lines[j]; }
+    executables.push({ line: i + 1, text });
+    i = j;
+  }
+
+  const violations = [];
+  for (const ex of executables) {
+    const referenced = new Set(ex.text.match(/[A-Za-z_$][\w$]*/g) || []);
+    for (const b of bindings) {
+      if (b.line > ex.line && referenced.has(b.name)) {
+        violations.push({
+          kind: "reachability", statement: ex.line, binding: b.name, declared: b.line,
+          message:
+            `the statement at line ${ex.line} references '${b.name}', declared at line ${b.line} — ` +
+            `that is a ReferenceError in the temporal dead zone the moment the module loads. ` +
+            `Being last is not the same as being after everything you TOUCH: startup must follow ` +
+            `the bindings it references, so move the STATEMENT below line ${b.line}, not the binding above.`,
+        });
+      }
+    }
+  }
+
+  const lastBinding = Math.max(0, ...bindings.map((b) => b.line));
+  for (const ex of executables) {
+    if (ex.line < lastBinding) {
+      violations.push({
+        kind: "position", statement: ex.line, declared: lastBinding,
+        message:
+          `the statement at line ${ex.line} runs before the last module binding (line ${lastBinding}). ` +
+          `Even if it touches nothing declared later TODAY, the functions it calls can grow a ` +
+          `dependency on a later binding and land in its dead zone — position is the property that ` +
+          `covers what your callees may come to touch. Put startup work in the init block at the ` +
+          `bottom, after every declaration AND after everything it touches.`,
+      });
+    }
+  }
+  return { bindings, executables, violations };
+}
+
+test("startup follows every binding it touches AND every binding, so the TDZ class cannot return", () => {
   // This asserts the STRUCTURE the source comment claims, rather than trusting
-  // the comment. The earlier arrangement put init partway down the module and
-  // was "safe" only because the current call graph happened not to reach the
-  // later bindings — a property that silently expires the moment loadManifest
-  // or watchForChanges grows a new dependency. Hoisting whichever binding
-  // trips only moves the tripwire, so the position is asserted rather than
-  // maintained by care.
-  const src = fs.readFileSync(path.join(REPO, "app", "serve-studio.mjs"), "utf8").split("\n");
+  // the comment. Reachability is checked as well as position because the two
+  // properties fail differently: position says "not at the bottom", reachability
+  // names the exact binding whose dead zone the statement would die in — which
+  // is the message that would have prevented the fifth TDZ from this file.
+  const src = fs.readFileSync(path.join(REPO, "app", "serve-studio.mjs"), "utf8");
+  const { bindings, executables, violations } = startupOrderingViolations(src);
 
-  const declarations = src
-    .map((line, i) => (/^(let|const)\s/.test(line) ? i + 1 : null))
-    .filter(Boolean);
-  const startup = src
-    .map((line, i) => (/^(watchForChanges|loadManifest)\(\);\s*$/.test(line) ? i + 1 : null))
-    .filter(Boolean);
+  assert.ok(bindings.length >= 10, `positive control: found only ${bindings.length} module bindings`);
+  assert.ok(executables.length >= 4,
+    `positive control: found only ${executables.length} module-level executable statements — ` +
+    `expected at least watchForChanges, loadManifest, loadAnnotations, the route walk, and .listen`);
+  assert.deepEqual(violations.map((v) => v.message), [],
+    "startup ordering violations in app/serve-studio.mjs");
+});
 
-  assert.ok(startup.length >= 2, "expected the startup calls at module level");
-  assert.ok(
-    Math.min(...startup) > Math.max(...declarations),
-    `startup runs at line ${Math.min(...startup)} but a module binding is declared at line ` +
-    `${Math.max(...declarations)} — startup must follow EVERY declaration, not merely the ones ` +
-    `it currently happens to touch`
-  );
+test("positive control: the ordering checker fires on a statement in a later binding's dead zone", () => {
+  // The defect this guard exists for, planted verbatim: startup work sitting
+  // "at the bottom" of an init block while referencing a const declared beneath
+  // it. A checker that has never been seen to fire is not a control.
+  const planted = [
+    "const early = 1;",
+    "doStartup();",
+    "await handleThing(",
+    "  { url: x },",
+    ").catch(() => {});",
+    "const handleThing = async () => {};",
+    "listenSomething();",
+  ].join("\n");
+  const { violations } = startupOrderingViolations(planted);
+  const reach = violations.filter((v) => v.kind === "reachability");
+  assert.equal(reach.length, 1, `expected exactly the planted TDZ, got: ${JSON.stringify(violations)}`);
+  assert.equal(reach[0].binding, "handleThing");
+  assert.ok(violations.some((v) => v.kind === "position"),
+    "the position property must also fire on statements before the last binding");
 });
 
 test("positive control: this suite is capable of failing", () => {
