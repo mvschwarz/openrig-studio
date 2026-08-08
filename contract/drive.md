@@ -18,14 +18,16 @@ application built on this SDK, and it is the reason that application can be
 watched rather than merely instructed. What was missing is the SDK offering it, so
 that two applications do not invent two incompatible versions of the same thing.
 
-> **⚠️ REDLINE — REVISION 2026-08-08 (per-surface delivery + settle-ack). PM
-> review pending.** Sections marked **(stable — REVISED)** below change a
-> previously-stable contract, and one change is **BREAKING** (an unaddressed
-> `POST` is now refused). Every changed section is marked so PM reviews the diff,
-> not the memory of it. Reason: one global channel delivered every op to every
-> kept-alive surface — including `play`/`export`/`delete` — because the op could
-> not name which surface it was for. The revision makes delivery per-surface
-> (structurally undeliverable to the wrong surface) and adds a settle-ack.
+> **✅ REVISION 2026-08-08 (per-surface delivery + settle-ack). ENDORSED by
+> pm-studiobox (lane owner) from the actual diff — including the unaddressed-`GET`
+> `400`, and the settle-ack accepted as advisory/exposed `appliedGen`, the
+> divergence from the pre-build position taken as the better mechanism.** Sections
+> marked **(stable — REVISED)** below change a previously-stable contract, and one
+> change is **BREAKING** (an unaddressed `POST`/`GET` is refused). Reason: one
+> global channel delivered every op to every kept-alive surface — including
+> `play`/`export`/`delete` — because the op could not name which surface it was
+> for. The revision makes delivery per-surface (structurally undeliverable to the
+> wrong surface) and adds a bounded settle-ack.
 
 ## The op (stable — REVISED: `surface` address added)
 
