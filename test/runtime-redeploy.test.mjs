@@ -480,220 +480,75 @@ test("the SSE change-signal still fires on a manifest change", async (t) => {
 // fourth, the comparison became structural and descends everywhere. Its controls
 // plant a field at all four levels and assert the path each is reported at.
 
-// The startup-ordering analysis, extracted so a control can run it against a
-// PLANTED violation. The previous guard asserted POSITION only — "startup after
-// every module binding" — and it invited exactly the fix that reproduces the
-// defect it exists to prevent: startup work was moved "to the bottom" of the
-// init block, below every binding the mover knew about, and directly into the
-// temporal dead zone of a `const` declared beneath it. Being last is not the
-// same as being after everything you TOUCH. So this checks two properties:
+// THE INIT-TDZ GUARD IS THE EVALUATOR — the fifth version of this guard, and
+// the first that is not a model. Four static versions each classified source
+// TEXT (a name whitelist, a position rule, a reachability scan, an
+// initializer grammar) and each missed the next ordinary spelling: the
+// misplaced walk, the direct initializer, the IIFE initializer, the standalone
+// IIFE statement. PM's ruling ended the series: do not MODEL the property, RUN
+// it. "Does this evaluate at module init" is asked of the code by the only
+// judge with no grammar to be wrong about — Node evaluates the module, and
+// either it evaluates or it exits naming the binding and the line. Coverage of
+// spellings nobody has planted yet is the evaluator's, by construction.
 //
-//   REACHABILITY — no module-level executable statement references a `let`/
-//   `const` binding declared later. This is the property whose violation IS the
-//   boot-time ReferenceError, checked against what each statement actually
-//   touches rather than against line order.
-//
-//   POSITION — every executable statement still follows every binding. This is
-//   deliberately broader than reachability: it also covers what the functions
-//   startup CALLS may grow to touch later, which no textual reference scan of
-//   the call site can see.
-//
-// It also recognises EVERY module-level executable statement — bare calls,
-// top-level awaits, method chains — where the old guard matched two whitelisted
-// call names and never saw the statement that carried the defect. A checker that
-// cannot see the statement is a checker nothing runs, for that statement.
-// Blank out string contents so braces and identifier-lookalikes inside them
-// neither break depth tracking nor register as references.
-function stripStrings(text) {
-  return text
-    .replace(/`(?:[^`\\]|\\[\s\S])*`/g, "``")
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+// What this deliberately gives up, stated rather than hidden: a static scan
+// could in principle fail EARLY on a merely-fragile arrangement (init not at
+// the bottom) before any TDZ is real. In practice every static version passed
+// on real TDZs and the "early" failures it produced were the wrong fixes. The
+// position discipline stays as the init-block source comment; the property
+// lives here, with its judge.
+
+async function evaluatesAtInit(mutate) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "init-eval-"));
+  fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
+  fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
+  if (mutate) {
+    const src = fs.readFileSync(path.join(dir, "app", "serve-studio.mjs"), "utf8");
+    const mutated = mutate(src);
+    if (mutated === src) throw new Error("the mutation did not apply — the result would be meaningless");
+    fs.writeFileSync(path.join(dir, "app", "serve-studio.mjs"), mutated);
+  }
+  const port = 9880 + Math.floor(Math.random() * 40);
+  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port)],
+    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  let stderr = "";
+  proc.stderr.on("data", (d) => { stderr += d; });
+  try {
+    for (let i = 0; i < 100; i++) {
+      if (proc.exitCode !== null) return { evaluated: false, code: proc.exitCode, stderr };
+      try {
+        await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" });
+        return { evaluated: true, code: null, stderr };
+      } catch { await new Promise((r) => setTimeout(r, 50)); }
+    }
+    return { evaluated: false, code: proc.exitCode, stderr: stderr + "\n(timed out: neither served nor exited)" };
+  } finally { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-// Remove `=> { … }` and `function … { … }` bodies — UNLESS the function is
-// immediately invoked. The property is "does this code evaluate at module
-// load", not "does this text look like a function": a deferred closure's body
-// belongs to call time and is dropped, but an IIFE's body RUNS DURING
-// INITIALIZER EVALUATION and must stay in for scanning. The previous version
-// stripped every body without asking, which is how
-// `const x = (() => later)();` crashed boot while the guard passed. The
-// invocation paren may sit after a wrapping close-paren: `(() => {…})()`.
-// Expects string-stripped input so brace counting cannot be derailed.
-function stripFunctionBodies(text) {
-  let out = "", i = 0;
-  for (;;) {
-    const m = /(?:=>\s*\{|function\b[^{]*\{)/.exec(text.slice(i));
-    if (!m) { out += text.slice(i); break; }
-    let depth = 1, j = i + m.index + m[0].length;
-    while (j < text.length && depth > 0) {
-      if (text[j] === "{") depth++;
-      else if (text[j] === "}") depth--;
-      j++;
-    }
-    const invokedNow = /^\s*\)?\s*\(/.test(text.slice(j));
-    if (invokedNow) out += text.slice(i, j);
-    else out += text.slice(i, i + m.index) + m[0] + "}";
-    i = j;
-  }
-  return out;
-}
-
-function startupOrderingViolations(src) {
-  const lines = src.split("\n");
-
-  // Module-level bindings (column 0), including simple destructuring.
-  const bindings = []; // { name, line }
-  lines.forEach((line, i) => {
-    const m = line.match(/^(?:const|let)\s+(?:\{([^}]*)\}|\[([^\]]*)\]|([A-Za-z_$][\w$]*))/);
-    if (!m) return;
-    const names = m[3] ? [m[3]]
-      : (m[1] || m[2]).split(",").map((s) => s.split(/[:=]/)[0].trim()).filter(Boolean);
-    for (const name of names) bindings.push({ name, line: i + 1 });
-  });
-
-  // Consume a multi-line statement starting at line i: cumulative ()[]{} depth
-  // over string-stripped lines, ending on the line where depth returns to zero
-  // and the line closes with `;`.
-  const statementEnd = (i) => {
-    let depth = 0;
-    for (let j = i; j < lines.length; j++) {
-      const s = stripStrings(lines[j]);
-      for (const ch of s) {
-        if ("([{".includes(ch)) depth++;
-        else if (")]}".includes(ch)) depth--;
-      }
-      if (depth <= 0 && /;\s*$/.test(s)) return j;
-    }
-    return lines.length - 1;
-  };
-
-  // What EXECUTES at module load, in both spellings:
-  //   - executable statements (calls, awaits, chains), and
-  //   - const/let INITIALIZERS — an initializer runs at load exactly like a
-  //     statement, unless the whole initializer is a function expression, whose
-  //     body waits for call time. Missing the second spelling is how
-  //     `const probe = handleRequest;` crashed the runtime while this guard
-  //     passed: it enforced reachability over the wrong SET of statements.
-  const executables = []; // { line, text, kind: "statement" }
-  const initializers = []; // { line, text, kind: "initializer" }
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const decl = line.match(/^(?:const|let)\s+[^=]*=\s*(.*)$/);
-    if (decl) {
-      const end = statementEnd(i);
-      const raw = lines.slice(i, end + 1).join("\n");
-      const init = raw.slice(raw.indexOf("=") + 1).trim();
-      const stripped = stripStrings(init);
-      // Exempt only what PROVABLY defers: a BARE function expression. A bare
-      // arrow cannot be immediately invoked without first being parenthesized
-      // (which changes the leading shape), and a bare `function` expression is
-      // deferred only when the statement ends at its closing brace — ending in
-      // `)` means it was called. Anything else — including an IIFE, which
-      // textually BEGINS like a function expression and runs at load — is
-      // scanned. The previous exemption keyed on how the text STARTED, which is
-      // a spelling, not the property.
-      const bareArrow = /^(?:async\s+)?(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(init);
-      const bareFunction = /^(?:async\s+)?function\b/.test(init) && /\}\s*;?\s*$/.test(stripped);
-      if (!bareArrow && !bareFunction) {
-        initializers.push({ line: i + 1, text: stripFunctionBodies(stripped) });
-      }
-      i = end;
-      continue;
-    }
-    if (!/^(?:await\s+|[A-Za-z_$][\w$]*\s*[.(])/.test(line)) continue;
-    if (/^(?:import|export|const|let|var|function|class|async\s+function)\b/.test(line)) continue;
-    let text = line;
-    let j = i;
-    while (j < lines.length - 1 && !/;\s*$/.test(lines[j]) ) { j++; text += "\n" + lines[j]; }
-    executables.push({ line: i + 1, text });
-    i = j;
-  }
-
-  const violations = [];
-  for (const ex of [...executables, ...initializers]) {
-    const what = ex === undefined ? "" : (executables.includes(ex) ? "statement" : "initializer");
-    const referenced = new Set(ex.text.match(/[A-Za-z_$][\w$]*/g) || []);
-    for (const b of bindings) {
-      if (b.line > ex.line && referenced.has(b.name)) {
-        violations.push({
-          kind: "reachability", statement: ex.line, binding: b.name, declared: b.line,
-          message:
-            `the ${what} at line ${ex.line} references '${b.name}', declared at line ${b.line} — ` +
-            `an ${what === "initializer" ? "initializer executes at module load exactly like a statement, so this" : "executable statement"} ` +
-            `is a ReferenceError in the temporal dead zone the moment the module loads. ` +
-            `Being last is not the same as being after everything you TOUCH: load-time code must follow ` +
-            `the bindings it references, so move it below line ${b.line}, not the binding above.`,
-        });
-      }
-    }
-  }
-
-  const lastBinding = Math.max(0, ...bindings.map((b) => b.line));
-  for (const ex of executables) {
-    if (ex.line < lastBinding) {
-      violations.push({
-        kind: "position", statement: ex.line, declared: lastBinding,
-        message:
-          `the statement at line ${ex.line} runs before the last module binding (line ${lastBinding}). ` +
-          `Even if it touches nothing declared later TODAY, the functions it calls can grow a ` +
-          `dependency on a later binding and land in its dead zone — position is the property that ` +
-          `covers what your callees may come to touch. Put startup work in the init block at the ` +
-          `bottom, after every declaration AND after everything it touches.`,
-      });
-    }
-  }
-  return { bindings, executables, violations };
-}
-
-test("startup follows every binding it touches AND every binding, so the TDZ class cannot return", () => {
-  // This asserts the STRUCTURE the source comment claims, rather than trusting
-  // the comment. Reachability is checked as well as position because the two
-  // properties fail differently: position says "not at the bottom", reachability
-  // names the exact binding whose dead zone the statement would die in — which
-  // is the message that would have prevented the fifth TDZ from this file.
-  const src = fs.readFileSync(path.join(REPO, "app", "serve-studio.mjs"), "utf8");
-  const { bindings, executables, violations } = startupOrderingViolations(src);
-
-  assert.ok(bindings.length >= 10, `positive control: found only ${bindings.length} module bindings`);
-  assert.ok(executables.length >= 4,
-    `positive control: found only ${executables.length} module-level executable statements — ` +
-    `expected at least watchForChanges, loadManifest, loadAnnotations, the route walk, and .listen`);
-  assert.deepEqual(violations.map((v) => v.message), [],
-    "startup ordering violations in app/serve-studio.mjs");
+test("the module EVALUATES at init — the TDZ property judged by the evaluator, not a model of it", async () => {
+  const r = await evaluatesAtInit(null);
+  assert.equal(r.evaluated, true,
+    `the runtime failed to evaluate at init:\n${r.stderr}`);
 });
 
-test("positive control: the ordering checker fires on BOTH load-time spellings of the dead zone", () => {
-  // The two defects this guard exists for, planted verbatim: the historical
-  // top-level statement referencing a const declared beneath it, and sdk-qa's
-  // `const probe = handleRequest;` — an INITIALIZER, which executes at module
-  // load exactly like a statement and which the previous scan excluded
-  // wholesale. A checker that has never been seen to fire is not a control.
-  const planted = [
-    "const early = 1;",
-    "doStartup();",
-    "await handleThing(",
-    "  { url: x },",
-    ").catch(() => {});",
-    "const qaInitializerProbe = handleThing;",
-    "const qaInitializerIife = (() => handleThing)();",
-    "const qaBraceIife = (function () { return handleThing; })();",
-    "const notALoad = () => handleThing;",
-    "const notALoadBrace = () => { return handleThing; };",
-    "const handleThing = async () => {};",
-    "listenSomething();",
-  ].join("\n");
-  const { violations } = startupOrderingViolations(planted);
-  const reach = violations.filter((v) => v.kind === "reachability");
-  assert.deepEqual(reach.map((v) => [v.statement, v.binding]).sort((a, b) => a[0] - b[0]),
-    [[3, "handleThing"], [6, "handleThing"], [7, "handleThing"], [8, "handleThing"]],
-    `expected the STATEMENT plant, the direct INITIALIZER, and BOTH IIFE spellings — an IIFE is not ` +
-    `a deferred closure, its body runs during initializer evaluation: ${JSON.stringify(reach)}`);
-  assert.ok(!reach.some((v) => v.statement === 9 || v.statement === 10),
-    "a bare function-expression initializer was flagged — its body runs at call time, not load time, " +
-    "and over-firing there would force every helper above the binding it eventually calls");
-  assert.ok(violations.some((v) => v.kind === "position"),
-    "the position property must also fire on statements before the last binding");
+test("controls: every historical TDZ spelling refuses to evaluate, named by the evaluator", async () => {
+  // The four mutants sdk-qa (and round 2) actually used, one per round. Each
+  // must exit nonzero with the ReferenceError naming the binding. Any FUTURE
+  // spelling is covered by the same mechanism these prove alive: the check is
+  // not a model of evaluation, it is evaluation.
+  const DECL = "const handleRequest = async (req, res) => {";
+  const MUTANTS = [
+    ["round-2: top-level statement", `await handleRequest;\n${DECL}`],
+    ["round-4: direct initializer", `const qaInitializerProbe = handleRequest;\n${DECL}`],
+    ["round-4: IIFE initializer", `const qaInitializerIife = (() => handleRequest)();\n${DECL}`],
+    ["round-5: standalone IIFE statement", `(() => handleRequest)();\n${DECL}`],
+  ];
+  for (const [name, planted] of MUTANTS) {
+    const r = await evaluatesAtInit((src) => src.replace(DECL, planted));
+    assert.equal(r.evaluated, false, `${name}: the mutant EVALUATED — the guard is not guarding`);
+    assert.match(r.stderr, /ReferenceError[\s\S]*handleRequest/,
+      `${name}: refused to evaluate but not with the ReferenceError naming the binding:\n${r.stderr}`);
+  }
 });
 
 test("positive control: this suite is capable of failing", () => {

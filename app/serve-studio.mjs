@@ -20,7 +20,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches } from "./verbs.mjs";
+import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, resolveApi } from "./verbs.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -1033,21 +1033,20 @@ function filesSearch(q) {
 // two markers, enforced by routingSurfaceViolations() in app/verbs.mjs and the
 // reserved-verbs tests. A mention outside the fence fails the suite.
 //
-// THE FENCE CONTAINS DATA, NOT DISPATCH — PM's ruling, fourth round on this
-// class, and the reason it is the last: every earlier fix defined a trusted
-// region (a spelling list, a fenced file region, a dispatcher body) and the
-// next raw arm simply moved inside the newest region. A trusted region is
-// always one special-case away from wrong. So the fence now holds three
-// constants and nothing executable with unbounded reach: the prefix, the
-// contract verb, and the table. Code inside a handler runs only AFTER its row
-// matched — bounded by the row that registered it.
+// THE FENCE CONTAINS DATA, NOT DISPATCH — and since round 5, THIS FILE DOES
+// NOT ROUTE AT ALL. Every earlier fix defined a trusted region (a spelling
+// list, a fenced file region, a dispatcher body) and the next raw arm simply
+// moved inside the newest region: a trusted region is always one special-case
+// away from wrong. The fence now holds two constants and the table — nothing
+// executable with unbounded reach. Code inside a handler runs only AFTER its
+// row matched, bounded by the row that registered it, and handlers receive
+// { searchParams, verb, rest } — never a pathname.
 //
-// ROUTING is the single table lookup in handleRequest below — the ONLY
-// operation in the runtime that matches a pathname to a handler. DISPATCH
-// receives the resolved row. A special case in the dispatch path has no
-// pathname to branch on without typing an /api literal outside this fence,
-// which fails the suite. "A route cannot serve without a row" is therefore
-// structural: a served route IS a dispatched row.
+// ROUTING lives in resolveApi (app/verbs.mjs), the one place a pathname meets
+// this table. handleRequest hands over the raw URL and receives an execute
+// closure; the pathname is OUT OF SCOPE downstream by construction, so "a
+// route cannot serve without a row" is a fact about the data flow. See
+// docs/design/routing-data-boundary.md for the load-bearing invariant.
 //
 // ONE STRUCTURE, TWO READERS: this table is what routing consults at request
 // time AND what `runtime.routes` and classification enumerate, so enumeration
@@ -1058,10 +1057,9 @@ function filesSearch(q) {
 //
 // ADD A ROUTE BY ADDING A ROW, then classify the verb in app/verbs.mjs.
 // A verb ending in `/` is a PREFIX, per the shared grammar (verbMatches).
-const API_PREFIX = "/api/";
 const CONTRACT_VERB = "/api/contract";
 const API_ROUTES = [
-  { verb: "/api/focus", handler: async (u, req, res) => {
+  { verb: "/api/focus", handler: async (request, req, res) => {
       if (req.method === "POST") {
         const raw = await readBody(req);
         let patch;
@@ -1075,11 +1073,11 @@ const API_ROUTES = [
       }
       // The read the record never had. `?since=` is the change-signal contract,
       // not a second polling mechanism — see contract/change-signal.md.
-      const since = u.searchParams.get("since");
+      const since = request.searchParams.get("since");
       const marker = focusMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, focus: focusRecord });
   } },
-  { verb: "/api/drive", handler: async (u, req, res) => {
+  { verb: "/api/drive", handler: async (request, req, res) => {
       if (req.method === "POST") {
         const raw = await readBody(req);
         let op;
@@ -1092,11 +1090,11 @@ const API_ROUTES = [
       // focus, so a surface that already watches one is watching this with the
       // primitive it has rather than a third mechanism of its own.
       driveReads += 1;
-      const since = u.searchParams.get("since");
+      const since = request.searchParams.get("since");
       const marker = driveMarker();
       return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, op: driveOp });
   } },
-  { verb: "/api/capture-target", handler: async (u, req, res) => {
+  { verb: "/api/capture-target", handler: async (request, req, res) => {
       if (req.method === "POST") {
         const raw = await readBody(req);
         let body;
@@ -1117,7 +1115,7 @@ const API_ROUTES = [
       }
       return sendJson(res, 200, { ok: true, target: captureTarget });
   } },
-  { verb: "/api/annotations", handler: async (u, req, res) => {
+  { verb: "/api/annotations", handler: async (request, req, res) => {
       if (req.method === "POST") {
         const raw = await readBody(req);
         let body;
@@ -1135,10 +1133,10 @@ const API_ROUTES = [
       // Read is scoped. Without a scope this answers an EMPTY set rather than
       // every scope on the box: a caller that forgot the parameter would otherwise
       // receive another surface's marks and render them over this one.
-      const scope = u.searchParams.get("scope");
+      const scope = request.searchParams.get("scope");
       return sendJson(res, 200, { ok: true, scope: scope || null, records: scope ? (annotations.get(scope) || []) : [] });
   } },
-  { verb: CONTRACT_VERB, handler: (u, req, res) => {
+  { verb: CONTRACT_VERB, handler: (request, req, res) => {
       return sendJson(res, 200, {
         contractVersion: CONTRACT_VERSION,
         // VERSION IS READ, NEVER TYPED. A runtime that states its own version from a
@@ -1181,21 +1179,21 @@ const API_ROUTES = [
         manifest: manifestReport(),
       });
   } },
-  { verb: "/api/factory/state", handler: (u, req, res) => sendJson(res, 200, factoryState()) },
-  { verb: "/api/events", handler: (u, req, res) => {
+  { verb: "/api/factory/state", handler: (request, req, res) => sendJson(res, 200, factoryState()) },
+  { verb: "/api/events", handler: (request, req, res) => {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
       res.write(`: connected\n\n`);
       sseClients.add(res);
       req.on("close", () => sseClients.delete(res));
       return;
   } },
-  { verb: "/api/files/tree", handler: (u, req, res) => {
-      const t = filesTree(u.searchParams.get("dir"));
+  { verb: "/api/files/tree", handler: (request, req, res) => {
+      const t = filesTree(request.searchParams.get("dir"));
       return t ? sendJson(res, 200, { ok: true, ...t })
         : sendJson(res, 400, { ok: false, error: "path outside the files root — files verbs are pinned to the runtime's files-root" });
   } },
-  { verb: "/api/files/read", handler: (u, req, res) => {
-      const r = insideRoot(u.searchParams.get("path") || "");
+  { verb: "/api/files/read", handler: (request, req, res) => {
+      const r = insideRoot(request.searchParams.get("path") || "");
       if (!r || !fs.existsSync(r) || fs.statSync(r).isDirectory())
         return sendJson(res, 404, { ok: false, error: "not found or outside the files root" });
       const kind = fileKind(r);
@@ -1204,36 +1202,38 @@ const API_ROUTES = [
           content: fs.readFileSync(r, "utf8"), mtime: fs.statSync(r).mtimeMs });
       return sendJson(res, 200, { ok: true, kind, raw: "/api/files/raw?path=" + encodeURIComponent(r), mtime: fs.statSync(r).mtimeMs });
   } },
-  { verb: "/api/files/raw", handler: (u, req, res) => {
-      const r = insideRoot(u.searchParams.get("path") || "");
+  { verb: "/api/files/raw", handler: (request, req, res) => {
+      const r = insideRoot(request.searchParams.get("path") || "");
       if (!r || !fs.existsSync(r)) { res.writeHead(404); return res.end(); }
       res.writeHead(200, { "content-type": TYPES[path.extname(r).toLowerCase()] || "application/octet-stream",
         "content-length": fs.statSync(r).size, "cache-control": "no-store" });
       return fs.createReadStream(r).pipe(res);
   } },
-  { verb: "/api/files/search", handler: (u, req, res) => {
-      const q = (u.searchParams.get("q") || "").trim();
+  { verb: "/api/files/search", handler: (request, req, res) => {
+      const q = (request.searchParams.get("q") || "").trim();
       return sendJson(res, 200, { ok: true, hits: q.length < 2 ? [] : filesSearch(q) });
   } },
 ];
 // <<< API ROUTING SURFACE
 
 const handleRequest = async (req, res) => {
-  const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
-  // ROUTING, then DISPATCH — deliberately not a function, so there is no
-  // dispatcher body to trust. The find() below is the only operation in the
-  // runtime that matches a pathname to a handler; dispatch receives the
-  // resolved ROW. Claims the whole /api namespace: a row matches or the
-  // request 404s, so no later code ever sees an /api path.
-  if (u.pathname.startsWith(API_PREFIX)) {
-    const row = API_ROUTES.find((r) => verbMatches(r.verb, u.pathname));
-    try {
-      if (row) await row.handler(u, req, res);
-      else sendJson(res, 404, { ok: false,
-        error: `no such contract route: ${u.pathname} — see GET ${CONTRACT_VERB} for capabilities and contract/runtime-api.md for the verb set` });
-    } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
+  // THE API FLOW HOLDS NO PATHNAME. Routing happens inside resolveApi (the
+  // grammar module): this function hands over the raw request URL and receives
+  // either null (not the api namespace) or an execute closure that already
+  // carries its resolved row. Neither `u` nor the namespace prefix exists as a
+  // binding anywhere in this flow — a pathname special-case here is a
+  // ReferenceError, not a code-review question. THE ORDERING BELOW IS
+  // LOAD-BEARING: the static-flow URL is deliberately constructed AFTER this
+  // branch returns, so no code that could see an api request ever holds a
+  // pathname. See docs/design/routing-data-boundary.md before "simplifying"
+  // either fact away.
+  const api = resolveApi(req.url, `http://127.0.0.1:${PORT}`, API_ROUTES, sendJson);
+  if (api) {
+    try { await api.execute(req, res); }
+    catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
     return;
   }
+  const u = new URL(req.url, `http://127.0.0.1:${PORT}`);
 
   // the manifest is served as its VALIDATED projection, not the raw file —
   // this is where "invalid rows are excluded from the served rail" is true.
@@ -1348,13 +1348,19 @@ const handleRequest = async (req, res) => {
 
 // ---- init: everything above is declarations -------------------------------
 // Ordering here is a correctness property, not a style preference. This block
-// sits after EVERY module binding — verified by a test, not by reading — so
-// startup cannot land in a temporal dead zone no matter what these statements
-// grow to touch later. Being last is NOT the same as being after everything you
-// touch: a boot-time statement once sat in an init block that was "at the
-// bottom" of the declarations it happened to know about while `handleRequest`
-// was declared beneath it, and died in that binding's dead zone. The test
-// asserts both properties — position AND reachability.
+// sits after EVERY module binding, so startup cannot land in a temporal dead
+// zone no matter what these statements grow to touch later. Being last is NOT
+// the same as being after everything you touch: a boot-time statement once sat
+// in an init block that was "at the bottom" of the declarations it happened to
+// know about while `handleRequest` was declared beneath it, and died in that
+// binding's dead zone.
+//
+// THE PROPERTY IS JUDGED BY THE EVALUATOR, not by a scan of this text: the
+// init-eval guard in test/runtime-redeploy.test.mjs spawns this module and
+// asserts it evaluates, and its controls prove every historical TDZ spelling
+// refuses to. Four static analyzers each missed the next spelling; the
+// position discipline in this comment is convention, the guarantee lives with
+// the judge.
 //
 // The weaker arrangement — init partway down, "safe" because the current call
 // graph happens not to reach the later bindings — is a temporal dead zone

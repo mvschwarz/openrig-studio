@@ -77,6 +77,37 @@ export const verbMatches = (declared, pathname) =>
 export const isRuntimeOwned = (pathname) =>
   RUNTIME_OWNED_VERBS.some((v) => verbMatches(v, pathname));
 
+// ---- routing: the ONE place a pathname meets the table ----------------------
+//
+// THE DATA BOUNDARY (PM's ratified criterion, round 5): after the table lookup
+// resolves a row, the raw pathname and the namespace prefix are OUT OF SCOPE
+// for everything downstream. The runtime's api flow never constructs a URL at
+// all — it hands this function the raw request URL and receives back either
+// null (not this namespace) or an `execute` closure. The row branch closes over
+// a request object carrying ONLY { searchParams, verb, rest }; the miss branch
+// closes over the pathname internally for its 404 message. So a pathname
+// special-case cannot be WRITTEN downstream: there is no pathname there to
+// branch on. That is a fact about the data flow, not a claim a guard checks —
+// the guards that remain (the literal fence, the unwritability control) police
+// the residue, which is this function itself: the definition of routing, where
+// any special case must now be written in plain sight and where the
+// routes=[] property test sees it.
+
+export const API_PREFIX = "/api/";
+
+export function resolveApi(rawUrl, base, routes, respond) {
+  const u = new URL(rawUrl, base);
+  if (!u.pathname.startsWith(API_PREFIX)) return null;
+  const row = routes.find((r) => verbMatches(r.verb, u.pathname));
+  if (!row) {
+    const pathname = u.pathname;
+    return { execute: (req, res) => respond(res, 404, { ok: false,
+      error: `no such contract route: ${pathname} — see GET /api/contract for capabilities and contract/runtime-api.md for the verb set` }) };
+  }
+  const request = { searchParams: u.searchParams, verb: row.verb, rest: u.pathname.slice(row.verb.length) };
+  return { execute: (req, res) => row.handler(request, req, res) };
+}
+
 // ---- the routing surface tripwire ------------------------------------------
 //
 // PM's ruling, third round on this class: OPT-IN DISCOVERY IS THE HOLE. A

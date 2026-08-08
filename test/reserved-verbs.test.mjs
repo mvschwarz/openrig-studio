@@ -29,7 +29,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup,
-         routingSurfaceViolations, verbMatches, isRuntimeOwned } from "../app/verbs.mjs";
+         routingSurfaceViolations, verbMatches, isRuntimeOwned, resolveApi } from "../app/verbs.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...p) => fs.readFileSync(path.join(REPO, ...p), "utf8");
@@ -209,23 +209,8 @@ test("BYPASS CONTROL: a raw handler that does not go through the table cannot la
     ["comment-cut evasion", '  { const cut = /\\/\\//; if (cut && u.pathname === "/api/qa-raw-evade") return sendJson(res, 200, { ok: true }); }\n',
       "/api/qa-raw-evade", "qa-raw-evade"],
   ];
-  // sdk-qa's fourth-round plant, kept as a STANDING control per PM: a raw arm at
-  // the MOST ORDINARY place — inside the routing block, after the namespace
-  // gate, where a competent author writes a special case by accident. Under the
-  // previous design this spot was INSIDE the fence and therefore trusted: the
-  // arm served 200, runtime.routes stayed empty, and every committed control
-  // passed. The fence now holds only data, so this spot is outside it and the
-  // literal is named. If this control ever stops firing, a trusted region has
-  // been reintroduced.
-  const routingAnchor = /if \(u\.pathname\.startsWith\(API_PREFIX\)\) \{\n/;
-  assert.match(src, routingAnchor, "the routing block moved — re-anchor sdk-qa's standing plant before trusting it");
-  forms.push(["inside the routing block (sdk-qa round 4)",
-    null, "/api/qa-inside-fence", "qa-inside-fence"]);
   for (const [form, arm, probe, needle] of forms) {
-    const planted = arm !== null
-      ? src.replace(anchor, (m) => m + arm)
-      : src.replace(routingAnchor, (m) =>
-          m + '    if (u.pathname === "/api/qa-inside-fence") { sendJson(res, 200, { ok: true, source: "raw-dispatch-arm" }); return; }\n');
+    const planted = src.replace(anchor, (m) => m + arm);
     assert.notEqual(planted, src, `${form}: the plant did not apply`);
     const { statuses, routes } = await bootMutated(planted, [probe]);
 
@@ -236,10 +221,103 @@ test("BYPASS CONTROL: a raw handler that does not go through the table cannot la
         `${form}: a raw handler SERVES (200), is NOT in runtime.routes, and the routing-surface ` +
         `tripwire does not name it — a live route invisible to classification, the original product failure`);
     } else {
+      // Since round 5 this is the branch every raw arm lands in: the static
+      // flow's `u` exists only AFTER the api branch has returned, so an arm
+      // planted beside it never sees an /api request at all.
       assert.equal(statuses[probe], 404,
         `${form}: a raw handler neither served nor 404'd — some residual path half-handled it`);
     }
   }
+});
+
+test("UNWRITABILITY CONTROL: sdk-qa's derived-prefix arm at the ordinary place is a ReferenceError", async () => {
+  // PM's ratified criterion, asserted as PM specified: the special case must be
+  // UNWRITABLE downstream — not caught, unwritable. sdk-qa's round-4/5 plants
+  // (the literal arm inside the dispatcher, then the derived-prefix arm built
+  // from the public constant) both go at the most ordinary place: the top of
+  // the api flow, where the namespace is established. Since round 5 neither
+  // `u` nor `API_PREFIX` is a binding there — routing lives in resolveApi and
+  // the api flow holds no pathname — so both plants must fail to EVALUATE,
+  // naming the missing binding. If either ever boots again, a pathname has
+  // been reintroduced into the api flow and the data boundary is gone.
+  const src = read("app", "serve-studio.mjs");
+  const ordinary = /const api = resolveApi\(req\.url[^\n]*\n/;
+  assert.match(src, ordinary, "the api flow entry moved — re-anchor this control before trusting it");
+
+  const plants = [
+    ["derived-prefix (no literal, sdk-qa round 5)",
+      '  if (u.pathname === API_PREFIX + "qa-derived") { sendJson(res, 200, { ok: true }); return; }\n',
+      /ReferenceError.*\b(u|API_PREFIX)\b/],
+    ["literal arm (sdk-qa round 4)",
+      '  if (u.pathname === "/api/qa-inside-fence") { sendJson(res, 200, { ok: true }); return; }\n',
+      /ReferenceError.*\bu\b/],
+  ];
+  // The detonation is at REQUEST time, not load time: the plant sits inside
+  // handleRequest, where `u` is in its temporal dead zone (declared below, in
+  // the static flow) and API_PREFIX is not a binding at all. The first request
+  // of ANY kind throws the ReferenceError, the async handler's rejection is
+  // unhandled, and the process dies naming the absent binding. What must NEVER
+  // happen is the arm answering 200 — that would mean a pathname is back in
+  // scope in the api flow.
+  for (const [name, arm, expect] of plants) {
+    const planted = src.replace(ordinary, (m) => arm + m);
+    assert.notEqual(planted, src, `${name}: the plant did not apply`);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "unwritable-"));
+    fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
+    fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "app", "serve-studio.mjs"), planted);
+    const port = 9985 + Math.floor(Math.random() * 10);
+    const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port)],
+      { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    proc.stderr.on("data", (d) => { stderr += d; });
+    let served200 = false;
+    try {
+      for (let i = 0; i < 60; i++) {
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}/api/qa-derived`, { cache: "no-store" });
+          if (r.status === 200) served200 = true;
+          break;
+        } catch { await new Promise((r) => setTimeout(r, 50)); }
+      }
+      await new Promise((r) => { proc.on("exit", r); setTimeout(r, 3000); });
+    } finally { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
+    assert.equal(served200, false,
+      `${name}: the planted arm ANSWERED 200 — a pathname binding is back in scope in the api flow`);
+    assert.match(stderr, expect,
+      `${name}: the plant did not detonate as a ReferenceError naming the absent binding:\n${stderr}`);
+  }
+});
+
+test("routing is exactly the table: routes=[] misses everything, routes=[X] resolves exactly X", async () => {
+  // The property test the pure function enables — routing asserted against its
+  // DEFINITION rather than against source text. A special case smuggled into
+  // resolveApi that does not consult the table would let some path resolve
+  // with an EMPTY table, which is the first assertion here.
+  const BASE = "http://127.0.0.1:9999";
+  const sent = [];
+  const respond = (res, code, obj) => sent.push({ code, obj });
+
+  for (const p of ["/api/focus", "/api/contract", "/api/anything/else", "/api/qa-derived"]) {
+    const decision = resolveApi(p, BASE, [], respond);
+    assert.ok(decision, `routes=[]: '${p}' left the api namespace unclaimed`);
+    decision.execute(null, null);
+    assert.equal(sent.at(-1).code, 404, `routes=[]: '${p}' resolved despite an empty table`);
+  }
+  assert.equal(resolveApi("/not-api", BASE, [], respond), null, "a non-api path was claimed");
+
+  let got = null;
+  const X = [{ verb: "/api/export-status/", handler: (request) => { got = request; } }];
+  const hit = resolveApi("/api/export-status/42?a=b", BASE, X, respond);
+  await hit.execute(null, null);
+  assert.equal(got.verb, "/api/export-status/");
+  assert.equal(got.rest, "42", "the prefix remainder is not handed to the handler as rest");
+  assert.equal(got.searchParams.get("a"), "b");
+  assert.equal(got.pathname, undefined,
+    "the resolved request carries a pathname — the data boundary leaks the thing it exists to remove");
+  const miss = resolveApi("/api/export-status", BASE, X, respond);
+  miss.execute(null, null);
+  assert.equal(sent.at(-1).code, 404, "an exact path matched a prefix verb without the trailing slash");
 });
 
 test("the runtime source keeps every /api mention inside the routing surface", () => {
