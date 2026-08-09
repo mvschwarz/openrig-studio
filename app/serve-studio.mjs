@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, routeRequest } from "./verbs.mjs";
+import { makeResFacade } from "./response-facade.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -1314,23 +1315,15 @@ const handleRequest = async (req, res) => {
           readBody: () => readBody(req),
           onClose: (cb) => req.on("close", cb),
         };
-        // A RESPONSE FACADE, not the raw `res` (MF1, sdk-qa re-round). Node's
-        // ServerResponse back-references the request as `res.req` (and via the
-        // socket), so handing handlers `res` let an ordinary handler read the
-        // url through `res.req.url` — the ctx confinement was real but the
-        // response object leaked around it. This facade exposes ONLY the
-        // response methods handlers use and closes over `res` in a scope they
-        // cannot reach; every method returns `resFacade`, a primitive, or
-        // undefined — NEVER `res` — so no object in handler scope retains the
-        // request. `sendJson(resFacade, …)` works (writeHead + end).
-        const resFacade = {
-          writeHead(...a) { res.writeHead(...a); return resFacade; },
-          setHeader(...a) { res.setHeader(...a); return resFacade; },
-          write(...a) { return res.write(...a); },
-          end(...a) { res.end(...a); },
-          pipeFrom(readable) { readable.pipe(res); },
-        };
-        await row.handler(ctx, resFacade);
+        // A RESPONSE FACADE, not the raw `res` (MF1). Node's ServerResponse
+        // back-references the request (`res.req`, the socket), so handing
+        // handlers `res` let an ordinary handler read the url. The facade gives
+        // ONLY the response methods handlers use and hands no native object —
+        // response or request — into handler-controlled code in ANY direction
+        // (see app/response-facade.mjs). sendJson(facade, …) works (writeHead +
+        // end); files/raw streams via facade.pipeFrom, which PULLS from its
+        // source rather than handing the source `res`.
+        await row.handler(ctx, makeResFacade(res));
       } else sendJson(res, 404, m.notFound);
     } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
     return;

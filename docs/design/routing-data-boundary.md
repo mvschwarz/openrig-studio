@@ -26,17 +26,22 @@ never holds a pathname at all.
   `handleRequest` references `req` only to route (`routeRequest(req.url, …)`) and
   to build a handler `ctx`. Handlers receive
   `{ method, headers, searchParams, verb, rest, readBody, onClose }` — no url and
-  no `req` — **and a RESPONSE FACADE, not the raw `res`.** The facade matters:
-  Node's `ServerResponse` back-references the request as `res.req`, so a handler
-  holding the real `res` could read `res.req.url` around the ctx — the ctx
-  confinement was real but the response object leaked. The facade exposes only
-  `writeHead`/`setHeader`/`write`/`end`/`pipeFrom`, closes over `res` in a scope
-  the handler cannot reach, and every method returns the facade, a primitive, or
-  `undefined` — never `res`. So **no object in handler scope retains the
-  request.** This is the mechanism: the boundary is that neither the url nor
-  anything reaching it is in handler scope. (Two earlier fixes were narrower — one
-  counted the literal `req.url` and a property-access spelling walked past it;
-  one removed `req` from ctx but left the request reachable through `res.req`.)
+  no `req` — **and a RESPONSE FACADE, not the raw `res`** (`app/response-facade.mjs`).
+  **The property, stated once for all crossings:** no facade-held native object —
+  the response, or the request it back-references — may cross into
+  handler-controlled code in ANY direction: not as an argument to a
+  handler-supplied function, not as its `this`, not as a return value, not as a
+  callback parameter, not as an event payload. So every facade method passes only
+  the handler's own arguments into `res`, returns only the facade / a primitive /
+  `undefined` (never `res`), and does not use `this`. `pipeFrom` **pulls** from a
+  handler-supplied source and writes the chunks to `res` itself — it hands the
+  source nothing (an earlier version called `source.pipe(res)`, handing the raw
+  response straight to handler-controlled code). **This is the mechanism: the
+  boundary is that neither the request nor anything reaching it is in handler
+  scope OR passes through a handler's hands.** MF1's history is four narrower
+  fixes, each of which moved the boundary and leaked through the next crossing —
+  a spelling guard, then `res.req`, then a facade property, then facade
+  delegation — which is why the property above is about ALL crossings.
 - Handlers receive `ctx`, never a pathname or a URL object. A handler needing
   path data uses `rest`, which is already scoped to its own matched verb.
 - `handleRequest` calls `routeRequest` and dispatches the indexed row. Neither
@@ -95,6 +100,10 @@ exist to catch a change that reintroduces it.
   handler that tries to read the url through the response object (`res.req.url`,
   the socket's parser, the connection) and asserts every path yields nothing —
   the runtime proof that the facade retains no reference to the request.
+- **facade unit tests** (`test/response-facade.test.mjs`): enumerate every facade
+  method for the all-crossings property — no method returns/yields `res`, none
+  read `this`, and `pipeFrom` iterates a source without handing it the response
+  (sdk-qa's `pipe(res)` delegation trojan is the negative control).
 - **Unwritability control** (`test/reserved-verbs.test.mjs`): plants sdk-qa's
   round-4 literal arm and round-5 derived-prefix arm at the top of the API flow
   and asserts each detonates as a `ReferenceError` naming the absent binding —
