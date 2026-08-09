@@ -15,14 +15,14 @@ never holds a pathname at all.
   receives the raw request URL, constructs the URL object, matches the table,
   and returns **data only**: a table index plus `{ rest, searchParams }`, or
   `{ index: -1, notFound }` where `notFound` is a 404 *body object*.
-- **The path-bearing side holds no response authority** (round 6, sdk-qa). An
+- **The path-bearing side holds no response authority** (round 6). An
   earlier shape returned an `execute` closure and took a respond callback — so
   a resolver-internal special case could mint a 200 before the table lookup.
   Now the resolver cannot mint a closure that runs (unknown fields are inert
   downstream), cannot set a status (the miss branch is hardcoded 404 at the
   dispatch site), and cannot reach a handler that is not a row (the executable
   is fetched as `API_ROUTES[m.index]` — table membership is the only door).
-- **The raw request is CONFINED to the routing adapter** (MF1, sdk-qa).
+- **The raw request is CONFINED to the routing adapter** (MF1).
   `handleRequest` references `req` only to route (`routeRequest(req.url, …)`) and
   to build a handler `ctx`. Handlers receive
   `{ method, headers, searchParams, verb, rest, readBody, onClose }` — no url and
@@ -116,7 +116,7 @@ exist to catch a change that reintroduces it.
   no method returns/yields `res`, none read `this`, `pipeFrom` iterates a source
   without handing it the response, and (measured against a REAL `ServerResponse`)
   a handler callback passed to any method runs with no native `this` and no
-  native argument. sdk-qa's `pipe(res)` and `end(cb)` trojans are the negative
+  native argument. The `pipe(res)` and `end(cb)` trojans are the negative
   controls.
 - **ctx crossing matrix** (`test/handler-context.test.mjs`): drives the ACTUAL
   `makeCtx` and asserts `ctx.onClose` leaks nothing native as `this`, as an
@@ -124,7 +124,7 @@ exist to catch a change that reintroduces it.
   the wrapper or the return-handling is stripped. (An earlier request-side control
   tested `ownCallback` in isolation and could not fail when the real wiring
   broke.)
-- **Unwritability control** (`test/reserved-verbs.test.mjs`): plants sdk-qa's
+- **Unwritability control** (`test/reserved-verbs.test.mjs`): plants the
   round-4 literal arm and round-5 derived-prefix arm at the top of the API flow
   and asserts each detonates as a `ReferenceError` naming the absent binding —
   and above all, never serves.
@@ -138,7 +138,7 @@ exist to catch a change that reintroduces it.
 - **The literal fence** (`routingSurfaceViolations`): every textual `/api`
   mention in `serve-studio.mjs` lives inside the marked data-only surface.
 - **Bypass control**: raw arms planted in the static flow demonstrably cannot
-  serve API requests (404), in all the spellings sdk-qa used across rounds.
+  serve API requests (404), in all the spellings tried across rounds.
 
 ## The stated residue
 
