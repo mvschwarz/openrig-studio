@@ -27,21 +27,30 @@ never holds a pathname at all.
   to build a handler `ctx`. Handlers receive
   `{ method, headers, searchParams, verb, rest, readBody, onClose }` — no url and
   no `req` — **and a RESPONSE FACADE, not the raw `res`** (`app/response-facade.mjs`).
-  **The property, stated once for all crossings:** no facade-held native object —
-  the response, or the request it back-references — may cross into
-  handler-controlled code in ANY direction: not as an argument to a
-  handler-supplied function, not as its `this`, not as a return value, not as a
-  callback parameter, not as an event payload. So every facade method passes only
-  the handler's own arguments into `res`, returns only the facade / a primitive /
-  `undefined` (never `res`), and does not use `this`. `pipeFrom` **pulls** from a
-  handler-supplied source and writes the chunks to `res` itself — it hands the
-  source nothing (an earlier version called `source.pipe(res)`, handing the raw
-  response straight to handler-controlled code). **This is the mechanism: the
-  boundary is that neither the request nor anything reaching it is in handler
-  scope OR passes through a handler's hands.** MF1's history is four narrower
-  fixes, each of which moved the boundary and leaked through the next crossing —
-  a spelling guard, then `res.req`, then a facade property, then facade
-  delegation — which is why the property above is about ALL crossings.
+  **The rule, stated as a property and not a list of channels: THE FACADE OWNS
+  EVERY INVOCATION AND EVERY REFERENCE.** No facade-held native object — the
+  response, or the request it back-references — crosses into handler-controlled
+  code in any direction, and crucially the facade never lets a native object
+  *invoke* handler code either. Concretely: methods pass only the handler's own
+  arguments into `res`, return only the facade / a primitive / `undefined` (never
+  `res`), and use no `this`. `pipeFrom` **pulls** from a handler-supplied source
+  and writes the chunks to `res` itself, handing the source nothing. And any
+  handler-supplied **callback** is replaced with a facade-owned wrapper
+  (`ownCallback`) that the facade invokes — with no `this` a handler can use and
+  no forwarded arguments — because Node invokes a response/emitter callback with
+  the native object as its `this` (`res.end(chunk, cb)` runs `cb` with
+  `this === res`; `req.on("close", cb)` runs it with `this === req`). The same
+  wrapper guards the request side: `ctx.onClose`. **The boundary is that neither
+  the request nor anything reaching it is in handler scope, passes through a
+  handler's hands, OR arrives as the receiver of handler code the facade let a
+  native object call.**
+
+  MF1's history is FIVE narrower fixes, each of which stated a rule too narrow
+  and leaked through the next crossing: a spelling guard, then `res.req`, then a
+  facade property, then facade delegation (`source.pipe(res)`), then callback
+  `this`-binding (`end(cb)`). The abstract property was right every time; the
+  implementation rule kept being "cover these channels" instead of "the facade
+  owns every invocation and reference." This is the version stated as the latter.
 - Handlers receive `ctx`, never a pathname or a URL object. A handler needing
   path data uses `rest`, which is already scoped to its own matched verb.
 - `handleRequest` calls `routeRequest` and dispatches the indexed row. Neither
@@ -100,10 +109,13 @@ exist to catch a change that reintroduces it.
   handler that tries to read the url through the response object (`res.req.url`,
   the socket's parser, the connection) and asserts every path yields nothing —
   the runtime proof that the facade retains no reference to the request.
-- **facade unit tests** (`test/response-facade.test.mjs`): enumerate every facade
-  method for the all-crossings property — no method returns/yields `res`, none
-  read `this`, and `pipeFrom` iterates a source without handing it the response
-  (sdk-qa's `pipe(res)` delegation trojan is the negative control).
+- **facade unit tests** (`test/response-facade.test.mjs`): the crossing matrix —
+  no method returns/yields `res`, none read `this`, `pipeFrom` iterates a source
+  without handing it the response, and (measured against a REAL `ServerResponse`)
+  a handler callback passed to any method runs with no native `this` and no
+  native argument. `ownCallback` is tested directly for the request side
+  (`ctx.onClose`). sdk-qa's `pipe(res)` and `end(cb)` trojans are the negative
+  controls.
 - **Unwritability control** (`test/reserved-verbs.test.mjs`): plants sdk-qa's
   round-4 literal arm and round-5 derived-prefix arm at the top of the API flow
   and asserts each detonates as a `ReferenceError` naming the absent binding —

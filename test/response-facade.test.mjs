@@ -8,7 +8,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { makeResFacade } from "../app/response-facade.mjs";
+import http from "node:http";
+import { makeResFacade, ownCallback } from "../app/response-facade.mjs";
 
 // A fake response that records what it is asked to do and carries a request
 // back-reference — the thing a leak recovers.
@@ -92,4 +93,51 @@ test("pipeFrom ends the response even when the source throws mid-stream", async 
   const boom = { [Symbol.asyncIterator]() { return { next: async () => { throw new Error("mid-stream"); } }; } };
   await f.pipeFrom(boom); // must not reject
   assert.ok(rec.ended, "a mid-stream failure left the response open");
+});
+
+test("CROSSING MATRIX: a handler CALLBACK passed to any method is invoked by the facade, not the native response", async () => {
+  // sdk-qa re-round-4: Node invokes `res.end(chunk, cb)` (and `write`) with the
+  // native response as the callback's `this`, from which a handler recovers the
+  // request. This must be measured against a REAL ServerResponse, not a fake —
+  // the fake never invokes the callback with res as this. Every native method
+  // that takes a callback is exercised; the callback must see no native `this`
+  // and no native argument.
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    const f = makeResFacade(res);
+    const record = (label) => function (...args) {
+      seen.push({ label, thisIsRes: this === res, thisReqUrl: (() => { try { return this && this.req && this.req.url; } catch { return "throw"; } })(), args });
+    };
+    f.write("chunk", record("write"));
+    f.end("body", record("end"));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const port = server.address().port;
+  try {
+    await fetch(`http://127.0.0.1:${port}/secret?token=leak-me`).then((r) => r.text());
+    await new Promise((r) => setTimeout(r, 50));
+  } finally { server.close(); }
+
+  assert.ok(seen.length >= 1, "no facade callback fired — the matrix measured nothing");
+  for (const c of seen) {
+    assert.equal(c.thisIsRes, false, `${c.label} callback ran with the native response as \`this\` — the request is recoverable`);
+    assert.ok(!c.thisReqUrl || c.thisReqUrl === "throw", `${c.label} callback recovered the request url through \`this\``);
+    assert.deepEqual(c.args, [], `${c.label} callback received native arguments — a native object can cross as a callback arg`);
+  }
+});
+
+test("ownCallback severs `this` and arguments — the request-side (onClose) uses the same wrapper", () => {
+  // ctx.onClose wraps a handler close callback with ownCallback, because
+  // `req.on("close", cb)` invokes cb with `this === req`. The wrapper is a
+  // facade-owned arrow: no `this` a handler can use, and no forwarded argument.
+  let capturedThis = "unset";
+  const capturedArgs = [];
+  const wrapped = ownCallback(function (...args) { capturedThis = this; capturedArgs.push(...args); });
+  // Invoke the wrapper the way a native emitter would: with a native `this` and
+  // native arguments. Both must be discarded.
+  const fakeNative = { req: { url: "/secret" } };
+  wrapped.call(fakeNative, fakeNative, "extra");
+  assert.notEqual(capturedThis, fakeNative, "ownCallback let the native `this` through");
+  assert.equal(capturedThis, undefined, "the handler callback saw a `this` — it must be called plainly");
+  assert.deepEqual(capturedArgs, [], "ownCallback forwarded native arguments to the handler callback");
 });

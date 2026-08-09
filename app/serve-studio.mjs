@@ -21,7 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, routeRequest } from "./verbs.mjs";
-import { makeResFacade } from "./response-facade.mjs";
+import { makeResFacade, ownCallback } from "./response-facade.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -1313,7 +1313,11 @@ const handleRequest = async (req, res) => {
           verb: row.verb,
           rest: m.rest,
           readBody: () => readBody(req),
-          onClose: (cb) => req.on("close", cb),
+          // SAME CLASS as the response callbacks: `req.on("close", cb)` would
+          // invoke a handler's close callback with `this === req`. The callback
+          // is wrapped so the facade owns its invocation — called with no `req`
+          // as `this` and no native args.
+          onClose: (cb) => req.on("close", ownCallback(cb)),
         };
         // A RESPONSE FACADE, not the raw `res` (MF1). Node's ServerResponse
         // back-references the request (`res.req`, the socket), so handing
