@@ -534,9 +534,10 @@ test("MF1: the raw request is CONFINED to the routing adapter — handlers never
   assert.equal(reqRefs(staticFlow), 0,
     "the static-file flow references `req` — it must work from the decision's url, not the raw request");
   // The adapter's sanctioned references: the (req, res) param, routeRequest(req.url),
-  // req.method, req.headers, readBody(req), req.on. Any pre-lookup arm reading req
-  // in ANY spelling raises this above the sanctioned count.
-  assert.equal(reqRefs(adapter), 6,
+  // and makeCtx(req, …). Method/headers/body/close moved into makeCtx
+  // (app/handler-context.mjs), which is why this is 3 and not the earlier 6. Any
+  // pre-lookup arm reading req in ANY spelling raises this above the sanctioned count.
+  assert.equal(reqRefs(adapter), 3,
     "the adapter's `req` references changed — a new one is a pre-lookup channel into the raw request; " +
     "if this is a legitimate adapter change, update the count deliberately");
 });

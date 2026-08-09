@@ -39,11 +39,14 @@ never holds a pathname at all.
   (`ownCallback`) that the facade invokes — with no `this` a handler can use and
   no forwarded arguments — because Node invokes a response/emitter callback with
   the native object as its `this` (`res.end(chunk, cb)` runs `cb` with
-  `this === res`; `req.on("close", cb)` runs it with `this === req`). The same
-  wrapper guards the request side: `ctx.onClose`. **The boundary is that neither
-  the request nor anything reaching it is in handler scope, passes through a
-  handler's hands, OR arrives as the receiver of handler code the facade let a
-  native object call.**
+  `this === res`; `req.on("close", cb)` runs it with `this === req`). The request
+  side (`ctx.onClose`, in `app/handler-context.mjs`) uses the same wrapper AND
+  returns nothing: `EventEmitter.on` returns the emitter — the native request —
+  so an expression-bodied arrow handed it straight back as the RETURN value, a
+  crossing the callback wrapper did not cover. **The boundary is that neither the
+  request nor anything reaching it is in handler scope, passes through a handler's
+  hands, arrives as the receiver of handler code a native object invokes, OR is
+  returned to the handler from a call it made.**
 
   MF1's history is FIVE narrower fixes, each of which stated a rule too narrow
   and leaked through the next crossing: a spelling guard, then `res.req`, then a
@@ -113,9 +116,14 @@ exist to catch a change that reintroduces it.
   no method returns/yields `res`, none read `this`, `pipeFrom` iterates a source
   without handing it the response, and (measured against a REAL `ServerResponse`)
   a handler callback passed to any method runs with no native `this` and no
-  native argument. `ownCallback` is tested directly for the request side
-  (`ctx.onClose`). sdk-qa's `pipe(res)` and `end(cb)` trojans are the negative
+  native argument. sdk-qa's `pipe(res)` and `end(cb)` trojans are the negative
   controls.
+- **ctx crossing matrix** (`test/handler-context.test.mjs`): drives the ACTUAL
+  `makeCtx` and asserts `ctx.onClose` leaks nothing native as `this`, as an
+  argument, or as the return value — with negative controls proven to go RED when
+  the wrapper or the return-handling is stripped. (An earlier request-side control
+  tested `ownCallback` in isolation and could not fail when the real wiring
+  broke.)
 - **Unwritability control** (`test/reserved-verbs.test.mjs`): plants sdk-qa's
   round-4 literal arm and round-5 derived-prefix arm at the top of the API flow
   and asserts each detonates as a `ReferenceError` naming the absent binding —

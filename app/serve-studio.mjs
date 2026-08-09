@@ -21,7 +21,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, routeRequest } from "./verbs.mjs";
-import { makeResFacade, ownCallback } from "./response-facade.mjs";
+import { makeResFacade } from "./response-facade.mjs";
+import { makeCtx } from "./handler-context.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -1306,19 +1307,9 @@ const handleRequest = async (req, res) => {
       // status the miss branch can have: the resolver returns an index and a
       // body object — data — never a closure and never a status.
       if (row) {
-        const ctx = {
-          method: req.method,
-          headers: req.headers,
-          searchParams: m.searchParams,
-          verb: row.verb,
-          rest: m.rest,
-          readBody: () => readBody(req),
-          // SAME CLASS as the response callbacks: `req.on("close", cb)` would
-          // invoke a handler's close callback with `this === req`. The callback
-          // is wrapped so the facade owns its invocation — called with no `req`
-          // as `this` and no native args.
-          onClose: (cb) => req.on("close", ownCallback(cb)),
-        };
+        // `ctx` is the request-side surface (app/handler-context.mjs): only data
+        // and callbacks the runtime owns, never the native request or an emitter.
+        const ctx = makeCtx(req, { searchParams: m.searchParams, verb: row.verb, rest: m.rest }, readBody);
         // A RESPONSE FACADE, not the raw `res` (MF1). Node's ServerResponse
         // back-references the request (`res.req`, the socket), so handing
         // handlers `res` let an ordinary handler read the url. The facade gives

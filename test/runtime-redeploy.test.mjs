@@ -368,6 +368,7 @@ test("starts when the manifest's whole directory is missing at boot", async (t) 
   // than by reading.
   fs.cpSync(path.join(REPO, "app", "verbs.mjs"), path.join(dir, "app", "verbs.mjs"));
   fs.cpSync(path.join(REPO, "app", "response-facade.mjs"), path.join(dir, "app", "response-facade.mjs"));
+  fs.cpSync(path.join(REPO, "app", "handler-context.mjs"), path.join(dir, "app", "handler-context.mjs"));
 
   const srv = await start(dir);
   t.after(() => srv.stop());
