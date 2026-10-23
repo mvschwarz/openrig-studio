@@ -581,8 +581,16 @@ function factoryState() {
   const attachment = typeof d.attached === "boolean"
     ? { attached: d.attached, reason: d.reason ?? null, detail: d.detail ?? null }
     : {};
+  // Finished work, when the generator sends it (optional; see the contract). Absent stays absent ("this provider doesn't send
+  // finished work"). Sent but not in the declared shape (rows not a list, a row that isn't an item with a string id) is carried as
+  // unreadable, never as "none finished", and never at the cost of the open work beside it.
+  const okRow = (r) => !!r && typeof r === "object" && !Array.isArray(r) && typeof r.id === "string";
+  const done = d.done === undefined ? {}
+    : d.done && typeof d.done === "object" && Array.isArray(d.done.rows) && d.done.rows.every(okRow)
+      ? { done: { rows: d.done.rows, coverage: d.done.coverage && typeof d.done.coverage === "object" && !Array.isArray(d.done.coverage) ? d.done.coverage : {} } }
+      : { done: { rows: [], coverage: { unreadable: "the finished work this box sent wasn't in the declared shape" } } };
   return { ok: true, rig: d.rig || "fixture", generatedAt: new Date().toISOString(), ...attachment,
-    seats: Array.isArray(d.seats) ? d.seats : [], queue: Array.isArray(d.queue) ? d.queue : [] };
+    seats: Array.isArray(d.seats) ? d.seats : [], queue: Array.isArray(d.queue) ? d.queue : [], ...done };
 }
 
 // ---- stream: SSE change-signal (signal-only contract) ----------------------

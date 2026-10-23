@@ -10,7 +10,7 @@ const surface = fs.readFileSync(SURFACE, "utf8");
 
 test("FLOOR renders seats and queue as semantic tables instead of cards", () => {
   assert.match(surface, /<title>Rig Floor<\/title>/, "positive control: loaded the FLOOR surface");
-  assert.equal((surface.match(/<table\b/g) || []).length, 2);
+  assert.equal((surface.match(/<table\b/g) || []).length, 3, "seats, queue and finished work");
 
   for (const heading of ["Seat", "Pod / member", "State", "Lifecycle", "Age", "Pending"]) {
     assert.match(surface, new RegExp(`<th[^>]*>${heading.replace(" / ", " \\/ ")}<\\/th>`, "i"));

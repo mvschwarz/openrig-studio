@@ -78,6 +78,16 @@
     .queue-title { color: var(--text); font-weight: 600; }
     .queue-state { color: var(--idle); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
     .route { color: var(--muted); overflow-wrap: anywhere; }
+    .item-id { display: block; margin-top: 3px; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    .result { max-width: 40ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .artifact { color: var(--muted); overflow-wrap: break-word; }
+    .unset { color: var(--muted); font-style: italic; }
+    .coverage { margin: -4px 0 10px; color: var(--muted); font-size: 11px; }
+    /* An element marked hidden stays hidden, whatever display a class gives it (the find box is display:flex). */
+    [hidden] { display: none !important; }
+    .find { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 18px; }
+    .find input { flex: 1 1 260px; max-width: 420px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .find output { color: var(--muted); font-size: 11px; }
     .notice { padding: 18px; color: var(--blocked); }
     footer { margin-top: 22px; color: var(--muted); font-size: 11px; }
     @media (max-width: 600px) {
@@ -93,6 +103,7 @@
       <div><div class="eyebrow">Live activity</div><h1 id="rig">Rig floor</h1></div>
       <div id="connection" class="connection"><span class="pulse"></span><span>connecting</span></div>
     </header>
+    <div class="find" id="findbox" role="search" hidden><input id="find" type="search" placeholder="Find work by id (qitem-…)" aria-label="Find work by id" autocomplete="off" spellcheck="false"><output id="found" aria-live="polite"></output></div>
     <div id="content"><div class="notice">Reading the runtime contract…</div></div>
     <footer id="updated"></footer>
   </main>
@@ -156,13 +167,56 @@
           <td class="numeric">${seat.ageMinutes == null ? 'unknown' : `${escapeHtml(seat.ageMinutes)}m`}</td>
           <td class="numeric">${escapeHtml(seat.pendingWork)}</td>
         </tr>`).join('') || '<tr><td class="empty" colspan="6">No seats reported.</td></tr>';
+      // Ids and the find box come with finished work: a generator that sends no `done` gets the floor exactly as before.
+      const showIds = !!(state.done && Array.isArray(state.done.rows));
+      document.querySelector('#findbox').hidden = !showIds;
       const queue = state.queue.map(item => `
-        <tr>
-          <td class="queue-title">${escapeHtml(item.title)}</td>
+        <tr${showIds ? ` data-id="${escapeHtml(item.id)}"` : ''}>
+          <td class="queue-title">${escapeHtml(item.title)}${showIds ? `<span class="item-id">${escapeHtml(item.id)}</span>` : ''}</td>
           <td class="queue-state">${escapeHtml(item.state)}</td>
           <td class="route">${escapeHtml(item.source)}</td>
           <td class="route">${escapeHtml(item.destination)}</td>
         </tr>`).join('') || '<tr><td class="empty" colspan="4">Queue is clear.</td></tr>';
+      // While a find is on, a table with no matching row says so instead of standing empty under its count.
+      const queueRows = queue + (showIds && state.queue.length ? '<tr id="nomatch-open" hidden><td class="empty" colspan="4">No match in the queue.</td></tr>' : '');
+
+      // Work that finished, from a provider that sends `done` (an older one doesn't, and then this section isn't drawn). The answer
+      // a seat closed the work with is its result; a field the work doesn't carry reads "not recorded", and a result the provider
+      // couldn't read says so instead of looking empty.
+      const unset = (text) => `<span class="unset">${text}</span>`;
+      // A closure in plain words; the queue's own word stays in the tooltip.
+      const SAY = { 'no-follow-on': 'Done, nothing follows', handed_off_to: 'Handed off to', blocked_on: 'Blocked on', denied: 'Denied', canceled: 'Canceled', escalation: 'Escalated' };
+      const decisionOf = (d) => !d?.reason ? unset('not recorded')
+        : `<span title="${escapeHtml(d.reason)}">${escapeHtml(SAY[d.reason] || d.reason)}${d.target ? `${SAY[d.reason] && /to$|on$/.test(SAY[d.reason]) ? ' ' : ': '}${escapeHtml(d.target)}` : ''}</span>`;
+      // An artifact reference may break after "@", ":", "/" or "#", not inside a word.
+      // Split the raw text first and escape each part: inserting after escaping would cut an entity (&#39;) apart.
+      const breakable = (t) => String(t).split(/(?<=[@:/#])/).map(escapeHtml).join('<wbr>');
+      const done = state.done && Array.isArray(state.done.rows) ? state.done : null;
+      const doneRows = done ? done.rows.map(item => {
+        if (!item || typeof item !== 'object') return '';
+        const decision = decisionOf(item.decision);
+        const answer = item.result ?? item.resolution;
+        const result = item.resultRead === false ? unset("couldn't be read") : typeof answer === 'string' && answer !== '' ? escapeHtml(answer) : unset('not recorded');
+        const closed = Date.parse(item.closedAt || '');
+        return `
+        <tr data-id="${escapeHtml(item.id)}">
+          <td class="queue-title">${escapeHtml(item.title)}<span class="item-id">${escapeHtml(item.id)}</span></td>
+          <td class="result">${result}</td>
+          <td class="route">${decision}</td>
+          <td class="artifact">${item.artifact ? breakable(item.artifact) : unset('not recorded')}</td>
+          <td class="numeric">${Number.isFinite(closed) ? escapeHtml(new Date(closed).toLocaleString(undefined, { timeZoneName: 'short' })) : unset('unknown')}</td>
+        </tr>`; }).join('') || `<tr><td class="empty" colspan="5">None of this rig's work among the newest ${escapeHtml(done.coverage?.looked ?? 0)} finished items on this box.</td></tr>` : '';
+      const cov = done?.coverage || {};
+      const doneSection = !done ? '' : cov.unreadable
+        ? `<section><h2>Done recently</h2><div class="notice">Finished work couldn't be read: ${escapeHtml(cov.unreadable)}.</div></section>`
+        : `<section>
+          <h2>Done recently · ${done.rows.length}</h2>
+          <p class="coverage">The newest ${escapeHtml(done.rows.length)} of this rig's finished work, from the newest ${escapeHtml(cov.looked ?? 0)} finished items on this box.</p>
+          <div class="table-wrap"><table aria-label="Finished work">
+            <thead><tr><th>Work</th><th>Result</th><th>Decision</th><th>Artifact</th><th class="numeric">Closed</th></tr></thead>
+            <tbody>${doneRows}${done.rows.length ? '<tr id="nomatch-done" hidden><td class="empty" colspan="5">No match in finished work.</td></tr>' : ''}</tbody>
+          </table></div>
+        </section>`;
 
       content.innerHTML = `
         ${welcomeHtml()}
@@ -182,11 +236,36 @@
           <h2>Queue · ${state.queue.length}</h2>
           <div class="table-wrap"><table aria-label="Rig queue">
             <thead><tr><th>Work</th><th>State</th><th>Source</th><th>Destination</th></tr></thead>
-            <tbody>${queue}</tbody>
+            <tbody>${queueRows}</tbody>
           </table></div>
-        </section>`;
+        </section>${doneSection}`;
+      lastState = state;
+      findWork();
       updated.textContent = `Runtime snapshot · ${new Date(state.generatedAt).toLocaleString()}`;
     }
+
+    // Find by id: only among the work this floor already holds (this rig's open work and its newest finished work); it reads
+    // nothing else. Kept outside #content so a refresh doesn't clear what was typed, and applied again after every refresh.
+    let lastState = null;
+    const findInput = document.querySelector('#find'), found = document.querySelector('#found');
+    // "This rig's" work is work with one of this floor's seats at either end: a generator that still sends other rigs' open work
+    // can't make the find box call that ours.
+    function findWork() {
+      const q = findInput.value.trim();
+      const seats = new Set((lastState?.seats || []).map(s => s.seat));
+      const ours = item => item && (seats.has(item.source) || seats.has(item.destination));
+      const hit = item => ours(item) && String(item.id).includes(q);
+      const openHits = (lastState?.queue || []).filter(hit), doneHits = (lastState?.done?.rows || []).filter(hit);
+      const shown = new Set([...openHits, ...doneHits].map(item => String(item.id)));
+      for (const row of content.querySelectorAll('tr[data-id]')) row.hidden = !!q && !shown.has(row.dataset.id);
+      for (const [sel, hits] of [['#nomatch-open', openHits], ['#nomatch-done', doneHits]]) { const r = document.querySelector(sel); if (r) r.hidden = !q || hits.length > 0; }
+      if (!q) { found.textContent = ''; return; }
+      const done = lastState?.done;
+      found.textContent = openHits.length || doneHits.length ? `${openHits.length} open, ${doneHits.length} finished`
+        : done?.coverage?.unreadable ? "Not in this rig's open work. Finished work couldn't be read, so this can't say whether it finished."
+        : `No work with that id in this rig's open work or its newest ${done?.rows?.length ?? 0} finished items (older finished work isn't searched).`;
+    }
+    findInput.addEventListener('input', findWork);
 
     // The box's own introduction, declared in its manifest. Absent on a box
     // that declares none, which is the normal case — this surface ships to
