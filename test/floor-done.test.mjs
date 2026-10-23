@@ -137,3 +137,22 @@ test("an artifact reference wraps without changing its text: an apostrophe or am
   assert.equal(text, ref, "the rendered text is the reference itself");
   assert.equal((cell.match(/<wbr>/g) || []).length, 4, "after /, #, @ and :");
 });
+
+// A finished item's outcome often lives in its resolution, with no closing note or a short one (a correction). Both show:
+// the resolution first, then a different closing note, labelled. Fails on da0d723, which showed the note and hid the resolution.
+test("Result shows the resolution AND a different closing note; either alone is the result; an unread note doesn't hide the resolution", () => {
+  const { ctx, els } = page();
+  const row = (extra) => ({ ...DONE.rows[1], id: `qitem-r-${Object.keys(extra).join("-")}`, ...extra });
+  const rows = [row({ resolution: "Outcome: README fixed in 4c1e9a2; the revision added the macOS note.", result: "Correction: line 41, not 40.", resultRead: true }),
+    row({ resolution: "Only an outcome.", result: null, resultRead: true }),
+    row({ resolution: null, result: "Only a closing note.", resultRead: true }),
+    row({ resolution: "Same text.", result: "Same text.", resultRead: true }),
+    row({ resolution: "Outcome stands.", result: null, resultRead: false })];
+  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: [], done: { rows, coverage: { looked: 5 } } });
+  const cells = [...els["#content"].innerHTML.matchAll(/<td class="result">([\s\S]*?)<\/td>/g)].map((m) => m[1]);
+  assert.equal(cells[0], 'Outcome: README fixed in 4c1e9a2; the revision added the macOS note.\n<span class="result-note">Closing note: Correction: line 41, not 40.</span>');
+  assert.equal(cells[1], "Only an outcome.");
+  assert.equal(cells[2], "Only a closing note.");
+  assert.equal(cells[3], "Same text.", "the same text isn't shown twice");
+  assert.equal(cells[4], 'Outcome stands.\n<span class="unset">(the closing note couldn\'t be read)</span>');
+});
