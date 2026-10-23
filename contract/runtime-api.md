@@ -129,7 +129,8 @@ by this contract (declared here, field-by-field), not by any backing system.
 
   A field the item doesn't carry is `null`, never invented. `resultRead: false` means the result couldn't be read (not that
   there is none). `coverage` says how much was looked at; `{ "unreadable": "<why>" }` there means finished work couldn't be read.
-  The runtime carries `done` through only in this shape. Its text is shown as written: this runtime has no private display mode.
+  The runtime carries `done` through only in this shape: a `done` that is sent but isn't in it (rows not a list, a row without a
+  string `id`) arrives as `{ "rows": [], "coverage": { "unreadable": "<why>" } }`, never as none, and the open work is kept. Its text is shown as written: this runtime has no private display mode.
 
 ## stream
 

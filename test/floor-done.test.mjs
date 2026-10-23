@@ -22,6 +22,7 @@ const DONE = { rows: [
   { id: "qitem-20261023065800-cccc", state: "done", title: "Unread", source: "lab-qa@lab", destination: "lab-impl@lab",
     closedAt: "2026-10-23T06:58:00.000Z", decision: { reason: "handed_off_to", target: "qitem-x" }, result: null, resultRead: false, artifact: null },
 ], coverage: { looked: 40, ours: 3, shown: 3, limit: 100 } };
+const SEATS = [{ seat: "lab-impl@lab" }, { seat: "lab-qa@lab" }];
 const OPEN = [{ id: "qitem-20261023071000-dddd", state: "pending", destination: "lab-impl@lab", source: "assistant@lab", tags: [], updated: "2026-10-23T07:10:00.000Z", title: "Open work" }];
 
 const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.once("error", reject); s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
@@ -37,11 +38,15 @@ async function stateFrom(fixture) {
   } finally { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-test("the runtime carries `done` through in its declared shape; absent stays absent; a malformed one is dropped", async () => {
+test("the runtime carries `done` through in its declared shape; absent stays absent; a malformed one is carried as unreadable, never as none", async () => {
   const s = await stateFrom({ rig: "lab", attached: true, seats: [], queue: OPEN, done: DONE });
   assert.deepEqual(s.done, DONE); assert.deepEqual(s.queue, OPEN, "queue is unchanged");
   assert.equal("done" in await stateFrom({ rig: "lab", attached: true, seats: [], queue: [] }), false, "a generator that sends no done: absent, not empty");
-  assert.equal("done" in await stateFrom({ rig: "lab", attached: true, seats: [], queue: [], done: "nope" }), false);
+  for (const bad of ["nope", { rows: [null] }, { rows: [{ title: "no id" }] }, { rows: "x" }, null]) {
+    const s2 = await stateFrom({ rig: "lab", attached: true, seats: [], queue: OPEN, done: bad });
+    assert.deepEqual(s2.done, { rows: [], coverage: { unreadable: "the finished work this box sent wasn't in the declared shape" } }, JSON.stringify(bad));
+    assert.deepEqual(s2.queue, OPEN, "a bad finished-work block never costs the open work");
+  }
   assert.deepEqual((await stateFrom({ rig: "lab", attached: true, seats: [], queue: [], done: { rows: [] } })).done, { rows: [], coverage: {} });
 });
 
@@ -60,7 +65,7 @@ function page() {
 
 test("FLOOR draws 'Done recently': id, decision, result (escaped), artifact; 'not recorded' and 'couldn't be read' are said; the open count is open work only", () => {
   const { ctx, els } = page();
-  ctx.render({ ok: true, rig: "lab", generatedAt: "2026-10-23T07:11:00.000Z", attached: true, seats: [], queue: OPEN, done: DONE });
+  ctx.render({ ok: true, rig: "lab", generatedAt: "2026-10-23T07:11:00.000Z", attached: true, seats: SEATS, queue: OPEN, done: DONE });
   const h = els["#content"].innerHTML;
   assert.match(h, /<b>1<\/b><span>queue items<\/span>/, "finished work doesn't count as queued");
   assert.match(h, /<h2>Done recently · 3<\/h2>/);
@@ -80,14 +85,40 @@ test("FLOOR draws 'Done recently': id, decision, result (escaped), artifact; 'no
 
 test("find by id looks only at the floor's own rows: matches are kept, others hidden, and a miss says so plainly", () => {
   const { ctx, els, rowsOf } = page();
-  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: [], queue: OPEN, done: DONE });
+  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: OPEN, done: DONE });
   els["#find"].value = "aaaa"; ctx.findWork();
   const rows = rowsOf(els["#content"].innerHTML);
   assert.deepEqual(rows.filter((r) => !r.hidden).map((r) => r.dataset.id), ["qitem-20261023070000-aaaa"]);
   assert.equal(els["#found"].textContent, "0 open, 1 finished");
   els["#find"].value = "qitem-from-another-rig"; ctx.findWork();
-  assert.equal(els["#found"].textContent, "No work with that id in this rig's open work or its newest 3 finished items.");
+  assert.equal(els["#found"].textContent, "No work with that id in this rig's open work or its newest 3 finished items (older finished work isn't searched).");
   assert.ok(rowsOf(els["#content"].innerHTML).every((r) => r.hidden));
   els["#find"].value = ""; ctx.findWork(); assert.equal(els["#found"].textContent, ""); assert.ok(rowsOf(els["#content"].innerHTML).every((r) => !r.hidden));
   assert.doesNotMatch(surface.slice(surface.indexOf("function findWork"), surface.indexOf("findInput.addEventListener")), /fetch\(/, "the find box reads nothing");
+});
+
+// Review fixes on the first candidate. Each fails on it.
+test("find counts only this floor's work: another rig's open item a generator still sends is neither found nor shown", () => {
+  const { ctx, els, rowsOf } = page();
+  const foreign = { id: "qitem-20261023071100-ffff", state: "pending", destination: "y@other", source: "x@other", tags: [], updated: "x", title: "theirs" };
+  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: [...OPEN, foreign], done: DONE });
+  els["#find"].value = "ffff"; ctx.findWork();
+  assert.match(els["#found"].textContent, /^No work with that id in this rig's open work/);
+  assert.ok(rowsOf(els["#content"].innerHTML).every((r) => r.hidden));
+  els["#find"].value = "dddd"; ctx.findWork(); assert.equal(els["#found"].textContent, "1 open, 0 finished");
+});
+
+test("bounded and unreadable finished work are said as such: no 'yet', and find doesn't claim a miss it can't know", () => {
+  const { ctx, els } = page();
+  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: OPEN, done: { rows: [], coverage: { looked: 100, ours: 0, shown: 0, limit: 100 } } });
+  assert.match(els["#content"].innerHTML, /None of this rig's work among the newest 100 finished items on this box\./); assert.doesNotMatch(els["#content"].innerHTML, /yet/);
+  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: OPEN, done: { rows: [], coverage: { unreadable: "rig queue timed out" } } });
+  els["#find"].value = "qitem-anything"; ctx.findWork();
+  assert.equal(els["#found"].textContent, "Not in this rig's open work. Finished work couldn't be read, so this can't say whether it finished.");
+});
+
+test("a hidden element stays hidden whatever a class says: the stylesheet makes [hidden] win", () => {
+  assert.match(surface, /\[hidden\] \{ display: none !important; \}/);
+  assert.match(surface, /\.find \{ display: flex;/, "the rule [hidden] has to beat is still there (positive control)");
+  assert.match(surface, /<div class="find" id="findbox" role="search" hidden>/);
 });

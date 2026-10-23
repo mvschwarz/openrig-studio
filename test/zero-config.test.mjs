@@ -133,15 +133,31 @@ test("zero-config: the served rail and its bytes are unchanged from before the c
   assert.deepEqual(await after.json("/surfaces.json"), await before.json("/surfaces.json"),
     "the zero-config manifest projection changed");
   // The SDK's own surface for a consumer who adopted nothing. Its bytes can't stay frozen forever (FLOOR gained finished work,
-  // shown only to a generator that sends `done`), so what is held is what such a consumer SEES: the page's markup outside its
-  // style and script, with the find box that stays hidden without `done` taken out, and what render() draws from the shipped
-  // fixture state. A change a zero-config consumer would see still fails here.
+  // shown only to a generator that sends `done`), so what is held is what such a consumer SEES, styles included:
+  // - the markup outside style and script is the same, apart from elements marked hidden, and those count as unseen ONLY because
+  //   the stylesheet says `[hidden] { display: none !important; }` (no class rule can then show them);
+  // - no style rule was removed or changed, and every added rule names only classes and ids that page doesn't show;
+  // - render() draws the same thing from the shipped fixture state.
   const [a, b] = [await after.text("/surfaces/floor.html"), await before.text("/surfaces/floor.html")];
-  const shown = (h) => h.replace(/<style>[\s\S]*?<\/style>/, "").replace(/<script>[\s\S]*?<\/script>/, "").replace(/<div class="find" id="findbox"[^>]*\bhidden\b[^>]*>[\s\S]*?<\/div>\s*/, "");
-  assert.equal(shown(a), shown(b), "the markup of the SDK's own surface changed for a consumer who adopted nothing");
+  const styleOf = (h) => (h.match(/<style>([\s\S]*?)<\/style>/)?.[1] || "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/@media[^{]*\{/g, "");
+  const rules = (h) => new Set([...styleOf(h).matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => `${m[1].trim().replace(/\s+/g, " ")} { ${m[2].trim().replace(/\s+/g, " ")} }`));
+  const [ra, rb] = [rules(a), rules(b)];
+  assert.ok(rb.size > 10, `positive control: the baseline's rules were read (${rb.size})`);
+  assert.deepEqual([...rb].filter((r) => !ra.has(r)), [], "a style rule the zero-config page uses was removed or changed");
+  const hides = ra.has("[hidden] { display: none !important; }");
+  const markup = (h) => h.replace(/<style>[\s\S]*?<\/style>/, "").replace(/<script>[\s\S]*?<\/script>/, "");
+  const unhidden = (h) => (hides ? h.replace(/<(\w+)\b[^>]*\shidden\b[^>]*>[\s\S]*?<\/\1>\s*/g, "") : h);
+  assert.equal(unhidden(markup(a)), markup(b), "the visible markup of the SDK's own surface changed for a consumer who adopted nothing");
   const fixture = await after.json("/api/factory/state");
   assert.equal("done" in fixture, false, "positive control: the shipped fixture sends no finished work");
-  assert.equal(renderedFloor(a, fixture), renderedFloor(b, fixture), "what FLOOR draws changed for a consumer who adopted nothing");
+  const drawn = renderedFloor(a, fixture);
+  assert.equal(drawn, renderedFloor(b, fixture), "what FLOOR draws changed for a consumer who adopted nothing");
+  const seen = unhidden(markup(a)) + drawn;
+  for (const r of [...ra].filter((x) => !rb.has(x) && x !== "[hidden] { display: none !important; }")) {
+    const names = r.split("{")[0].match(/[.#][A-Za-z_][\w-]*/g) || [];
+    for (const n of names) assert.ok(!new RegExp(n[0] === "." ? `class="[^"]*\\b${n.slice(1)}\\b` : `id="${n.slice(1)}"`).test(seen),
+      `the added rule "${r}" styles ${n}, which a consumer who adopted nothing sees`);
+  }
 });
 
 test("zero-config: the contract answer is additive — one field gained, none lost, version unmoved", async (t) => {

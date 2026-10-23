@@ -82,6 +82,8 @@
     .result { max-width: 40ch; white-space: pre-wrap; overflow-wrap: anywhere; }
     .unset { color: var(--muted); font-style: italic; }
     .coverage { margin: -4px 0 10px; color: var(--muted); font-size: 11px; }
+    /* An element marked hidden stays hidden, whatever display a class gives it (the find box is display:flex). */
+    [hidden] { display: none !important; }
     .find { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 18px; }
     .find input { flex: 1 1 260px; max-width: 420px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .find output { color: var(--muted); font-size: 11px; }
@@ -181,6 +183,7 @@
       const unset = (text) => `<span class="unset">${text}</span>`;
       const done = state.done && Array.isArray(state.done.rows) ? state.done : null;
       const doneRows = done ? done.rows.map(item => {
+        if (!item || typeof item !== 'object') return '';
         const decision = item.decision?.reason ? `${escapeHtml(item.decision.reason)}${item.decision.target ? ` → ${escapeHtml(item.decision.target)}` : ''}` : unset('not recorded');
         const answer = item.result ?? item.resolution;
         const result = item.resultRead === false ? unset("couldn't be read") : typeof answer === 'string' && answer !== '' ? escapeHtml(answer) : unset('not recorded');
@@ -192,7 +195,7 @@
           <td class="result">${result}</td>
           <td class="route">${item.artifact ? escapeHtml(item.artifact) : unset('not recorded')}</td>
           <td class="numeric">${Number.isFinite(closed) ? escapeHtml(new Date(closed).toLocaleString()) : unset('unknown')}</td>
-        </tr>`; }).join('') || '<tr><td class="empty" colspan="5">No finished work on this rig yet.</td></tr>' : '';
+        </tr>`; }).join('') || `<tr><td class="empty" colspan="5">None of this rig's work among the newest ${escapeHtml(done.coverage?.looked ?? 0)} finished items on this box.</td></tr>` : '';
       const cov = done?.coverage || {};
       const doneSection = !done ? '' : cov.unreadable
         ? `<section><h2>Done recently</h2><div class="notice">Finished work couldn't be read: ${escapeHtml(cov.unreadable)}.</div></section>`
@@ -235,16 +238,21 @@
     // nothing else. Kept outside #content so a refresh doesn't clear what was typed, and applied again after every refresh.
     let lastState = null;
     const findInput = document.querySelector('#find'), found = document.querySelector('#found');
+    // "This rig's" work is work with one of this floor's seats at either end: a generator that still sends other rigs' open work
+    // can't make the find box call that ours.
     function findWork() {
       const q = findInput.value.trim();
-      const rows = [...content.querySelectorAll('tr[data-id]')];
-      for (const row of rows) row.hidden = !!q && !row.dataset.id.includes(q);
+      const seats = new Set((lastState?.seats || []).map(s => s.seat));
+      const ours = item => item && (seats.has(item.source) || seats.has(item.destination));
+      const hit = item => ours(item) && String(item.id).includes(q);
+      const openHits = (lastState?.queue || []).filter(hit), doneHits = (lastState?.done?.rows || []).filter(hit);
+      const shown = new Set([...openHits, ...doneHits].map(item => String(item.id)));
+      for (const row of content.querySelectorAll('tr[data-id]')) row.hidden = !!q && !shown.has(row.dataset.id);
       if (!q) { found.textContent = ''; return; }
-      const open = (lastState?.queue || []).filter(item => String(item.id).includes(q)).length;
-      const doneN = (lastState?.done?.rows || []).filter(item => String(item.id).includes(q)).length;
-      found.textContent = open || doneN
-        ? `${open} open, ${doneN} finished`
-        : lastState?.done ? `No work with that id in this rig's open work or its newest ${lastState.done.rows.length} finished items.` : 'No work with that id in this rig\'s open work.';
+      const done = lastState?.done;
+      found.textContent = openHits.length || doneHits.length ? `${openHits.length} open, ${doneHits.length} finished`
+        : done?.coverage?.unreadable ? "Not in this rig's open work. Finished work couldn't be read, so this can't say whether it finished."
+        : `No work with that id in this rig's open work or its newest ${done?.rows?.length ?? 0} finished items (older finished work isn't searched).`;
     }
     findInput.addEventListener('input', findWork);
 
