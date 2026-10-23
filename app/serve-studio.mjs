@@ -581,8 +581,12 @@ function factoryState() {
   const attachment = typeof d.attached === "boolean"
     ? { attached: d.attached, reason: d.reason ?? null, detail: d.detail ?? null }
     : {};
+  // Finished work, when the generator sends it (optional; see the contract). Carried only in its declared shape, so a surface
+  // can tell "this provider doesn't send finished work" (absent) from "none finished" (rows: []).
+  const done = d.done && typeof d.done === "object" && Array.isArray(d.done.rows)
+    ? { done: { rows: d.done.rows, coverage: d.done.coverage && typeof d.done.coverage === "object" ? d.done.coverage : {} } } : {};
   return { ok: true, rig: d.rig || "fixture", generatedAt: new Date().toISOString(), ...attachment,
-    seats: Array.isArray(d.seats) ? d.seats : [], queue: Array.isArray(d.queue) ? d.queue : [] };
+    seats: Array.isArray(d.seats) ? d.seats : [], queue: Array.isArray(d.queue) ? d.queue : [], ...done };
 }
 
 // ---- stream: SSE change-signal (signal-only contract) ----------------------

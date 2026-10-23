@@ -23,8 +23,20 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// What FLOOR's own script draws into #content from one state, run with just enough of a page (no network, no timers fired).
+function renderedFloor(html, state) {
+  const el = () => ({ innerHTML: "", textContent: "", value: "", className: "", hidden: true, lastElementChild: { textContent: "" }, addEventListener() {}, querySelectorAll: () => [] });
+  const els = {};
+  const ctx = { document: { querySelector: (s) => (els[s] ??= el()) }, fetch: () => new Promise(() => {}), EventSource: function () {}, setInterval, clearInterval, setTimeout, clearTimeout, parent: { postMessage() {} }, console };
+  vm.createContext(ctx);
+  vm.runInContext(html.match(/<script>([\s\S]*)<\/script>/)[1].replace(/\bboot\(\);\s*$/, ""), ctx);
+  ctx.render(state);
+  return els["#content"].innerHTML;
+}
 
 const git = (...args) => {
   const r = spawnSync("git", args, { cwd: REPO, encoding: "utf8" });
@@ -120,8 +132,16 @@ test("zero-config: the served rail and its bytes are unchanged from before the c
 
   assert.deepEqual(await after.json("/surfaces.json"), await before.json("/surfaces.json"),
     "the zero-config manifest projection changed");
-  assert.equal(await after.text("/surfaces/floor.html"), await before.text("/surfaces/floor.html"),
-    "the bytes of the SDK's own surface changed for a consumer who adopted nothing");
+  // The SDK's own surface for a consumer who adopted nothing. Its bytes can't stay frozen forever (FLOOR gained finished work,
+  // shown only to a generator that sends `done`), so what is held is what such a consumer SEES: the page's markup outside its
+  // style and script, with the find box that stays hidden without `done` taken out, and what render() draws from the shipped
+  // fixture state. A change a zero-config consumer would see still fails here.
+  const [a, b] = [await after.text("/surfaces/floor.html"), await before.text("/surfaces/floor.html")];
+  const shown = (h) => h.replace(/<style>[\s\S]*?<\/style>/, "").replace(/<script>[\s\S]*?<\/script>/, "").replace(/<div class="find" id="findbox"[^>]*\bhidden\b[^>]*>[\s\S]*?<\/div>\s*/, "");
+  assert.equal(shown(a), shown(b), "the markup of the SDK's own surface changed for a consumer who adopted nothing");
+  const fixture = await after.json("/api/factory/state");
+  assert.equal("done" in fixture, false, "positive control: the shipped fixture sends no finished work");
+  assert.equal(renderedFloor(a, fixture), renderedFloor(b, fixture), "what FLOOR draws changed for a consumer who adopted nothing");
 });
 
 test("zero-config: the contract answer is additive — one field gained, none lost, version unmoved", async (t) => {
