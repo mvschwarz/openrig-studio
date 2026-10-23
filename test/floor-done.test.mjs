@@ -126,3 +126,14 @@ test("a hidden element stays hidden whatever a class says: the stylesheet makes 
   assert.match(surface, /\.find \{ display: flex;/, "the rule [hidden] has to beat is still there (positive control)");
   assert.match(surface, /<div class="find" id="findbox" role="search" hidden>/);
 });
+
+test("an artifact reference wraps without changing its text: an apostrophe or ampersand survives the break points", () => {
+  const { ctx, els } = page();
+  const ref = "folder/owner's-output#1 & more@v2:x";
+  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: [], done: { rows: [{ ...DONE.rows[0], artifact: ref }], coverage: { looked: 1 } } });
+  const cell = els["#content"].innerHTML.match(/<td class="artifact">([\s\S]*?)<\/td>/)[1];
+  assert.doesNotMatch(cell, /&#<wbr>/, "no entity is cut");
+  const text = cell.replace(/<wbr>/g, "").replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+  assert.equal(text, ref, "the rendered text is the reference itself");
+  assert.equal((cell.match(/<wbr>/g) || []).length, 4, "after /, #, @ and :");
+});

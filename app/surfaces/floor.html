@@ -189,7 +189,8 @@
       const decisionOf = (d) => !d?.reason ? unset('not recorded')
         : `<span title="${escapeHtml(d.reason)}">${escapeHtml(SAY[d.reason] || d.reason)}${d.target ? `${SAY[d.reason] && /to$|on$/.test(SAY[d.reason]) ? ' ' : ': '}${escapeHtml(d.target)}` : ''}</span>`;
       // An artifact reference may break after "@", ":", "/" or "#", not inside a word.
-      const breakable = (t) => escapeHtml(t).replace(/([@:/#])/g, '$1<wbr>');
+      // Split the raw text first and escape each part: inserting after escaping would cut an entity (&#39;) apart.
+      const breakable = (t) => String(t).split(/(?<=[@:/#])/).map(escapeHtml).join('<wbr>');
       const done = state.done && Array.isArray(state.done.rows) ? state.done : null;
       const doneRows = done ? done.rows.map(item => {
         if (!item || typeof item !== 'object') return '';
