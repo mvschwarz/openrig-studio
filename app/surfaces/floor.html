@@ -82,6 +82,7 @@
     .result { max-width: 40ch; white-space: pre-wrap; overflow-wrap: anywhere; }
     .artifact { color: var(--muted); overflow-wrap: break-word; }
     .unset { color: var(--muted); font-style: italic; }
+    .result-note { display: block; margin-top: 6px; color: var(--muted); }
     .coverage { margin: -4px 0 10px; color: var(--muted); font-size: 11px; }
     /* An element marked hidden stays hidden, whatever display a class gives it (the find box is display:flex). */
     [hidden] { display: none !important; }
@@ -195,8 +196,15 @@
       const doneRows = done ? done.rows.map(item => {
         if (!item || typeof item !== 'object') return '';
         const decision = decisionOf(item.decision);
-        const answer = item.result ?? item.resolution;
-        const result = item.resultRead === false ? unset("couldn't be read") : typeof answer === 'string' && answer !== '' ? escapeHtml(answer) : unset('not recorded');
+        // Both answers a finished item can carry: its resolution (the outcome stored on the item, often the whole answer) first,
+        // then the note it was closed with when that says something else. Either one alone is the result.
+        const text = (v) => (typeof v === 'string' && v.trim() !== '' ? v : null);
+        const outcome = text(item.resolution), note = item.resultRead === false ? null : text(item.result);
+        const parts = [];
+        if (outcome) parts.push(escapeHtml(outcome));
+        if (note && note !== outcome) parts.push(outcome ? `<span class="result-note">Closing note: ${escapeHtml(note)}</span>` : escapeHtml(note));
+        if (item.resultRead === false) parts.push(outcome ? unset("(the closing note couldn't be read)") : unset("couldn't be read"));
+        const result = parts.length ? parts.join('\n') : unset('not recorded');
         const closed = Date.parse(item.closedAt || '');
         return `
         <tr data-id="${escapeHtml(item.id)}">
