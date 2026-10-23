@@ -54,7 +54,7 @@ test("the runtime carries `done` through in its declared shape; absent stays abs
 function page() {
   const el = (sel) => ({ sel, innerHTML: "", textContent: "", value: "", className: "", lastElementChild: { textContent: "" }, hidden: false,
     addEventListener() {}, querySelectorAll() { return rowsOf(this.innerHTML); } });
-  const els = { "#content": el("#content"), "#rig": el("#rig"), "#updated": el("#updated"), "#connection": el("#connection"), "#find": el("#find"), "#found": el("#found"), "#findbox": el("#findbox") };
+  const els = { "#content": el("#content"), "#rig": el("#rig"), "#updated": el("#updated"), "#connection": el("#connection"), "#find": el("#find"), "#found": el("#found"), "#findbox": el("#findbox"), "#nomatch-open": el("#nomatch-open"), "#nomatch-done": el("#nomatch-done") };
   const rows = new Map();
   const rowsOf = (html) => [...html.matchAll(/<tr data-id="([^"]+)">/g)].map((m) => rows.get(m[1]) || rows.set(m[1], { dataset: { id: m[1] }, hidden: false }).get(m[1]));
   const ctx = { document: { querySelector: (s) => els[s] }, fetch: () => new Promise(() => {}), EventSource: function () {}, setInterval, clearInterval, setTimeout, clearTimeout, parent: { postMessage() {} }, console };
@@ -71,12 +71,13 @@ test("FLOOR draws 'Done recently': id, decision, result (escaped), artifact; 'no
   assert.match(h, /<h2>Done recently · 3<\/h2>/);
   assert.match(h, /The newest 3 of this rig's finished work, from the newest 40 finished items on this box\./);
   assert.match(h, /<span class="item-id">qitem-20261023070000-aaaa<\/span>/);
-  assert.match(h, /<td class="route">no-follow-on<\/td>/);
+  assert.match(h, /<td class="route"><span title="no-follow-on">Done, nothing follows<\/span><\/td>/, "the decision in plain words, the queue's word in the tooltip");
+  assert.match(h, /<th>Work<\/th><th>Result<\/th><th>Decision<\/th><th>Artifact<\/th><th class="numeric">Closed<\/th>/, "the answer right after the work (ux 07:42Z)");
   assert.match(h, /<td class="result">Fixed &lt;b&gt;line 12&lt;\/b&gt;\.<\/td>/, "result text is escaped, never markup");
-  assert.match(h, /<td class="route">docs\/README\.md@1a2b3c4<\/td>/);
+  assert.match(h, /<td class="artifact">docs\/<wbr>README\.md@<wbr>1a2b3c4<\/td>/, "an artifact breaks after / @ : #, not inside a word");
   assert.equal((h.match(/<span class="unset">not recorded<\/span>/g) || []).length, 4, "row b: decision, result and artifact; row c: artifact only (its decision is recorded, its result couldn't be read)");
   assert.match(h, /<td class="result"><span class="unset">couldn't be read<\/span><\/td>/);
-  assert.match(h, /handed_off_to → qitem-x/);
+  assert.match(h, /<span title="handed_off_to">Handed off to qitem-x<\/span>/);
   ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: [], queue: [] });
   assert.doesNotMatch(els["#content"].innerHTML, /Done recently/, "a provider that sends no done: no section");
   ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: [], queue: [], done: { rows: [], coverage: { unreadable: "rig queue timed out" } } });
@@ -87,6 +88,9 @@ test("find by id looks only at the floor's own rows: matches are kept, others hi
   const { ctx, els, rowsOf } = page();
   ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: OPEN, done: DONE });
   els["#find"].value = "aaaa"; ctx.findWork();
+  assert.equal(els["#nomatch-open"].hidden, false, "the queue says it has no match instead of standing empty"); assert.equal(els["#nomatch-done"].hidden, true);
+  assert.match(els["#content"].innerHTML, /<tr id="nomatch-open" hidden><td class="empty" colspan="4">No match in the queue\.<\/td><\/tr>/);
+  assert.match(els["#content"].innerHTML, /<tr id="nomatch-done" hidden><td class="empty" colspan="5">No match in finished work\.<\/td><\/tr>/);
   const rows = rowsOf(els["#content"].innerHTML);
   assert.deepEqual(rows.filter((r) => !r.hidden).map((r) => r.dataset.id), ["qitem-20261023070000-aaaa"]);
   assert.equal(els["#found"].textContent, "0 open, 1 finished");

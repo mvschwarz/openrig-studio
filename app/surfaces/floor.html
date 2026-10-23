@@ -80,6 +80,7 @@
     .route { color: var(--muted); overflow-wrap: anywhere; }
     .item-id { display: block; margin-top: 3px; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
     .result { max-width: 40ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .artifact { color: var(--muted); overflow-wrap: break-word; }
     .unset { color: var(--muted); font-style: italic; }
     .coverage { margin: -4px 0 10px; color: var(--muted); font-size: 11px; }
     /* An element marked hidden stays hidden, whatever display a class gives it (the find box is display:flex). */
@@ -176,25 +177,33 @@
           <td class="route">${escapeHtml(item.source)}</td>
           <td class="route">${escapeHtml(item.destination)}</td>
         </tr>`).join('') || '<tr><td class="empty" colspan="4">Queue is clear.</td></tr>';
+      // While a find is on, a table with no matching row says so instead of standing empty under its count.
+      const queueRows = queue + (showIds && state.queue.length ? '<tr id="nomatch-open" hidden><td class="empty" colspan="4">No match in the queue.</td></tr>' : '');
 
       // Work that finished, from a provider that sends `done` (an older one doesn't, and then this section isn't drawn). The answer
       // a seat closed the work with is its result; a field the work doesn't carry reads "not recorded", and a result the provider
       // couldn't read says so instead of looking empty.
       const unset = (text) => `<span class="unset">${text}</span>`;
+      // A closure in plain words; the queue's own word stays in the tooltip.
+      const SAY = { 'no-follow-on': 'Done, nothing follows', handed_off_to: 'Handed off to', blocked_on: 'Blocked on', denied: 'Denied', canceled: 'Canceled', escalation: 'Escalated' };
+      const decisionOf = (d) => !d?.reason ? unset('not recorded')
+        : `<span title="${escapeHtml(d.reason)}">${escapeHtml(SAY[d.reason] || d.reason)}${d.target ? `${SAY[d.reason] && /to$|on$/.test(SAY[d.reason]) ? ' ' : ': '}${escapeHtml(d.target)}` : ''}</span>`;
+      // An artifact reference may break after "@", ":", "/" or "#", not inside a word.
+      const breakable = (t) => escapeHtml(t).replace(/([@:/#])/g, '$1<wbr>');
       const done = state.done && Array.isArray(state.done.rows) ? state.done : null;
       const doneRows = done ? done.rows.map(item => {
         if (!item || typeof item !== 'object') return '';
-        const decision = item.decision?.reason ? `${escapeHtml(item.decision.reason)}${item.decision.target ? ` → ${escapeHtml(item.decision.target)}` : ''}` : unset('not recorded');
+        const decision = decisionOf(item.decision);
         const answer = item.result ?? item.resolution;
         const result = item.resultRead === false ? unset("couldn't be read") : typeof answer === 'string' && answer !== '' ? escapeHtml(answer) : unset('not recorded');
         const closed = Date.parse(item.closedAt || '');
         return `
         <tr data-id="${escapeHtml(item.id)}">
           <td class="queue-title">${escapeHtml(item.title)}<span class="item-id">${escapeHtml(item.id)}</span></td>
-          <td class="route">${decision}</td>
           <td class="result">${result}</td>
-          <td class="route">${item.artifact ? escapeHtml(item.artifact) : unset('not recorded')}</td>
-          <td class="numeric">${Number.isFinite(closed) ? escapeHtml(new Date(closed).toLocaleString()) : unset('unknown')}</td>
+          <td class="route">${decision}</td>
+          <td class="artifact">${item.artifact ? breakable(item.artifact) : unset('not recorded')}</td>
+          <td class="numeric">${Number.isFinite(closed) ? escapeHtml(new Date(closed).toLocaleString(undefined, { timeZoneName: 'short' })) : unset('unknown')}</td>
         </tr>`; }).join('') || `<tr><td class="empty" colspan="5">None of this rig's work among the newest ${escapeHtml(done.coverage?.looked ?? 0)} finished items on this box.</td></tr>` : '';
       const cov = done?.coverage || {};
       const doneSection = !done ? '' : cov.unreadable
@@ -203,8 +212,8 @@
           <h2>Done recently · ${done.rows.length}</h2>
           <p class="coverage">The newest ${escapeHtml(done.rows.length)} of this rig's finished work, from the newest ${escapeHtml(cov.looked ?? 0)} finished items on this box.</p>
           <div class="table-wrap"><table aria-label="Finished work">
-            <thead><tr><th>Work</th><th>Decision</th><th>Result</th><th>Artifact</th><th class="numeric">Closed</th></tr></thead>
-            <tbody>${doneRows}</tbody>
+            <thead><tr><th>Work</th><th>Result</th><th>Decision</th><th>Artifact</th><th class="numeric">Closed</th></tr></thead>
+            <tbody>${doneRows}${done.rows.length ? '<tr id="nomatch-done" hidden><td class="empty" colspan="5">No match in finished work.</td></tr>' : ''}</tbody>
           </table></div>
         </section>`;
 
@@ -226,7 +235,7 @@
           <h2>Queue · ${state.queue.length}</h2>
           <div class="table-wrap"><table aria-label="Rig queue">
             <thead><tr><th>Work</th><th>State</th><th>Source</th><th>Destination</th></tr></thead>
-            <tbody>${queue}</tbody>
+            <tbody>${queueRows}</tbody>
           </table></div>
         </section>${doneSection}`;
       lastState = state;
@@ -248,6 +257,7 @@
       const openHits = (lastState?.queue || []).filter(hit), doneHits = (lastState?.done?.rows || []).filter(hit);
       const shown = new Set([...openHits, ...doneHits].map(item => String(item.id)));
       for (const row of content.querySelectorAll('tr[data-id]')) row.hidden = !!q && !shown.has(row.dataset.id);
+      for (const [sel, hits] of [['#nomatch-open', openHits], ['#nomatch-done', doneHits]]) { const r = document.querySelector(sel); if (r) r.hidden = !q || hits.length > 0; }
       if (!q) { found.textContent = ''; return; }
       const done = lastState?.done;
       found.textContent = openHits.length || doneHits.length ? `${openHits.length} open, ${doneHits.length} finished`
