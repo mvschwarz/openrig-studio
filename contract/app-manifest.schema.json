@@ -12,12 +12,15 @@
       "x-stability": "stable"
     },
     "id": {
-      "type": "string", "minLength": 1, "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$",
       "description": "Unique app id. Becomes the surface row id, so it is also a deep-link target.",
       "x-stability": "stable"
     },
     "name": {
-      "type": "string", "minLength": 1,
+      "type": "string",
+      "minLength": 1,
       "description": "Rail label. Short, uppercase by convention.",
       "x-stability": "stable"
     },
@@ -55,12 +58,14 @@
           "x-stability": "stable"
         },
         "path": {
-          "type": "string", "pattern": "^/",
+          "type": "string",
+          "pattern": "^/",
           "description": "Where it is served on the rail. Different from entry, and conflating the two is the common slip.",
           "x-stability": "stable"
         },
         "url": {
-          "type": "string", "pattern": "^https?://[^/?#\\s]+",
+          "type": "string",
+          "pattern": "^https?://[^/?#\\s]+",
           "description": "Absolute http(s) URL for an app that serves itself.",
           "x-stability": "provisional"
         },
@@ -82,7 +87,8 @@
       "required": ["package"],
       "properties": {
         "package": {
-          "type": "string", "minLength": 1,
+          "type": "string",
+          "minLength": 1,
           "description": "The provider package name.",
           "x-stability": "stable"
         },
@@ -135,17 +141,20 @@
       "description": "What the app needs from the host, whoever satisfies it. A provider may declare that it SHIPS a binary; that does not make the need untrue, so both stay legible.",
       "properties": {
         "binaries": {
-          "type": "array", "items": { "type": "string" },
+          "type": "array",
+          "items": { "type": "string" },
           "description": "Binaries the app needs on PATH or supplied by its provider.",
           "x-stability": "stable"
         },
         "ffmpeg_filters": {
-          "type": "array", "items": { "type": "string" },
+          "type": "array",
+          "items": { "type": "string" },
           "description": "Filters without which the app cannot work. Absence is fatal to an install.",
           "x-stability": "provisional"
         },
         "ffmpeg_filters_preferred": {
-          "type": "array", "items": { "type": "string" },
+          "type": "array",
+          "items": { "type": "string" },
           "description": "Filters that degrade a feature when absent. Must NOT block an install — losing a caption is not worth refusing a working studio.",
           "x-stability": "provisional"
         }

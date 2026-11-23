@@ -17,12 +17,12 @@
 
 /** Verbs answering state held in the runtime process. Reserved by construction. */
 export const RUNTIME_OWNED_VERBS = Object.freeze([
-  "/api/contract",        // this runtime describing itself
-  "/api/events",          // this runtime's change stream
-  "/api/factory/state",   // this runtime's view of the floor
-  "/api/focus",           // focusRecord — module state here
-  "/api/drive",           // driveOp + generation — module state here
-  "/api/capture-target",  // captureTarget, resolved against THIS box's bound roots
+  "/api/contract", // this runtime describing itself
+  "/api/events", // this runtime's change stream
+  "/api/factory/state", // this runtime's view of the floor
+  "/api/focus", // focusRecord — module state here
+  "/api/drive", // driveOp + generation — module state here
+  "/api/capture-target", // captureTarget, resolved against THIS box's bound roots
 ]);
 
 /**
@@ -31,7 +31,10 @@ export const RUNTIME_OWNED_VERBS = Object.freeze([
  * Reserving these would forbid the substitution a provider exists for.
  */
 export const SUBSTITUTABLE_VERBS = Object.freeze([
-  "/api/files/tree", "/api/files/read", "/api/files/raw", "/api/files/search",
+  "/api/files/tree",
+  "/api/files/read",
+  "/api/files/raw",
+  "/api/files/search",
   "/api/annotations",
 ]);
 
@@ -55,7 +58,7 @@ export const openVocabMap = (entries = []) => {
 
 /** Own-property lookup. Returns `undefined` for anything inherited. */
 export const lookup = (map, key) =>
-  (map && typeof key === "string" && Object.hasOwn(map, key)) ? map[key] : undefined;
+  map && typeof key === "string" && Object.hasOwn(map, key) ? map[key] : undefined;
 
 /**
  * Does a request path match a declared verb?
@@ -79,14 +82,12 @@ export const isRuntimeOwned = (pathname) =>
 
 // ---- routing: the ONE place a pathname meets the table ----------------------
 //
-// THE DATA BOUNDARY (PM's ratified criterion, round 5): after the table lookup
-// resolves a row, the raw pathname and the namespace prefix are OUT OF SCOPE
-// for everything downstream — the runtime's api flow never constructs a URL at
-// all. AND (round 6, sdk-qa): the path-bearing side holds NO RESPONSE
-// AUTHORITY. The previous shape returned an `execute` closure and took a
-// respond callback, so a resolver-internal special case could mint a 200
-// before the table lookup — the trusted region had moved in here. Now this
-// function returns ONLY DATA:
+// THE DATA BOUNDARY: after the table lookup resolves a row, the raw pathname
+// and the namespace prefix are OUT OF SCOPE for everything downstream — the
+// runtime's api flow never constructs a URL at all. AND the path-bearing side
+// holds NO RESPONSE AUTHORITY: if it returned a handler or took a respond
+// callback, a special case inside the resolver could answer before the table
+// lookup. So this function returns ONLY DATA:
 //
 //   null                                  — not the api namespace
 //   { index, rest, searchParams }         — a TABLE INDEX, never a handler
@@ -109,26 +110,31 @@ export function matchApi(rawUrl, base, routes) {
   if (!u.pathname.startsWith(API_PREFIX)) return null;
   const index = routes.findIndex((r) => verbMatches(r.verb, u.pathname));
   if (index === -1) {
-    return { index: -1, notFound: { ok: false,
-      error: `no such contract route: ${u.pathname} — see GET /api/contract for capabilities and contract/runtime-api.md for the verb set` } };
+    return {
+      index: -1,
+      notFound: {
+        ok: false,
+        error: `no such contract route: ${u.pathname} — see GET /api/contract for capabilities and contract/runtime-api.md for the verb set`,
+      },
+    };
   }
   return { index, rest: u.pathname.slice(routes[index].verb.length), searchParams: u.searchParams };
 }
 
-// THE SINGLE CONSUMER OF THE RAW REQUEST URL (RS-C1, review.r2): matchApi put
-// the PATHNAME behind a data boundary, but `req.url` — the raw request string —
-// was still readable at handleRequest's entry, one consumer earlier, before the
-// match ran. A pre-lookup arm deriving the prefix from fragments (`"/" + "api/"`)
-// served a 200 the table never saw and the literal fence never named.
+// THE SINGLE CONSUMER OF THE RAW REQUEST URL: matchApi puts the PATHNAME behind
+// a data boundary, but if `req.url` (the raw request string) were also read at
+// handleRequest's entry, before the match, a pre-lookup arm that built the
+// prefix from fragments (`"/" + "api/"`) could answer a request the table never
+// saw and the literal fence never named.
 //
-// So routeRequest is now the ONE place a raw request URL is consumed, and it
+// So routeRequest is the ONE place a raw request URL is consumed, and it
 // returns DATA: `{ api }` — a matchApi result, no url, no pathname — or
 // `{ static }` carrying the parsed URL the file flow legitimately needs. Because
 // handleRequest reads `req.url` exactly once (this call), a pre-lookup arm
 // branching on the path needs a SECOND `req.url` read, which the req.url-once
 // guard in reserved-verbs.test.mjs forbids. Same standard as matchApi, applied
 // to the raw string rather than the pathname. The api branch still holds no
-// pathname (round 5); the resolver still returns data, not authority (round 6).
+// pathname, and the resolver still returns data, not authority.
 export function routeRequest(rawUrl, base, routes) {
   const m = matchApi(rawUrl, base, routes);
   if (m) return { api: m };
@@ -137,9 +143,9 @@ export function routeRequest(rawUrl, base, routes) {
 
 // ---- the routing surface tripwire ------------------------------------------
 //
-// PM's ruling, third round on this class: OPT-IN DISCOVERY IS THE HOLE. A
-// registration wrapper (`serves()`) is a convention — a raw handler that never
-// calls it serves live while `runtime.routes` and the classifier stay blind.
+// OPT-IN DISCOVERY IS THE HOLE. A registration wrapper is a convention — a raw
+// handler that never calls it serves live while `runtime.routes` and the
+// classifier stay blind.
 // The mechanism is now a TABLE the dispatcher consults at request time, and the
 // same table is what `runtime.routes` and classification enumerate: one
 // structure, two readers, so a route cannot serve without a row.
@@ -152,11 +158,10 @@ export function routeRequest(rawUrl, base, routes) {
 // forces is "add a table row", which is the mechanism. Over-blocking is safe;
 // silence is not.
 //
-// (Its predecessor here was `discoverApiRoutes`, a regex over source recognising
-// specific comparison spellings — an approximation of the router, exactly what
-// PM ruled against, and each new spelling was invisible until added. A negative
-// tripwire has no per-spelling blind spot: it needs no grammar of arms, only the
-// literal every arm must carry.)
+// A regex over source that recognised specific comparison spellings would only
+// approximate the router, and each new spelling would be invisible until added.
+// A negative tripwire has no per-spelling blind spot: it needs no grammar of
+// arms, only the literal every arm must carry.
 
 export const ROUTING_SURFACE_BEGIN = ">>> API ROUTING SURFACE";
 export const ROUTING_SURFACE_END = "<<< API ROUTING SURFACE";

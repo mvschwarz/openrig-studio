@@ -25,11 +25,15 @@ import { composeRail, writeOverlayManifest } from "../tools/compose-rail.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once("error", reject);
-  s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
 
 async function start({ dir: existing, args = [] } = {}) {
   const dir = existing ?? fs.mkdtempSync(path.join(os.tmpdir(), "signal-"));
@@ -38,14 +42,24 @@ async function start({ dir: existing, args = [] } = {}) {
     fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
   }
   const port = await freePort();
-  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port), ...args],
-    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(
+    process.execPath,
+    [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port), ...args],
+    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] },
+  );
   const get = (p) => fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" });
   const deadline = Date.now() + 10_000;
   for (;;) {
-    try { await (await get("/api/contract")).json(); break; }
-    catch { if (Date.now() > deadline) { proc.kill(); throw new Error("never came up"); }
-            await new Promise((r) => setTimeout(r, 100)); }
+    try {
+      await (await get("/api/contract")).json();
+      break;
+    } catch {
+      if (Date.now() > deadline) {
+        proc.kill();
+        throw new Error("never came up");
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
   }
   return { dir, port, get, text: async (p) => (await get(p)).text(), stop: () => proc.kill() };
 }
@@ -60,9 +74,18 @@ function studio(pageBody, rowExtra = {}) {
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
   const root = path.join(dir, "studio");
   fs.mkdirSync(path.join(root, "apps"), { recursive: true });
-  fs.writeFileSync(path.join(root, "surfaces.json"), JSON.stringify({
-    surfaces: [{ id: "mine", name: "MINE", glyph: "▲", path: "/surfaces/mine.html", ...rowExtra }],
-  }, null, 2));
+  fs.writeFileSync(
+    path.join(root, "surfaces.json"),
+    JSON.stringify(
+      {
+        surfaces: [
+          { id: "mine", name: "MINE", glyph: "▲", path: "/surfaces/mine.html", ...rowExtra },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
   fs.writeFileSync(path.join(root, "mine.html"), pageBody);
   return { dir, root };
 }
@@ -83,7 +106,10 @@ test("the runtime reports a process identity at /api/contract", async (t) => {
   t.after(() => s.stop());
   const c = await (await s.get("/api/contract")).json();
   assert.equal(typeof c.runtime.boot, "string");
-  assert.ok(c.runtime.boot.length >= 8, `boot id too short to be distinguishing: ${c.runtime.boot}`);
+  assert.ok(
+    c.runtime.boot.length >= 8,
+    `boot id too short to be distinguishing: ${c.runtime.boot}`,
+  );
 });
 
 test("the identity is STABLE across reads — it marks the process, not the request", async (t) => {
@@ -126,22 +152,34 @@ test("an edit that has NOT reached the browser does not move the identity — an
 
   // Fixture control: the composed page really is the one being served, so the
   // "unchanged" readings below are about the runtime and not about a broken setup.
-  assert.match(await a.text("/surfaces/mine.html"), /VERSION-ONE/,
-    "fixture broken: the composed surface is not being served");
+  assert.match(
+    await a.text("/surfaces/mine.html"),
+    /VERSION-ONE/,
+    "fixture broken: the composed surface is not being served",
+  );
   const before = (await (await a.get("/api/contract")).json()).runtime.boot;
   assert.equal(typeof before, "string", "no identity to compare");
 
   // The developer — or an agent — edits the SOURCE.
   fs.writeFileSync(path.join(root, "mine.html"), "<html>VERSION-TWO</html>");
-  assert.match(fs.readFileSync(path.join(root, "mine.html"), "utf8"), /VERSION-TWO/,
-    "fixture broken: the edit did not land, so nothing below is under test");
-  await new Promise((r) => setTimeout(r, 1500));   // past the watch AND the 1s integrity floor
+  assert.match(
+    fs.readFileSync(path.join(root, "mine.html"), "utf8"),
+    /VERSION-TWO/,
+    "fixture broken: the edit did not land, so nothing below is under test",
+  );
+  await new Promise((r) => setTimeout(r, 1500)); // past the watch AND the 1s integrity floor
 
-  assert.match(await a.text("/surfaces/mine.html"), /VERSION-ONE/,
-    "the edit reached the browser with no restart — this control no longer tests what it claims");
+  assert.match(
+    await a.text("/surfaces/mine.html"),
+    /VERSION-ONE/,
+    "the edit reached the browser with no restart — this control no longer tests what it claims",
+  );
   const after = (await (await a.get("/api/contract")).json()).runtime.boot;
-  assert.equal(after, before,
-    "a source edit moved the process identity — the trigger is watching the file, not the restart");
+  assert.equal(
+    after,
+    before,
+    "a source edit moved the process identity — the trigger is watching the file, not the restart",
+  );
 
   a.stop();
 
@@ -152,8 +190,11 @@ test("an edit that has NOT reached the browser does not move the identity — an
   const b = await start({ dir, args: ["--surfaces", overlay] });
   t.after(() => b.stop());
 
-  assert.match(await b.text("/surfaces/mine.html"), /VERSION-TWO/,
-    "the restart did not pick up the edit, so the pairing proves nothing");
+  assert.match(
+    await b.text("/surfaces/mine.html"),
+    /VERSION-TWO/,
+    "the restart did not pick up the edit, so the pairing proves nothing",
+  );
   const restarted = (await (await b.get("/api/contract")).json()).runtime.boot;
   assert.notEqual(restarted, before, "the restart did not change the identity");
 });
@@ -165,7 +206,11 @@ test("the runtime serves the change-signal helper at a stable path", async (t) =
   assert.equal(r.status, 200);
   assert.match(r.headers.get("content-type") || "", /javascript/);
   const body = await r.text();
-  assert.match(body, /export function watchSignal/, "the helper does not export the documented entry point");
+  assert.match(
+    body,
+    /export function watchSignal/,
+    "the helper does not export the documented entry point",
+  );
 });
 
 // MOVED — see test/contract-response-parity.test.mjs, which owns doc/response
@@ -186,12 +231,17 @@ test("a declared preserve list is ACCEPTED and reaches the served row", async (t
 
   const m = (await (await s.get("/api/contract")).json()).manifest;
   assert.equal(m.ok, true, JSON.stringify(m.errors));
-  assert.ok(!m.warnings.some((w) => /unknown field "preserve"/.test(w)),
-    `preserve is contract now, so it must not be reported as unknown: ${JSON.stringify(m.warnings)}`);
+  assert.ok(
+    !m.warnings.some((w) => /unknown field "preserve"/.test(w)),
+    `preserve is contract now, so it must not be reported as unknown: ${JSON.stringify(m.warnings)}`,
+  );
 
   const row = (await (await s.get("/surfaces.json")).json()).surfaces.find((r) => r.id === "mine");
-  assert.deepEqual(row.preserve, kinds,
-    "the declared list did not survive into the served row, so nothing downstream could read it");
+  assert.deepEqual(
+    row.preserve,
+    kinds,
+    "the declared list did not survive into the served row, so nothing downstream could read it",
+  );
 });
 
 test("an unknown field STILL warns — so the clean read above is not a broken warning path", async (t) => {
@@ -204,8 +254,10 @@ test("an unknown field STILL warns — so the clean read above is not a broken w
   t.after(() => s.stop());
 
   const m = (await (await s.get("/api/contract")).json()).manifest;
-  assert.ok(m.warnings.some((w) => /unknown field "definitelyNotAField"/.test(w)),
-    `the unknown-field warning path is dead: ${JSON.stringify(m.warnings)}`);
+  assert.ok(
+    m.warnings.some((w) => /unknown field "definitelyNotAField"/.test(w)),
+    `the unknown-field warning path is dead: ${JSON.stringify(m.warnings)}`,
+  );
   assert.equal(m.ok, true, "an unknown field must stay a warning, never an error");
 });
 

@@ -9,8 +9,8 @@
 // NAMED rather than a bare literal, and that neither disclosure channel can be
 // removed without a test failing.
 //
-// Found by studio-impl while building against it, which is the only way a silent
-// cap ever gets found: the seventh button does not work and nothing says why.
+// A silent cap is otherwise found only by building against it: the seventh
+// button does not work and nothing says why.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -32,20 +32,31 @@ test("the cap is a NAMED constant, not a literal buried in a slice", () => {
   // A bare `slice(0, 6)` is how this stayed undocumented: the number existed in
   // exactly one place, with no name to look up and nothing to point a doc at.
   const src = shell();
-  assert.match(src, /const HEADER_ACTION_LIMIT = \d+;/,
-    "the header action cap is not a named constant");
-  assert.doesNotMatch(renderFn(src), /slice\(0,\s*\d+\)/,
-    "renderAppHeader still slices on a bare literal — the cap has two homes again");
+  assert.match(
+    src,
+    /const HEADER_ACTION_LIMIT = \d+;/,
+    "the header action cap is not a named constant",
+  );
+  assert.doesNotMatch(
+    renderFn(src),
+    /slice\(0,\s*\d+\)/,
+    "renderAppHeader still slices on a bare literal — the cap has two homes again",
+  );
 });
 
 test("dropping actions is disclosed on BOTH channels", () => {
   const body = renderFn(shell());
-  assert.match(body, /console\.warn/,
-    "no console warning: whoever is building the app is told nothing");
-  assert.match(body, /header-overflow/,
-    "nothing is posted back: the APP cannot see the cap, which was the whole finding");
-  assert.match(body, /dropped/,
-    "the disclosure does not name which actions were dropped");
+  assert.match(
+    body,
+    /console\.warn/,
+    "no console warning: whoever is building the app is told nothing",
+  );
+  assert.match(
+    body,
+    /header-overflow/,
+    "nothing is posted back: the APP cannot see the cap, which was the whole finding",
+  );
+  assert.match(body, /dropped/, "the disclosure does not name which actions were dropped");
 });
 
 test("the documented limit is the limit the shell enforces", () => {
@@ -57,8 +68,11 @@ test("the documented limit is the limit the shell enforces", () => {
   assert.ok(documented, "shell-protocol.md no longer states the header action limit");
   const words = { six: 6, seven: 7, five: 5, eight: 8, four: 4 };
   const stated = words[documented[1].toLowerCase()] ?? Number(documented[1]);
-  assert.equal(stated, Number(shipped[1]),
-    `the contract says ${documented[1]} header actions and the shell enforces ${shipped[1]}`);
+  assert.equal(
+    stated,
+    Number(shipped[1]),
+    `the contract says ${documented[1]} header actions and the shell enforces ${shipped[1]}`,
+  );
 });
 
 test("the overflow message shape in the doc matches what the shell sends", () => {
@@ -76,17 +90,30 @@ test("positive control: these checks can fail", () => {
   const src = shell();
 
   const noWarn = src.replace(/console\.warn\(/g, "void(");
-  assert.doesNotMatch(renderFn(noWarn), /console\.warn/,
-    "the console warning survived removal, so that assertion proves nothing");
+  assert.doesNotMatch(
+    renderFn(noWarn),
+    /console\.warn/,
+    "the console warning survived removal, so that assertion proves nothing",
+  );
 
   const noPost = src.replace(/header-overflow/g, "header-nothing");
-  assert.doesNotMatch(renderFn(noPost), /header-overflow/,
-    "the overflow message survived removal, so that assertion proves nothing");
+  assert.doesNotMatch(
+    renderFn(noPost),
+    /header-overflow/,
+    "the overflow message survived removal, so that assertion proves nothing",
+  );
 
-  const relit = src.replace(/const HEADER_ACTION_LIMIT = \d+;/, "")
-                   .replace(/slice\(0, HEADER_ACTION_LIMIT\)/, "slice(0, 6)");
-  assert.doesNotMatch(relit, /const HEADER_ACTION_LIMIT = \d+;/,
-    "the named constant survived removal");
-  assert.match(renderFn(relit), /slice\(0,\s*6\)/,
-    "the bare-literal regression could not be planted, so the doesNotMatch above is untested");
+  const relit = src
+    .replace(/const HEADER_ACTION_LIMIT = \d+;/, "")
+    .replace(/slice\(0, HEADER_ACTION_LIMIT\)/, "slice(0, 6)");
+  assert.doesNotMatch(
+    relit,
+    /const HEADER_ACTION_LIMIT = \d+;/,
+    "the named constant survived removal",
+  );
+  assert.match(
+    renderFn(relit),
+    /slice\(0,\s*6\)/,
+    "the bare-literal regression could not be planted, so the doesNotMatch above is untested",
+  );
 });

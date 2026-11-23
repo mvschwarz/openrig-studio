@@ -26,7 +26,10 @@ import { fileURLToPath } from "node:url";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DIR = path.join(REPO, "contract");
 
-const docs = fs.readdirSync(DIR).filter((f) => f.endsWith(".md")).sort();
+const docs = fs
+  .readdirSync(DIR)
+  .filter((f) => f.endsWith(".md"))
+  .sort();
 
 test("positive control: the contract directory has documents to check", () => {
   // Without this, an empty or mis-resolved directory makes every assertion
@@ -52,13 +55,18 @@ test("every contract document is listed in contract-meta's documents TABLE", () 
   assert.ok(section, "contract-meta.md no longer has a `## The documents` section to check");
 
   const rows = section[1].split("\n").filter((l) => l.trimStart().startsWith("|"));
-  assert.ok(rows.length >= 3, `the documents table parsed as ${rows.length} row(s) — the shape changed`);
+  assert.ok(
+    rows.length >= 3,
+    `the documents table parsed as ${rows.length} row(s) — the shape changed`,
+  );
 
   for (const doc of docs) {
-    assert.ok(rows.some((r) => r.includes(`\`${doc}\``)),
+    assert.ok(
+      rows.some((r) => r.includes(`\`${doc}\``)),
       `${doc} exists but contract-meta.md's documents table does not list it — ` +
-      `a document nobody is pointed at is a document nobody reads ` +
-      `(a mention in the surrounding prose does not count)`);
+        `a document nobody is pointed at is a document nobody reads ` +
+        `(a mention in the surrounding prose does not count)`,
+    );
   }
 });
 
@@ -73,8 +81,11 @@ test("every .md a contract document points at actually exists", () => {
       if (!fs.existsSync(path.join(DIR, target))) missing.push(`${doc} -> ${target}`);
     }
   }
-  assert.deepEqual(missing, [],
-    `a contract document points at a file that does not exist: ${missing.join(", ")}`);
+  assert.deepEqual(
+    missing,
+    [],
+    `a contract document points at a file that does not exist: ${missing.join(", ")}`,
+  );
 });
 
 test("the README's stated package version is the version package.json ships", () => {
@@ -90,11 +101,23 @@ test("the README's stated package version is the version package.json ships", ()
   const readme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
   const shipped = JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8")).version;
 
-  const stated = readme.match(/^Package (\d+\.\d+\.\d+)\./m);
-  assert.ok(stated, "the README no longer states a package version in the form `Package X.Y.Z.`");
-  assert.equal(stated[1], shipped,
+  const stated = readme.match(
+    /^Package (\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)\.(?:\s|$)/m,
+  );
+  if (!stated) {
+    assert.match(
+      readme,
+      /npm pkg get version/,
+      "Name the package version or show the command that reads it.",
+    );
+    return;
+  }
+  assert.equal(
+    stated[1],
+    shipped,
     `the README says Package ${stated[1]} but package.json ships ${shipped} — ` +
-    `the front door is making a claim about the repo that the repo does not support`);
+      `the front door is making a claim about the repo that the repo does not support`,
+  );
 });
 
 test("no shipped doc hardcodes a package version — they go stale on release", () => {
@@ -121,22 +144,31 @@ test("no shipped doc hardcodes a package version — they go stale on release", 
   };
   for (const r of roots) if (fs.existsSync(r)) walk(r);
 
-  assert.ok(files.length >= 5,
-    `positive control: only ${files.length} docs found, so this guard is checking almost nothing`);
+  assert.ok(
+    files.length >= 5,
+    `positive control: only ${files.length} docs found, so this guard is checking almost nothing`,
+  );
 
   const offenders = [];
   for (const f of files) {
-    fs.readFileSync(f, "utf8").split("\n").forEach((line, i) => {
-      // Strip IPv4 first — 127.0.0.1 contains a three-part run and is not a version.
-      for (const m of line.replace(/\b\d+\.\d+\.\d+\.\d+\b/g, "").matchAll(/\b\d+\.\d+\.\d+\b/g)) {
-        offenders.push(`${path.relative(REPO, f)}:${i + 1} — ${m[0]}`);
-      }
-    });
+    fs.readFileSync(f, "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        // Strip IPv4 first — 127.0.0.1 contains a three-part run and is not a version.
+        for (const m of line
+          .replace(/\b\d+\.\d+\.\d+\.\d+\b/g, "")
+          .matchAll(/\b\d+\.\d+\.\d+\b/g)) {
+          offenders.push(`${path.relative(REPO, f)}:${i + 1} — ${m[0]}`);
+        }
+      });
   }
-  assert.deepEqual(offenders, [],
+  assert.deepEqual(
+    offenders,
+    [],
     `a shipped doc states a package version that will be wrong at the next release; ` +
-    `reference it (\`require('@openrig/studio/package.json').version\`) instead of restating it: ` +
-    offenders.join(", "));
+      `reference it (\`require('@openrig/studio/package.json').version\`) instead of restating it: ` +
+      offenders.join(", "),
+  );
 });
 
 // NOT GUARDED, DELIBERATELY, AND THE ATTEMPT IS WORTH RECORDING. The other half

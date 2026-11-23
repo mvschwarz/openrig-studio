@@ -31,13 +31,20 @@ const REPO = path.resolve(HERE, "..");
 const SERVER = path.join("app", "serve-studio.mjs");
 
 const ONE = [{ id: "floor", name: "FLOOR", glyph: "●", path: "/surfaces/floor.html", hint: "one" }];
-const TWO = [...ONE, { id: "two", name: "TWO", glyph: "◆", path: "/surfaces/two.html", hint: "two" }];
+const TWO = [
+  ...ONE,
+  { id: "two", name: "TWO", glyph: "◆", path: "/surfaces/two.html", hint: "two" },
+];
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once("error", reject);
-  s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
 
 // A throwaway copy of the runtime — never the repo's own app/, never a live
 // instance. serve-studio derives its paths from its own location, so a copy is
@@ -61,11 +68,17 @@ function writeManifest(manifestPath, surfaces) {
 
 async function start(dir) {
   const port = await freePort();
-  const proc = spawn(process.execPath, [path.join(dir, SERVER), "--port", String(port)],
-    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(process.execPath, [path.join(dir, SERVER), "--port", String(port)], {
+    cwd: dir,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let log = "";
-  proc.stdout.on("data", (d) => { log += d; });
-  proc.stderr.on("data", (d) => { log += d; });
+  proc.stdout.on("data", (d) => {
+    log += d;
+  });
+  proc.stderr.on("data", (d) => {
+    log += d;
+  });
 
   const contract = async () => {
     const r = await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" });
@@ -74,8 +87,14 @@ async function start(dir) {
 
   const deadline = Date.now() + 10_000;
   for (;;) {
-    try { await contract(); break; } catch {
-      if (Date.now() > deadline) { proc.kill(); throw new Error(`server never came up:\n${log}`); }
+    try {
+      await contract();
+      break;
+    } catch {
+      if (Date.now() > deadline) {
+        proc.kill();
+        throw new Error(`server never came up:\n${log}`);
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
   }
@@ -94,10 +113,13 @@ async function start(dir) {
   };
 
   return {
-    port, contract, until,
+    port,
+    contract,
+    until,
     log: () => log,
     text: async (p) => (await fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" })).text(),
-    status: async (p) => (await fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" })).status,
+    status: async (p) =>
+      (await fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" })).status,
     stop: () => proc.kill(),
   };
 }
@@ -192,7 +214,7 @@ test("atomic write-tmp+rename is picked up", async (t) => {
   doc.surfaces = TWO;
   const tmp = manifestPath + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(doc, null, 2));
-  fs.renameSync(tmp, manifestPath);   // atomic replace: new inode, same path
+  fs.renameSync(tmp, manifestPath); // atomic replace: new inode, same path
 
   const m = await srv.until((x) => x.surfaces === 2);
   assert.equal(m.surfaces, 2, "tmp+rename replace was not picked up");
@@ -213,7 +235,7 @@ test("recovers when the manifest's parent directory is itself replaced", async (
   const m1 = await srv.until((x) => x.state === "unreadable");
   assert.equal(m1.state, "unreadable");
 
-  fs.renameSync(stash, appDir);       // tree comes back, new directory inode
+  fs.renameSync(stash, appDir); // tree comes back, new directory inode
   const m2 = await srv.until((x) => x.state === "ok", 10_000);
   assert.equal(m2.state, "ok", "did not recover after the parent directory was replaced");
   assert.equal(m2.recoveries, 1);
@@ -227,19 +249,25 @@ test("a directory SWAP is picked up, not served stale", async (t) => {
   // ever fires and no error is raised — the runtime would serve the PREVIOUS
   // manifest indefinitely while reporting state "ok". That is worse than the
   // ENOENT this slice started on, because it looks healthy.
-  const { dir, manifestPath } = instance([{ id: "old", name: "OLD", glyph: "●", path: "/surfaces/floor.html" }]);
+  const { dir, manifestPath } = instance([
+    { id: "old", name: "OLD", glyph: "●", path: "/surfaces/floor.html" },
+  ]);
   const appDir = path.dirname(manifestPath);
 
   // a complete replacement tree, as a deploy would stage
   const incoming = path.join(dir, "app-incoming");
   fs.cpSync(appDir, incoming, { recursive: true });
-  writeManifest(path.join(incoming, "surfaces.json"),
-    [{ id: "new", name: "NEW", glyph: "▲", path: "/surfaces/floor.html" },
-     { id: "new2", name: "NEW2", glyph: "◆", path: "/surfaces/floor.html" }]);
+  writeManifest(path.join(incoming, "surfaces.json"), [
+    { id: "new", name: "NEW", glyph: "▲", path: "/surfaces/floor.html" },
+    { id: "new2", name: "NEW2", glyph: "◆", path: "/surfaces/floor.html" },
+  ]);
 
   const srv = await start(dir);
   t.after(() => srv.stop());
-  assert.deepEqual(JSON.parse(await srv.text("/surfaces.json")).surfaces.map((r) => r.id), ["old"]);
+  assert.deepEqual(
+    JSON.parse(await srv.text("/surfaces.json")).surfaces.map((r) => r.id),
+    ["old"],
+  );
 
   fs.renameSync(appDir, path.join(dir, "app-old"));
   fs.renameSync(incoming, appDir);
@@ -262,11 +290,16 @@ test("a directory SWAP is picked up, not served stale", async (t) => {
   // the stat floor caught it". The stale-but-healthy-looking lie has to be
   // observably DETECTED, not merely fixed.
   assert.equal(m.recoveries, 0, "a clean swap never broke, so it is not a recovery");
-  assert.ok(m.integrityReloads >= 1,
-    "a directory swap must be reported as an integrity reload — the watch cannot see it");
+  assert.ok(
+    m.integrityReloads >= 1,
+    "a directory swap must be reported as an integrity reload — the watch cannot see it",
+  );
   assert.ok(m.lastIntegrityReloadAt, "lastIntegrityReloadAt must be set when the guard fires");
-  assert.match(srv.log(), /manifest REPLACED:/,
-    "the integrity guard must emit a positive log line, not correct silently");
+  assert.match(
+    srv.log(),
+    /manifest REPLACED:/,
+    "the integrity guard must emit a positive log line, not correct silently",
+  );
 });
 
 test("an idle runtime does not churn", async (t) => {
@@ -296,7 +329,7 @@ test("starts and warn-firsts when the manifest is ABSENT at boot", async (t) => 
   const { dir, manifestPath } = instance(ONE);
   fs.unlinkSync(manifestPath);
 
-  const srv = await start(dir);   // start() throws if the process never serves
+  const srv = await start(dir); // start() throws if the process never serves
   t.after(() => srv.stop());
 
   const m = await srv.contract();
@@ -327,11 +360,11 @@ test("starts and warn-firsts when the manifest is INVALID at boot", async (t) =>
   assert.equal(m.recoveries, 0, "booting broken is not a recovery");
 });
 
-test("VALID JSON that is not a manifest OBJECT still warn-firsts, never crashes boot", async (t) => {
-  // review.r2 RS-C2: the invalid-at-boot control above uses only SYNTACTICALLY
-  // invalid JSON, which hits the guarded JSON.parse catch. `null` is valid JSON,
-  // parses fine, then `null.surfaces` THREW at load — the process exited 1 and
-  // /api/contract never came up, the exact crash warn-first exists to prevent.
+test("VALID JSON that is not a manifest OBJECT still warn-firsts, never crashes boot", async () => {
+  // The invalid-at-boot control above uses only SYNTACTICALLY invalid JSON,
+  // which hits the guarded JSON.parse catch. `null` is valid JSON and parses
+  // fine, and reading `.surfaces` off it would throw at load, before
+  // /api/contract came up: the exact crash warn-first exists to prevent.
   // The whole semantic-invalid family (null, primitives, arrays, and a plain
   // object missing surfaces[]) must warn-first: named error, empty rail, still
   // serving — one repro value is not the family.
@@ -349,10 +382,15 @@ test("VALID JSON that is not a manifest OBJECT still warn-firsts, never crashes 
       const m = await srv.contract();
       assert.equal(m.state, "invalid", `${why}: manifest state is not "invalid"`);
       assert.ok(m.errors[0], `${why}: no named error`);
-      assert.equal(await srv.status("/api/contract"), 200,
-        `${why}: /api/contract is not serving — warn-first was bypassed and the runtime likely crashed at boot`);
+      assert.equal(
+        await srv.status("/api/contract"),
+        200,
+        `${why}: /api/contract is not serving — warn-first was bypassed and the runtime likely crashed at boot`,
+      );
       assert.equal(await srv.status("/"), 200, `${why}: the shell is not serving`);
-    } finally { srv.stop(); }
+    } finally {
+      srv.stop();
+    }
   }
 });
 
@@ -367,8 +405,14 @@ test("starts when the manifest's whole directory is missing at boot", async (t) 
   // the server alone gets ERR_MODULE_NOT_FOUND, which is how this was found rather
   // than by reading.
   fs.cpSync(path.join(REPO, "app", "verbs.mjs"), path.join(dir, "app", "verbs.mjs"));
-  fs.cpSync(path.join(REPO, "app", "response-facade.mjs"), path.join(dir, "app", "response-facade.mjs"));
-  fs.cpSync(path.join(REPO, "app", "handler-context.mjs"), path.join(dir, "app", "handler-context.mjs"));
+  fs.cpSync(
+    path.join(REPO, "app", "response-facade.mjs"),
+    path.join(dir, "app", "response-facade.mjs"),
+  );
+  fs.cpSync(
+    path.join(REPO, "app", "handler-context.mjs"),
+    path.join(dir, "app", "handler-context.mjs"),
+  );
 
   const srv = await start(dir);
   t.after(() => srv.stop());
@@ -445,10 +489,17 @@ test("contract v0.1 is unchanged: same version, same existing fields, additive o
   //
   // Removing one IS breaking, because a consumer gates on it, so that is what is
   // still checked.
-  for (const cap of ["contract.meta", "observe.factory-state", "stream.events", "files.read",
-    "shell.protocol"]) {
-    assert.ok(body.capabilities.includes(cap),
-      `capability ${cap} disappeared — removing one breaks every consumer gating on it`);
+  for (const cap of [
+    "contract.meta",
+    "observe.factory-state",
+    "stream.events",
+    "files.read",
+    "shell.protocol",
+  ]) {
+    assert.ok(
+      body.capabilities.includes(cap),
+      `capability ${cap} disappeared — removing one breaks every consumer gating on it`,
+    );
   }
   for (const key of ["ok", "errors", "warnings", "surfaces"]) {
     assert.ok(key in body.manifest, `pre-existing manifest field ${key} disappeared`);
@@ -474,16 +525,18 @@ test("the SSE change-signal still fires on a manifest change", async (t) => {
     // re-check its own deadline — the test would hang until the runner killed
     // it instead of failing with the reason it asserts. A stated timeout that
     // cannot fire is a check whose failure does not look like its failure.
-    // 
+    //
     const deadline = Date.now() + 8000;
     let seen = "";
     while (Date.now() < deadline) {
       // The losing timer must be CLEARED. An uncleared referenced timer keeps
       // the event loop alive for its full duration after the race resolves —
       // the suite still passes, it just silently gets slower, which is a cost
-      // nobody attributes to the test that caused it. 
+      // nobody attributes to the test that caused it.
       let timer;
-      const timeout = new Promise((r) => { timer = setTimeout(() => r("__timeout__"), Math.max(0, deadline - Date.now())); });
+      const timeout = new Promise((r) => {
+        timer = setTimeout(() => r("__timeout__"), Math.max(0, deadline - Date.now()));
+      });
       const next = await Promise.race([reader.read(), timeout]);
       clearTimeout(timer);
       if (next === "__timeout__") return false;
@@ -511,12 +564,11 @@ test("the SSE change-signal still fires on a manifest change", async (t) => {
 // fourth, the comparison became structural and descends everywhere. Its controls
 // plant a field at all four levels and assert the path each is reported at.
 
-// THE INIT-TDZ GUARD IS THE EVALUATOR — the fifth version of this guard, and
-// the first that is not a model. Four static versions each classified source
-// TEXT (a name whitelist, a position rule, a reachability scan, an
-// initializer grammar) and each missed the next ordinary spelling: the
-// misplaced walk, the direct initializer, the IIFE initializer, the standalone
-// IIFE statement. PM's ruling ended the series: do not MODEL the property, RUN
+// THE INIT-TDZ GUARD IS THE EVALUATOR, not a model. A static check that
+// classifies source TEXT (a name whitelist, a position rule, a reachability
+// scan, an initializer grammar) misses the next ordinary spelling: a misplaced
+// walk, a direct initializer, an IIFE initializer, a standalone IIFE statement.
+// So this does not MODEL the property, it RUNS
 // it. "Does this evaluate at module init" is asked of the code by the only
 // judge with no grammar to be wrong about — Node evaluates the module, and
 // either it evaluates or it exits naming the binding and the line. Coverage of
@@ -524,8 +576,8 @@ test("the SSE change-signal still fires on a manifest change", async (t) => {
 //
 // What this deliberately gives up, stated rather than hidden: a static scan
 // could in principle fail EARLY on a merely-fragile arrangement (init not at
-// the bottom) before any TDZ is real. In practice every static version passed
-// on real TDZs and the "early" failures it produced were the wrong fixes. The
+// the bottom) before any TDZ is real, but static checks pass real TDZs and their
+// "early" failures point at the wrong fixes. The
 // position discipline stays as the init-block source comment; the property
 // lives here, with its judge.
 
@@ -536,49 +588,75 @@ async function evaluatesAtInit(mutate) {
   if (mutate) {
     const src = fs.readFileSync(path.join(dir, "app", "serve-studio.mjs"), "utf8");
     const mutated = mutate(src);
-    if (mutated === src) throw new Error("the mutation did not apply — the result would be meaningless");
+    if (mutated === src)
+      throw new Error("the mutation did not apply — the result would be meaningless");
     fs.writeFileSync(path.join(dir, "app", "serve-studio.mjs"), mutated);
   }
-  const port = 9880 + Math.floor(Math.random() * 40);
-  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port)],
-    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
-  let stderr = "";
-  proc.stderr.on("data", (d) => { stderr += d; });
+  // Port 0: the OS picks a free port and the runtime's first line reports it.
+  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", "0"], {
+    cwd: dir,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "",
+    stdout = "",
+    port = null;
+  proc.stderr.on("data", (d) => {
+    stderr += d;
+  });
+  proc.stdout.on("data", (d) => {
+    stdout += d;
+    port ??= Number(stdout.match(/runtime: http:\/\/127\.0\.0\.1:(\d+)\//)?.[1]) || null;
+  });
   try {
     for (let i = 0; i < 100; i++) {
       if (proc.exitCode !== null) return { evaluated: false, code: proc.exitCode, stderr };
+      if (!port) {
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
+      }
       try {
         await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" });
         return { evaluated: true, code: null, stderr };
-      } catch { await new Promise((r) => setTimeout(r, 50)); }
+      } catch {
+        await new Promise((r) => setTimeout(r, 50));
+      }
     }
-    return { evaluated: false, code: proc.exitCode, stderr: stderr + "\n(timed out: neither served nor exited)" };
-  } finally { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
+    return {
+      evaluated: false,
+      code: proc.exitCode,
+      stderr: stderr + "\n(timed out: neither served nor exited)",
+    };
+  } finally {
+    proc.kill();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 test("the module EVALUATES at init — the TDZ property judged by the evaluator, not a model of it", async () => {
   const r = await evaluatesAtInit(null);
-  assert.equal(r.evaluated, true,
-    `the runtime failed to evaluate at init:\n${r.stderr}`);
+  assert.equal(r.evaluated, true, `the runtime failed to evaluate at init:\n${r.stderr}`);
 });
 
-test("controls: every historical TDZ spelling refuses to evaluate, named by the evaluator", async () => {
-  // The four mutants sdk-qa (and round 2) actually used, one per round. Each
+test("controls: every known TDZ spelling refuses to evaluate, named by the evaluator", async () => {
+  // Four known spellings of the mistake. Each
   // must exit nonzero with the ReferenceError naming the binding. Any FUTURE
   // spelling is covered by the same mechanism these prove alive: the check is
   // not a model of evaluation, it is evaluation.
   const DECL = "const handleRequest = async (req, res) => {";
   const MUTANTS = [
-    ["round-2: top-level statement", `await handleRequest;\n${DECL}`],
-    ["round-4: direct initializer", `const qaInitializerProbe = handleRequest;\n${DECL}`],
-    ["round-4: IIFE initializer", `const qaInitializerIife = (() => handleRequest)();\n${DECL}`],
-    ["round-5: standalone IIFE statement", `(() => handleRequest)();\n${DECL}`],
+    ["top-level statement", `await handleRequest;\n${DECL}`],
+    ["direct initializer", `const qaInitializerProbe = handleRequest;\n${DECL}`],
+    ["IIFE initializer", `const qaInitializerIife = (() => handleRequest)();\n${DECL}`],
+    ["standalone IIFE statement", `(() => handleRequest)();\n${DECL}`],
   ];
   for (const [name, planted] of MUTANTS) {
     const r = await evaluatesAtInit((src) => src.replace(DECL, planted));
     assert.equal(r.evaluated, false, `${name}: the mutant EVALUATED — the guard is not guarding`);
-    assert.match(r.stderr, /ReferenceError[\s\S]*handleRequest/,
-      `${name}: refused to evaluate but not with the ReferenceError naming the binding:\n${r.stderr}`);
+    assert.match(
+      r.stderr,
+      /ReferenceError[\s\S]*handleRequest/,
+      `${name}: refused to evaluate but not with the ReferenceError naming the binding:\n${r.stderr}`,
+    );
   }
 });
 

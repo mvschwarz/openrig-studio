@@ -23,7 +23,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO, "contract", "surface-row.schema.json"), "utf8"));
+const SCHEMA = JSON.parse(
+  fs.readFileSync(path.join(REPO, "contract", "surface-row.schema.json"), "utf8"),
+);
 const RUNTIME = fs.readFileSync(path.join(REPO, "app", "serve-studio.mjs"), "utf8");
 
 // The runtime's table, read from source. Parsed rather than imported because
@@ -31,7 +33,10 @@ const RUNTIME = fs.readFileSync(path.join(REPO, "app", "serve-studio.mjs"), "utf
 // guard next door reads its block out of the file.
 function runtimeTable() {
   const block = RUNTIME.match(/const ROW_OPTIONAL = \{([\s\S]*?)\n?\};/);
-  assert.ok(block, "ROW_OPTIONAL is no longer a literal in app/serve-studio.mjs — this guard cannot read it");
+  assert.ok(
+    block,
+    "ROW_OPTIONAL is no longer a literal in app/serve-studio.mjs — this guard cannot read it",
+  );
   const table = {};
   for (const m of block[1].matchAll(/(\w+):\s*"(\w+)"/g)) table[m[1]] = m[2];
   return table;
@@ -43,7 +48,7 @@ const schemaOptional = () =>
   Object.fromEntries(
     Object.entries(SCHEMA.properties)
       .filter(([name]) => !HANDLED_SEPARATELY.has(name))
-      .map(([name, prop]) => [name, prop.type])
+      .map(([name, prop]) => [name, prop.type]),
   );
 
 test("positive control: both sides were actually read", () => {
@@ -51,7 +56,10 @@ test("positive control: both sides were actually read", () => {
   // comparison below pass by comparing two empty objects.
   const table = runtimeTable();
   assert.ok(Object.keys(table).length >= 5, `ROW_OPTIONAL parsed as ${JSON.stringify(table)}`);
-  assert.ok(Object.keys(schemaOptional()).length >= 5, "the schema parsed with almost no properties");
+  assert.ok(
+    Object.keys(schemaOptional()).length >= 5,
+    "the schema parsed with almost no properties",
+  );
 });
 
 test("the schema and the runtime accept exactly the same optional fields", () => {
@@ -61,12 +69,18 @@ test("the schema and the runtime accept exactly the same optional fields", () =>
   const inSchemaOnly = Object.keys(schema).filter((k) => !(k in table));
   const inRuntimeOnly = Object.keys(table).filter((k) => !(k in schema));
 
-  assert.deepEqual(inSchemaOnly, [],
+  assert.deepEqual(
+    inSchemaOnly,
+    [],
     `the schema declares field(s) the runtime treats as unknown: ${inSchemaOnly.join(", ")} — ` +
-    `an author following the contract would get a warning for a documented field`);
-  assert.deepEqual(inRuntimeOnly, [],
+      `an author following the contract would get a warning for a documented field`,
+  );
+  assert.deepEqual(
+    inRuntimeOnly,
+    [],
     `the runtime accepts field(s) the schema does not declare: ${inRuntimeOnly.join(", ")} — ` +
-    `a field that works while being documented nowhere is how one shipped unpromised before`);
+      `a field that works while being documented nowhere is how one shipped unpromised before`,
+  );
 });
 
 test("and they agree on each field's TYPE", () => {
@@ -74,8 +88,11 @@ test("and they agree on each field's TYPE", () => {
   // demanded a string, which rejects every correctly-authored row.
   const table = runtimeTable();
   for (const [name, type] of Object.entries(schemaOptional())) {
-    assert.equal(table[name], type,
-      `${name}: schema says ${type}, the runtime validates it as ${table[name]}`);
+    assert.equal(
+      table[name],
+      type,
+      `${name}: schema says ${type}, the runtime validates it as ${table[name]}`,
+    );
   }
 });
 
@@ -86,14 +103,20 @@ test("preserve is declared, is an array, and is stable", () => {
   assert.ok(p, "the preserve declaration is gone from the surface-row schema");
   assert.equal(p.type, "array");
   assert.equal(p["x-stability"], "stable");
-  assert.equal(runtimeTable().preserve, "array", "the runtime does not accept a declared preserve list");
+  assert.equal(
+    runtimeTable().preserve,
+    "array",
+    "the runtime does not accept a declared preserve list",
+  );
 });
 
 test("every schema property carries a valid stability mark", () => {
   const CLASSES = new Set(["stable", "provisional", "runtime-internal"]);
   for (const [name, prop] of Object.entries(SCHEMA.properties)) {
-    assert.ok(CLASSES.has(prop["x-stability"]),
-      `${name} has x-stability ${JSON.stringify(prop["x-stability"])}, which is not a class contract-meta defines`);
+    assert.ok(
+      CLASSES.has(prop["x-stability"]),
+      `${name} has x-stability ${JSON.stringify(prop["x-stability"])}, which is not a class contract-meta defines`,
+    );
   }
 });
 

@@ -5,8 +5,8 @@
 // The ask arrived as `declareCaptureTarget(dir)`, taking a raw directory. That is
 // the exact anti-pattern `app-manifest.md` names — "roots are KINDS, never paths…
 // works on exactly one machine" — and independently an unbounded write surface: an
-// app could name any directory on the box. Raised as a PRD deviation and ruled to
-// the kind-bound shape rather than built either way.
+// app could name any directory on the box. So it takes a root kind instead, the
+// kind-bound shape, rather than a directory.
 //
 // The property: a target that cannot be EXPRESSED unsafely cannot be INHERITED
 // unsafely by whatever eventually captures. Validation at declaration beats
@@ -17,29 +17,29 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { startRuntime } from "./helpers/runtime.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-let nextPort = 9660;
-
 async function start({ roots } = {}) {
-  const port = nextPort++;
-  const args = [path.join(REPO, "app", "serve-studio.mjs"), "--port", String(port)];
-  if (roots) args.push("--roots", JSON.stringify(roots));
-  const proc = spawn(process.execPath, args, { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
-  const base = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) {
-    try { await fetch(`${base}/api/contract`, { cache: "no-store" }); break; }
-    catch { await new Promise((r) => setTimeout(r, 50)); }
-  }
+  const args = roots ? ["--roots", JSON.stringify(roots)] : [];
+  const { proc, ready } = startRuntime(path.join(REPO, "app", "serve-studio.mjs"), args, {
+    cwd: REPO,
+  });
+  const base = `http://127.0.0.1:${await ready}`;
   return {
     base,
-    stop: () => new Promise((r) => { proc.once("exit", r); proc.kill(); }),
+    stop: () =>
+      new Promise((r) => {
+        proc.once("exit", r);
+        proc.kill();
+      }),
     declare: async (body) => {
-      const res = await fetch(`${base}/api/capture-target`, { method: "POST",
+      const res = await fetch(`${base}/api/capture-target`, {
+        method: "POST",
         headers: { "content-type": "application/json" },
-        body: typeof body === "string" ? body : JSON.stringify(body) });
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      });
       return { status: res.status, body: await res.json() };
     },
     read: async () => (await fetch(`${base}/api/capture-target`, { cache: "no-store" })).json(),
@@ -61,7 +61,10 @@ test("a RELATIVE path inside a bound kind resolves", async (t) => {
   const r = await s.declare({ root: "feedback", path: "gateway-m1" });
   assert.equal(r.status, 200);
   assert.equal(r.body.target.root, "feedback");
-  assert.equal(fs.realpathSync(r.body.target.path), fs.realpathSync(path.join(dir, "feedback", "gateway-m1")));
+  assert.equal(
+    fs.realpathSync(r.body.target.path),
+    fs.realpathSync(path.join(dir, "feedback", "gateway-m1")),
+  );
 });
 
 test("a target that does not exist YET is allowed", async (t) => {
@@ -113,8 +116,11 @@ test("an UNBOUND kind is refused, never silently redirected", async (t) => {
   t.after(() => s.stop());
   const r = await s.declare({ root: "media", path: "x" });
   assert.equal(r.status, 400);
-  assert.match(r.body.error, /no root bound/,
-    "an unbound kind did not say the kind was the problem");
+  assert.match(
+    r.body.error,
+    /no root bound/,
+    "an unbound kind did not say the kind was the problem",
+  );
   // Landing captures somewhere unexpected is worse than not capturing.
   assert.equal((await s.read()).target, null, "a refused declaration still set a target");
 });
@@ -145,8 +151,11 @@ test("the contract SAYS nothing consumes it yet", async (t) => {
   const s = await start({ roots: { feedback: path.join(dir, "feedback") } });
   t.after(() => s.stop());
   const c = await s.contract();
-  assert.equal(c.capture.consumedBy, null,
-    "consumedBy claims a consumer — if a capture action now exists, this is lockable and the note must go");
+  assert.equal(
+    c.capture.consumedBy,
+    null,
+    "consumedBy claims a consumer — if a capture action now exists, this is lockable and the note must go",
+  );
   assert.ok(c.capabilities.includes("capture.target"));
 });
 
@@ -156,8 +165,11 @@ test("THIS VERB WRITES NOTHING — the contract still has no write verbs", async
   const s = await start({ roots: { feedback: path.join(dir, "feedback") } });
   t.after(() => s.stop());
   await s.declare({ root: "feedback", path: "slice-99/feedback" });
-  assert.deepEqual(fs.readdirSync(path.join(dir, "feedback")), before,
-    "declaring a target created something on disk — this verb records, it does not write");
+  assert.deepEqual(
+    fs.readdirSync(path.join(dir, "feedback")),
+    before,
+    "declaring a target created something on disk — this verb records, it does not write",
+  );
 });
 
 test("positive control: this suite is capable of failing", () => {
@@ -165,13 +177,14 @@ test("positive control: this suite is capable of failing", () => {
 });
 
 test("MULTI-LOCATION ROOT: existence decides the binding, not order", async (t) => {
-  // QA finding. Containment holds for a path that does not exist yet — which must
-  // stay allowed — so the FIRST binding swallowed every relative path and later
-  // bindings were unreachable even when the target existed there. Accepted-but-
-  // misdirected, and this contract's own line is that landing somewhere
-  // unexpected is worse than refusing.
+  // Containment holds for a path that does not exist yet — which must stay
+  // allowed — so if order decided, the FIRST binding would swallow every relative
+  // path and later bindings would be unreachable even when the target existed
+  // there. Accepted-but-misdirected, and this contract's own line is that landing
+  // somewhere unexpected is worse than refusing.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-"));
-  const first = path.join(dir, "first"), second = path.join(dir, "second");
+  const first = path.join(dir, "first"),
+    second = path.join(dir, "second");
   fs.mkdirSync(path.join(second, "proof", "shot"), { recursive: true });
   fs.mkdirSync(first, { recursive: true });
 
@@ -179,8 +192,11 @@ test("MULTI-LOCATION ROOT: existence decides the binding, not order", async (t) 
   t.after(() => s.stop());
   const r = await s.declare({ root: "feedback", path: "proof/shot" });
   assert.equal(r.status, 200);
-  assert.equal(fs.realpathSync(r.body.target.path), fs.realpathSync(path.join(second, "proof", "shot")),
-    "resolved to the first binding where the target does NOT exist, ignoring the one where it does");
+  assert.equal(
+    fs.realpathSync(r.body.target.path),
+    fs.realpathSync(path.join(second, "proof", "shot")),
+    "resolved to the first binding where the target does NOT exist, ignoring the one where it does",
+  );
   assert.ok(fs.existsSync(r.body.target.path), "resolved to a path that does not exist");
 });
 
@@ -188,20 +204,26 @@ test("multi-location: a target existing NOWHERE still resolves, to the first bin
   // The create-it-later case must keep working; this is the positive control that
   // stops the fix above from becoming "refuse unless it already exists".
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-"));
-  const first = path.join(dir, "first"), second = path.join(dir, "second");
-  fs.mkdirSync(first, { recursive: true }); fs.mkdirSync(second, { recursive: true });
+  const first = path.join(dir, "first"),
+    second = path.join(dir, "second");
+  fs.mkdirSync(first, { recursive: true });
+  fs.mkdirSync(second, { recursive: true });
   const s = await start({ roots: { feedback: [first, second] } });
   t.after(() => s.stop());
   const r = await s.declare({ root: "feedback", path: "slice-99/feedback" });
   assert.equal(r.status, 200, `refused a not-yet-created target: ${r.body.error}`);
-  assert.equal(fs.realpathSync(path.dirname(path.dirname(r.body.target.path))), fs.realpathSync(first));
+  assert.equal(
+    fs.realpathSync(path.dirname(path.dirname(r.body.target.path))),
+    fs.realpathSync(first),
+  );
 });
 
 test("multi-location: AMBIGUOUS refuses rather than picking", async (t) => {
   // Existing under two bindings has no honest answer, and choosing silently is the
   // defect this was rewritten for.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "multi-"));
-  const first = path.join(dir, "first"), second = path.join(dir, "second");
+  const first = path.join(dir, "first"),
+    second = path.join(dir, "second");
   fs.mkdirSync(path.join(first, "proof"), { recursive: true });
   fs.mkdirSync(path.join(second, "proof"), { recursive: true });
   const s = await start({ roots: { feedback: [first, second] } });
@@ -230,9 +252,9 @@ test("PROTOTYPE-NAMED root kinds 400 like any unbound kind, never 500", async (t
 });
 
 test("an existing FILE is refused as a capture target, at DECLARATION", async (t) => {
-  // QA finding: the check asked whether the path EXISTED and never whether it was
-  // a DIRECTORY, so a regular file at the target was accepted and stored — and the
-  // real consumer then failed `EEXIST … mkdir`. Accepted-but-unperformable, and
+  // Asking only whether the path EXISTS, not whether it is a DIRECTORY, would
+  // accept and store a regular file at the target — and the real consumer would
+  // then fail `EEXIST … mkdir`. Accepted-but-unperformable, and
   // this contract puts the refusal at declaration precisely so a consumer cannot
   // inherit one.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "isfile-"));
@@ -248,13 +270,16 @@ test("an existing FILE is refused as a capture target, at DECLARATION", async (t
 
   // positive control: a real directory beside it still resolves
   fs.mkdirSync(path.join(dir, "work", "real"), { recursive: true });
-  assert.equal((await s.declare({ root: "work", path: "real" })).status, 200,
-    "the directory check refuses directories too");
+  assert.equal(
+    (await s.declare({ root: "work", path: "real" })).status,
+    200,
+    "the directory check refuses directories too",
+  );
 });
 
 test("two bindings resolving to the SAME location are ONE location, not ambiguity", async (t) => {
-  // QA medium: `[first, first]` refused as ambiguous. There is only one resolved
-  // location, so there is nothing to be ambiguous between. Two DISTINCT roots
+  // `[first, first]` is not ambiguous: there is only one resolved location, so
+  // there is nothing to be ambiguous between. Two DISTINCT roots
   // holding the same relative target stay an honest refusal — checked below.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dupe-"));
   const one = path.join(dir, "one");
@@ -267,10 +292,10 @@ test("two bindings resolving to the SAME location are ONE location, not ambiguit
 });
 
 test("a MISSING target below an existing regular FILE is refused — the ancestor decides", async (t) => {
-  // QA finding, one level below the last one, and the same class: the fix checked
-  // whether the TARGET was a directory and never whether the path could BECOME
-  // one. A missing target whose deepest existing ancestor is a regular file was
-  // accepted at declaration; the consumer's `mkdir recursive` then failed ENOTDIR.
+  // One level below the last case, and the same class: checking whether the
+  // TARGET is a directory is not enough; the path must be able to BECOME one. A
+  // missing target whose deepest existing ancestor is a regular file would pass
+  // declaration, and the consumer's `mkdir recursive` would then fail ENOTDIR.
   // The property is performability, not the final component: EVERY existing
   // component of the resolved path must be a directory.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ancfile-"));
@@ -281,16 +306,27 @@ test("a MISSING target below an existing regular FILE is refused — the ancesto
 
   for (const p of ["file-parent/child", "file-parent/a/b/c"]) {
     const r = await s.declare({ root: "work", path: p });
-    assert.equal(r.status, 400, `'${p}' was accepted — mkdir recursive under a regular file is ENOTDIR`);
-    assert.match(r.body.error, /not a directory/, `'${p}' refused without naming the blocking file`);
+    assert.equal(
+      r.status,
+      400,
+      `'${p}' was accepted — mkdir recursive under a regular file is ENOTDIR`,
+    );
+    assert.match(
+      r.body.error,
+      /not a directory/,
+      `'${p}' refused without naming the blocking file`,
+    );
   }
   assert.equal((await s.read()).target, null, "a refused target was stored anyway");
 
   // positive control: the same DEPTH under a real directory still resolves,
   // so this is the ancestor check refusing, not depth.
   fs.mkdirSync(path.join(dir, "work", "dir-parent"), { recursive: true });
-  assert.equal((await s.declare({ root: "work", path: "dir-parent/a/b/c" })).status, 200,
-    "the ancestor check refuses paths under real directories too");
+  assert.equal(
+    (await s.declare({ root: "work", path: "dir-parent/a/b/c" })).status,
+    200,
+    "the ancestor check refuses paths under real directories too",
+  );
 });
 
 test("multi-location: a file-blocked binding loses to a performable one — and blocked everywhere refuses", async (t) => {
@@ -298,16 +334,24 @@ test("multi-location: a file-blocked binding loses to a performable one — and 
   // a regular file is unperformable and must not win the create-it-later fallback
   // just by being FIRST — that is accepted-but-unperformable through the side door.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ancmulti-"));
-  const first = path.join(dir, "first"), second = path.join(dir, "second");
-  fs.mkdirSync(first, { recursive: true }); fs.mkdirSync(second, { recursive: true });
+  const first = path.join(dir, "first"),
+    second = path.join(dir, "second");
+  fs.mkdirSync(first, { recursive: true });
+  fs.mkdirSync(second, { recursive: true });
   fs.writeFileSync(path.join(first, "proof"), "a file where a directory is needed");
 
   const s = await start({ roots: { feedback: [first, second] } });
   t.after(() => s.stop());
   const r = await s.declare({ root: "feedback", path: "proof/shot" });
-  assert.equal(r.status, 200, `the performable second binding lost to a file-blocked first: ${r.body.error}`);
-  assert.ok(r.body.target.path.startsWith(fs.realpathSync(second) + path.sep),
-    "resolved under the file-blocked binding");
+  assert.equal(
+    r.status,
+    200,
+    `the performable second binding lost to a file-blocked first: ${r.body.error}`,
+  );
+  assert.ok(
+    r.body.target.path.startsWith(fs.realpathSync(second) + path.sep),
+    "resolved under the file-blocked binding",
+  );
 
   // blocked under EVERY binding: refuse, never accept the unperformable.
   fs.writeFileSync(path.join(second, "blocked"), "also a file");
@@ -318,15 +362,15 @@ test("multi-location: a file-blocked binding loses to a performable one — and 
 });
 
 test("a DANGLING symlink is refused at declaration — absent and broken are different", async (t) => {
-  // QA finding, and the only one of its round with a boundary consequence: the
-  // ancestor walk used realpathSync, which fails on a dangling symlink exactly
-  // like it fails on nothing-there — so the walk STEPPED OVER an existing,
-  // unresolvable component, settled on the root, and called the path
-  // performable. The declaration returned 200 while the link dangled; when the
-  // link's outside target later came into existence, the stored path resolved
-  // OUTSIDE the bound root and the consumer's mkdir succeeded there.
+  // This one has a boundary consequence. realpathSync fails on a dangling
+  // symlink exactly like it fails on nothing-there, so an ancestor walk built on
+  // it would STEP OVER an existing, unresolvable component, settle on the root,
+  // and call the path performable. The declaration would return 200 while the
+  // link dangled; when the link's outside target later came into existence, the
+  // stored path would resolve OUTSIDE the bound root and the consumer's mkdir
+  // would succeed there.
   //
-  // The property, per PM: refuse at declaration what you cannot VERIFY at
+  // The property: refuse at declaration what you cannot VERIFY at
   // declaration. A component that exists but cannot be resolved is not absent —
   // it is unverifiable, and containment is assigned to declaration by contract.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dangle-"));
@@ -340,13 +384,16 @@ test("a DANGLING symlink is refused at declaration — absent and broken are dif
   // The link itself as target, and a child below it — both must refuse.
   for (const p of ["dangling", "dangling/child"]) {
     const r = await s.declare({ root: "feedback", path: p });
-    assert.equal(r.status, 400,
-      `'${p}' accepted while its link dangles — once the outside target exists, writes land outside the root`);
+    assert.equal(
+      r.status,
+      400,
+      `'${p}' accepted while its link dangles — once the outside target exists, writes land outside the root`,
+    );
     assert.ok(r.body.error, `'${p}' refused without saying why`);
   }
   assert.equal((await s.read()).target, null, "a refused target was stored anyway");
 
-  // QA's full scenario: even after the outside target exists, re-declaring must
+  // The full scenario: even after the outside target exists, re-declaring must
   // refuse — the resolved path is outside the root, which containment already
   // catches. Both halves of the timeline are closed, not just the early one.
   fs.mkdirSync(outside, { recursive: true });
@@ -356,8 +403,11 @@ test("a DANGLING symlink is refused at declaration — absent and broken are dif
   // positive control: a live symlink INSIDE the root still resolves.
   fs.mkdirSync(path.join(root, "real-dir"), { recursive: true });
   fs.symlinkSync(path.join(root, "real-dir"), path.join(root, "live-link"));
-  assert.equal((await s.declare({ root: "feedback", path: "live-link/sub" })).status, 200,
-    "the broken-link refusal also refuses resolvable in-root links");
+  assert.equal(
+    (await s.declare({ root: "feedback", path: "live-link/sub" })).status,
+    200,
+    "the broken-link refusal also refuses resolvable in-root links",
+  );
 });
 
 test("multi-location: a broken-link binding loses to a performable one", async (t) => {
@@ -365,15 +415,23 @@ test("multi-location: a broken-link binding loses to a performable one", async (
   // file-blocked case: unverifiable under one binding must not poison a kind
   // that is genuinely performable under another, and must not win by being first.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "danglemulti-"));
-  const first = path.join(dir, "first"), second = path.join(dir, "second");
-  fs.mkdirSync(first, { recursive: true }); fs.mkdirSync(second, { recursive: true });
+  const first = path.join(dir, "first"),
+    second = path.join(dir, "second");
+  fs.mkdirSync(first, { recursive: true });
+  fs.mkdirSync(second, { recursive: true });
   fs.symlinkSync(path.join(dir, "nowhere"), path.join(first, "proof"));
   const s = await start({ roots: { feedback: [first, second] } });
   t.after(() => s.stop());
   const r = await s.declare({ root: "feedback", path: "proof/shot" });
-  assert.equal(r.status, 200, `the performable second binding lost to a broken-link first: ${r.body.error}`);
-  assert.ok(r.body.target.path.startsWith(fs.realpathSync(second) + path.sep),
-    "resolved under the broken-link binding");
+  assert.equal(
+    r.status,
+    200,
+    `the performable second binding lost to a broken-link first: ${r.body.error}`,
+  );
+  assert.ok(
+    r.body.target.path.startsWith(fs.realpathSync(second) + path.sep),
+    "resolved under the broken-link binding",
+  );
 });
 
 test("a SYMLINKED duplicate is also one location", async (t) => {
@@ -386,6 +444,9 @@ test("a SYMLINKED duplicate is also one location", async (t) => {
   fs.symlinkSync(real, path.join(dir, "alias"));
   const s = await start({ roots: { feedback: [real, path.join(dir, "alias")] } });
   t.after(() => s.stop());
-  assert.equal((await s.declare({ root: "feedback", path: "proof" })).status, 200,
-    "a symlinked duplicate binding was treated as a second location");
+  assert.equal(
+    (await s.declare({ root: "feedback", path: "proof" })).status,
+    200,
+    "a symlinked duplicate binding was treated as a second location",
+  );
 });

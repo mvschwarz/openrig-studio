@@ -38,8 +38,8 @@ export function watchSignal({
   onDegraded = () => {},
   fetchImpl = fetch,
 } = {}) {
-  const cursors = new Map();          // verb -> last-seen marker
-  let boot;                           // undefined until the first observation
+  const cursors = new Map(); // verb -> last-seen marker
+  let boot; // undefined until the first observation
   let bootSeen = false;
   let stopped = false;
   let degraded = false;
@@ -60,8 +60,14 @@ export function watchSignal({
       const res = await fetchImpl("/api/contract", { cache: "no-store" });
       if (!res.ok) throw new Error(`contract responded ${res.status}`);
       const next = (await res.json())?.runtime?.boot;
-      if (!bootSeen) { boot = next; bootSeen = true; }        // first OBSERVATION
-      else if (next && next !== boot) { onCode({ from: boot, to: next }); return; }
+      if (!bootSeen) {
+        boot = next;
+        bootSeen = true;
+      } // first OBSERVATION
+      else if (next && next !== boot) {
+        onCode({ from: boot, to: next });
+        return;
+      }
     } catch (e) {
       // A failed contract read still counts as an observation: without this the
       // latch waits for success and inherits the bug it exists to avoid.
@@ -72,7 +78,8 @@ export function watchSignal({
     for (const verb of verbs) {
       try {
         const since = cursors.get(verb);
-        const url = verb + (verb.includes("?") ? "&" : "?") + "since=" + encodeURIComponent(since ?? "");
+        const url =
+          verb + (verb.includes("?") ? "&" : "?") + "since=" + encodeURIComponent(since ?? "");
         const res = await fetchImpl(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`${verb} responded ${res.status}`);
         const body = await res.json();
@@ -82,7 +89,9 @@ export function watchSignal({
         // its own consumer. Count it as a failure so `degraded` is reported, and
         // do NOT deliver it as fresh data or advance the cursor on it.
         if (body && body.ok === false) {
-          sawFailure = (typeof body.degraded === "string" && body.degraded) || `${verb} reported a degraded read (ok:false)`;
+          sawFailure =
+            (typeof body.degraded === "string" && body.degraded) ||
+            `${verb} reported a degraded read (ok:false)`;
           continue;
         }
         // A marker that moved BACKWARDS or was reissued counts as changed.
@@ -102,9 +111,19 @@ export function watchSignal({
     settle(Boolean(sawFailure), sawFailure);
   }
 
-  const timer = setInterval(() => { if (!stopped) tick(); }, interval);
+  const timer = setInterval(() => {
+    if (!stopped) tick();
+  }, interval);
   tick();
-  return { stop() { stopped = true; clearInterval(timer); }, get degraded() { return degraded; } };
+  return {
+    stop() {
+      stopped = true;
+      clearInterval(timer);
+    },
+    get degraded() {
+      return degraded;
+    },
+  };
 }
 
 // ---- state that survives a code reload --------------------------------------
@@ -139,12 +158,14 @@ export function preserveAcross(key, { capture, restore, say = () => {}, onLate }
     const raw = sessionStorage.getItem(slot);
     if (raw !== null) {
       if (calledAfterPaint()) {
-        const warn = "preserveAcross ran after the load event, so the restore lands AFTER first " +
+        const warn =
+          "preserveAcross ran after the load event, so the restore lands AFTER first " +
           "paint and the user sees the un-restored view first. Call it from a deferred module " +
           "script — see contract/change-signal.md.";
-        if (onLate) onLate(warn); else globalThis.console?.warn?.(warn);
+        if (onLate) onLate(warn);
+        else globalThis.console?.warn?.(warn);
       }
-      sessionStorage.removeItem(slot);   // one-shot: a stale slot must not resurrect
+      sessionStorage.removeItem(slot); // one-shot: a stale slot must not resurrect
       restore?.(JSON.parse(raw));
       restored = true;
       // Say it ONCE, deliberately. Partly so the user knows the state came back
@@ -152,14 +173,19 @@ export function preserveAcross(key, { capture, restore, say = () => {}, onLate }
       // as a reload rather than hidden by a perfect restore.
       say("reloaded with new code — your view was kept");
     }
-  } catch { /* a corrupt slot must not stop the surface from loading */ }
+  } catch {
+    /* a corrupt slot must not stop the surface from loading */
+  }
 
   return {
     restored,
     // Call immediately before reloading.
     keep() {
-      try { sessionStorage.setItem(slot, JSON.stringify(capture?.() ?? null)); }
-      catch { /* quota or private mode: reload without preservation, do not throw */ }
+      try {
+        sessionStorage.setItem(slot, JSON.stringify(capture?.() ?? null));
+      } catch {
+        /* quota or private mode: reload without preservation, do not throw */
+      }
     },
   };
 }
@@ -171,7 +197,11 @@ export function preserveAcross(key, { capture, restore, say = () => {}, onLate }
 //
 // Takes its fetch for the same reason watchSignal does: a consumer can test its
 // own adoption with no browser and no live provider.
-export async function declaredKinds({ surfaceId, fetchImpl = fetch, manifest = "/surfaces.json" } = {}) {
+export async function declaredKinds({
+  surfaceId,
+  fetchImpl = fetch,
+  manifest = "/surfaces.json",
+} = {}) {
   const res = await fetchImpl(manifest, { cache: "no-store" });
   if (!res.ok) throw new Error(`${manifest} responded ${res.status}`);
   const rows = (await res.json())?.surfaces ?? [];
@@ -180,13 +210,18 @@ export async function declaredKinds({ surfaceId, fetchImpl = fetch, manifest = "
   // "my row is missing" and "my row declares nothing" are different facts and a
   // surface can act on the difference — the first is a registration problem, the
   // second is a deliberate choice. Collapsing them to [] would hide the first.
-  if (!row) return { kinds: [], found: false, problem: `no row with id "${surfaceId}" in ${manifest}` };
+  if (!row)
+    return { kinds: [], found: false, problem: `no row with id "${surfaceId}" in ${manifest}` };
   if (row.preserve === undefined) return { kinds: [], found: true, problem: null };
   if (!Array.isArray(row.preserve)) {
     // Declared and unusable is NOT the same as undeclared, and it must not read
     // as an empty list. Absence is silent because the field is optional; a
     // declaration that does nothing is not.
-    return { kinds: [], found: true, problem: `preserve must be an array of kind names, got ${typeof row.preserve}` };
+    return {
+      kinds: [],
+      found: true,
+      problem: `preserve must be an array of kind names, got ${typeof row.preserve}`,
+    };
   }
   return { kinds: row.preserve, found: true, problem: null };
 }
@@ -238,8 +273,13 @@ export function standardAdapter({ win = globalThis, doc = globalThis.document } 
         if (!v || typeof v !== "object") return;
         if (v.win) win.scrollTo?.(v.win.x ?? 0, v.win.y ?? 0);
         for (const [key, top, left] of v.els ?? []) {
-          const el = doc?.querySelector?.(`[data-preserve-scroll][name="${key}"], #${CSS?.escape?.(key) ?? key}`);
-          if (el) { el.scrollTop = top; el.scrollLeft = left; }
+          const el = doc?.querySelector?.(
+            `[data-preserve-scroll][name="${key}"], #${CSS?.escape?.(key) ?? key}`,
+          );
+          if (el) {
+            el.scrollTop = top;
+            el.scrollLeft = left;
+          }
         }
       },
     },
@@ -250,7 +290,10 @@ export function standardAdapter({ win = globalThis, doc = globalThis.document } 
         for (const el of doc?.querySelectorAll?.("input, select, textarea") ?? []) {
           const key = fieldKey(el);
           if (!key || SKIP_INPUT.has(el.type)) continue;
-          out[key] = el.type === "checkbox" || el.type === "radio" ? { checked: el.checked } : { value: el.value };
+          out[key] =
+            el.type === "checkbox" || el.type === "radio"
+              ? { checked: el.checked }
+              : { value: el.value };
         }
         return out;
       },
@@ -267,9 +310,10 @@ export function standardAdapter({ win = globalThis, doc = globalThis.document } 
     },
 
     playhead: {
-      get: () => [...(doc?.querySelectorAll?.("video, audio") ?? [])]
-        .map((el, i) => [fieldKey(el) || String(i), el.currentTime, !el.paused])
-        .filter(([k]) => k !== null),
+      get: () =>
+        [...(doc?.querySelectorAll?.("video, audio") ?? [])]
+          .map((el, i) => [fieldKey(el) || String(i), el.currentTime, !el.paused])
+          .filter(([k]) => k !== null),
       set: (v) => {
         const media = [...(doc?.querySelectorAll?.("video, audio") ?? [])];
         for (const [key, time, playing] of Array.isArray(v) ? v : []) {
@@ -296,11 +340,15 @@ export function preserveDeclared(key, kinds, { adapter, say, onUnsupported = () 
   if (!adapter || typeof adapter.get !== "function" || typeof adapter.set !== "function") {
     // Throw rather than no-op. A preserve helper that silently preserved nothing
     // is the exact failure this whole declaration exists to avoid.
-    throw new Error("preserveDeclared needs an adapter: { get(kind), set(kind, value), supports?(kind) }");
+    throw new Error(
+      "preserveDeclared needs an adapter: { get(kind), set(kind, value), supports?(kind) }",
+    );
   }
   const list = Array.isArray(kinds) ? kinds : [];
-  const supported = [], unsupported = [];
-  for (const k of list) (adapter.supports ? adapter.supports(k) : true) ? supported.push(k) : unsupported.push(k);
+  const supported = [],
+    unsupported = [];
+  for (const k of list)
+    (adapter.supports ? adapter.supports(k) : true) ? supported.push(k) : unsupported.push(k);
   // Reported, never dropped quietly: a kind the surface declared and nothing can
   // keep is a promise the user will notice being broken.
   if (unsupported.length) onUnsupported(unsupported);
@@ -367,15 +415,26 @@ export function deferWhileDirty(isDirty, apply) {
   let hasPending = false;
   return {
     offer(change) {
-      if (isDirty()) { pending = change; hasPending = true; return "deferred"; }
-      apply(change); return "applied";
+      if (isDirty()) {
+        pending = change;
+        hasPending = true;
+        return "deferred";
+      }
+      apply(change);
+      return "applied";
     },
     // Call when the surface becomes clean.
     flush() {
       if (!hasPending || isDirty()) return false;
-      const c = pending; pending = undefined; hasPending = false; apply(c); return true;
+      const c = pending;
+      pending = undefined;
+      hasPending = false;
+      apply(c);
+      return true;
     },
-    get deferred() { return hasPending; },
+    get deferred() {
+      return hasPending;
+    },
   };
 }
 
@@ -421,14 +480,17 @@ export function driveSurface({
   // is exactly why a foreground op never reaches it — there is no unaddressed
   // channel left to poll.
   if (typeof surface !== "string" || !surface.trim()) {
-    throw new TypeError("driveSurface needs the `surface` id it receives ops for — ops are per-surface");
+    throw new TypeError(
+      "driveSurface needs the `surface` id it receives ops for — ops are per-surface",
+    );
   }
 
-  let marker = null;      // last marker seen, so `?since=` can be honest
-  let seen = 0;           // highest generation ACCEPTED (dedup), not yet proven applied
-  let appliedGen = 0;     // highest generation whose apply() RESOLVED — the ack we report
-  let next = null;        // newest op that arrived while one was being applied
-  let baselined = false;  // has the first poll established what counts as "already there"?
+  let marker = null; // last marker seen, so `?since=` can be honest
+  let seen = 0; // highest generation ACCEPTED (dedup), not yet proven applied
+  let appliedGen = 0; // highest generation whose apply() RESOLVED — the ack we report
+  let baselineGen = 0; // gen adopted as "already there" at load — never applied, never pending
+  let next = null; // newest op that arrived while one was being applied
+  let baselined = false; // has the first poll established what counts as "already there"?
   let flying = false;
   let stopped = false;
   let timer = null;
@@ -457,7 +519,10 @@ export function driveSurface({
   function offer(op) {
     if (!op || typeof op.gen !== "number" || op.gen <= seen) return "superseded";
     seen = op.gen;
-    if (flying) { next = op; return "queued-latest"; }
+    if (flying) {
+      next = op;
+      return "queued-latest";
+    }
     run(op).catch(onError);
     return "applying";
   }
@@ -473,9 +538,15 @@ export function driveSurface({
       if (r && r.ok) {
         marker = r.marker ?? marker;
         // The baseline is taken from the FIRST answer, before anything is applied.
+        // The baselined gen is also the settle FLOOR: it is deliberately never
+        // applied, so without the floor a page booting under an old op would
+        // wait out every whenSettled() timeout on work that is not pending.
         if (!baselined) {
           baselined = true;
-          if (!resumeLatestOnLoad && r.op && typeof r.op.gen === "number") seen = r.op.gen;
+          if (!resumeLatestOnLoad && r.op && typeof r.op.gen === "number") {
+            seen = r.op.gen;
+            baselineGen = r.op.gen;
+          }
         }
         if (r.changed && r.op) offer(r.op);
       }
@@ -488,16 +559,60 @@ export function driveSurface({
     if (!stopped) timer = setTimeout(poll, intervalMs);
   }
 
+  // SETTLED IS THE HARDER HALF, and there is exactly ONE primitive for it, here
+  // at the seam — a surface that hand-rolls this comparison gets it wrong in the
+  // way the review app did: it advanced a parallel counter at ACCEPTANCE and its
+  // settle() reported {settled:true} while state still showed the previous item,
+  // 4,185ms early. drive.md: appliedGen advances only when application has
+  // RESOLVED. whenSettled refuses BOTH easier halves at once:
+  //   - recorded-but-undelivered: the runtime holds a gen this client's poll has
+  //     not fetched yet (the drive + immediate-write window) — each round
+  //     consults the runtime, so silence between polls cannot read as settled;
+  //   - accepted-but-unresolved: apply() is in flight or queued behind one.
+  // The read is OBSERVE-ONLY: delivery stays with the poll loop, so awaiting
+  // settle cannot double-deliver an op. A baselined-away gen counts via the
+  // floor (deliberately declined is not pending). An unreachable runtime does
+  // not fabricate settled:true — the local windows still gate; only the
+  // recorded-gen consult degrades.
+  async function whenSettled({ timeoutMs = 4000, pollMs = 50 } = {}) {
+    const t0 = Date.now();
+    for (;;) {
+      let latest = seen;
+      try {
+        const params = new URLSearchParams({ surface, applied: String(appliedGen) });
+        const r = await (await fetchImpl(`${endpoint}?${params}`, { cache: "no-store" })).json();
+        if (r && r.ok && r.op && typeof r.op.gen === "number") latest = Math.max(latest, r.op.gen);
+      } catch {
+        /* runtime unreachable: local drain still gates below */
+      }
+      const floor = Math.max(appliedGen, baselineGen);
+      if (!flying && next === null && floor >= latest)
+        return { settled: true, applied: appliedGen };
+      if (Date.now() - t0 >= timeoutMs) return { settled: false, latest, applied: appliedGen };
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  }
+
   poll();
   return {
     offer,
-    stop() { stopped = true; if (timer) clearTimeout(timer); },
+    whenSettled,
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
     // `applied` is the SETTLE-ACK value: the highest generation whose apply()
     // resolved. `accepted` is the dedup high-water (highest offered/baselined) —
     // it moves ahead of `applied` while an application is in flight, which is the
-    // observable posted-but-not-yet-applied window.
-    get applied() { return appliedGen; },
-    get accepted() { return seen; },
+    // observable posted-but-not-yet-applied window. These are raw watermarks;
+    // "is it settled" is whenSettled's question, deliberately not duplicated as
+    // a second, weaker boolean here.
+    get applied() {
+      return appliedGen;
+    },
+    get accepted() {
+      return seen;
+    },
   };
 }
 
@@ -549,8 +664,14 @@ export function declareCaptureTarget(spec) {
     // A shell that predates this seam never answers. Resolving rather than hanging
     // keeps an app that awaits this from stalling its own load — and it is
     // reported as an unanswered declaration, never as a success.
-    const timer = setTimeout(() => finish({
-      ok: false, target: null, error: "no answer from the shell (timed out)",
-    }), 4000);
+    const timer = setTimeout(
+      () =>
+        finish({
+          ok: false,
+          target: null,
+          error: "no answer from the shell (timed out)",
+        }),
+      4000,
+    );
   });
 }

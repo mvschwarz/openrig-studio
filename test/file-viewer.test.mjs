@@ -31,9 +31,12 @@ const src = () => fs.readFileSync(path.join(REPO, "app", "file-viewer.js"), "utf
 // over raw source cannot tell a comment EXPLAINING a property from code VIOLATING
 // it — two of these checks failed on their own explanatory prose the first time
 // they ran. Strip comments and assert on what executes.
-const code = () => src()
-  .replace(/\/\*[\s\S]*?\*\//g, "")
-  .split("\n").map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1")).join("\n");
+const code = () =>
+  src()
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1"))
+    .join("\n");
 const css = () => fs.readFileSync(path.join(REPO, "app", "file-viewer.css"), "utf8");
 
 test("HTML is sandboxed, never injected into the app's DOM", () => {
@@ -42,8 +45,11 @@ test("HTML is sandboxed, never injected into the app's DOM", () => {
   const s = code();
   const html = s.match(/case "html":([\s\S]*?)case "text":/);
   assert.ok(html, "the html branch is gone");
-  assert.match(html[1], /<iframe[^>]*\bsandbox\b/,
-    "html is no longer rendered in a sandboxed iframe");
+  assert.match(
+    html[1],
+    /<iframe[^>]*\bsandbox\b/,
+    "html is no longer rendered in a sandboxed iframe",
+  );
   assert.match(html[1], /srcdoc=/, "html is not passed via srcdoc");
   assert.doesNotMatch(html[1], /innerHTML/, "the html branch reaches for innerHTML");
 });
@@ -56,21 +62,26 @@ test("markdown ESCAPES FIRST, then formats — the order is the safety property"
   assert.match(md[1], /esc\(src\)/, "markdown does not escape its input before formatting");
   const escIdx = md[1].indexOf("esc(src)");
   const fmtIdx = md[1].search(/replace\(\/`/);
-  assert.ok(escIdx >= 0 && (fmtIdx < 0 || escIdx < fmtIdx),
-    "formatting happens before escaping — the file's own markup would survive");
+  assert.ok(
+    escIdx >= 0 && (fmtIdx < 0 || escIdx < fmtIdx),
+    "formatting happens before escaping — the file's own markup would survive",
+  );
 });
 
 test("markdown link hrefs are scheme-limited", () => {
   // `javascript:` in a markdown link is the obvious hole, and a proof artifact is
   // exactly the kind of file that arrives from elsewhere.
   const s = src();
-  assert.match(s, /\^\(https\?:\|\\\/\|#\)/,
-    "the link-href scheme allowlist is gone — javascript: URLs would render as links");
+  assert.match(
+    s,
+    /\^\(https\?:\|\\\/\|#\)/,
+    "the link-href scheme allowlist is gone — javascript: URLs would render as links",
+  );
 });
 
 test("a chain entry is ICON + FILENAME, never a thumbnail", () => {
-  // A wall of thumbnails turns an ordered story into a contact sheet. The PRD is
-  // explicit and the reason is in the shape, so it is pinned.
+  // A wall of thumbnails turns an ordered story into a contact sheet. The reason
+  // is in the shape, so it is pinned.
   const s = src();
   const link = s.match(/export function fileLink\([\s\S]*?\n\}/);
   assert.ok(link, "fileLink is gone");
@@ -85,16 +96,26 @@ test("kind comes from the RUNTIME, not from the filename", () => {
   // terminal capture, a .md that is really a log.
   const s = src();
   assert.match(s, /doc\.kind/, "the viewer no longer switches on the runtime's kind");
-  assert.doesNotMatch(s, /\.split\("\."\)\.pop\(\)|extname/,
-    "the viewer derives kind from the filename somewhere");
+  assert.doesNotMatch(
+    s,
+    /\.split\("\."\)\.pop\(\)|extname/,
+    "the viewer derives kind from the filename somewhere",
+  );
 });
 
 test("an unreadable file SAYS so — a failure must not borrow an empty file's look", () => {
   const s = src();
   assert.match(s, /class="fv-error"/, "there is no error rendering path");
-  assert.match(s, /not an empty file/,
-    "the error does not distinguish unreachable from empty, which is the wrong conclusion to invite");
-  assert.match(css(), /\.fv-error\s*\{/, "the error state has no styling, so it reads as body text");
+  assert.match(
+    s,
+    /not an empty file/,
+    "the error does not distinguish unreachable from empty, which is the wrong conclusion to invite",
+  );
+  assert.match(
+    css(),
+    /\.fv-error\s*\{/,
+    "the error state has no styling, so it reads as body text",
+  );
 });
 
 test("closing empties the body, so media stops", () => {
@@ -110,11 +131,17 @@ test("positive control: these checks can fail", () => {
   const s = code();
   const unsandboxed = s.replace(/<iframe class="fv-frame" sandbox/, '<iframe class="fv-frame"');
   const html = unsandboxed.match(/case "html":([\s\S]*?)case "text":/);
-  assert.doesNotMatch(html[1], /\bsandbox\b/,
-    "the sandbox attribute could not be removed, so that assertion proves nothing");
+  assert.doesNotMatch(
+    html[1],
+    /\bsandbox\b/,
+    "the sandbox attribute could not be removed, so that assertion proves nothing",
+  );
 
   const unescaped = s.replace(/const lines = esc\(src\)\.split/, "const lines = String(src).split");
   const md = unescaped.match(/function markdown\(src\) \{([\s\S]*?)\n\}/);
-  assert.doesNotMatch(md[1], /esc\(src\)/,
-    "the escape could not be removed, so the ordering assertion is untested");
+  assert.doesNotMatch(
+    md[1],
+    /esc\(src\)/,
+    "the escape could not be removed, so the ordering assertion is untested",
+  );
 });

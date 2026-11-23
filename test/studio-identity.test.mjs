@@ -23,28 +23,49 @@ import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { reuseDecision, probePort, canonical, REUSE, NOT_MINE, NOTHING } from "../provision/studio-identity.mjs";
+import {
+  reuseDecision,
+  probePort,
+  canonical,
+  REUSE,
+  NOT_MINE,
+  NOTHING,
+} from "../provision/studio-identity.mjs";
 
 const MINE = "/home/op/studio/.runtime/surfaces";
 
 // A well-formed studio contract response. Built as a whole valid document so a
 // test that removes ONE field is testing that field rather than a fixture that
 // was never valid.
-const studio = (dir) => JSON.stringify({
-  contractVersion: "0.1",
-  runtime: { name: "openrig-studio", flavor: "reference-fixture" },
-  capabilities: ["contract.meta", "observe.factory-state", "stream.events", "files.read", "shell.protocol"],
-  manifest: {
-    ok: true, errors: [], warnings: [], surfaces: 1,
-    consumer: dir === null ? null : { dir, surfaces: 1, state: "ok" },
-  },
-});
+const studio = (dir) =>
+  JSON.stringify({
+    contractVersion: "0.1",
+    runtime: { name: "openrig-studio", flavor: "reference-fixture" },
+    capabilities: [
+      "contract.meta",
+      "observe.factory-state",
+      "stream.events",
+      "files.read",
+      "shell.protocol",
+    ],
+    manifest: {
+      ok: true,
+      errors: [],
+      warnings: [],
+      surfaces: 1,
+      consumer: dir === null ? null : { dir, surfaces: 1, state: "ok" },
+    },
+  });
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once("error", reject);
-  s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
 
 // A server that answers however the test says, so the PROBE can be exercised
 // rather than only the decision it wraps.
@@ -69,8 +90,10 @@ test("a studio serving a DIFFERENT directory is refused, and both paths are name
   const theirs = "/home/op/other-studio/.runtime/surfaces";
   const d = reuseDecision({ body: studio(theirs), expectedDir: MINE });
   assert.equal(d.outcome, NOT_MINE);
-  assert.ok(d.reason.includes(theirs) && d.reason.includes(MINE),
-    `the refusal must name what it found AND what it wanted: ${d.reason}`);
+  assert.ok(
+    d.reason.includes(theirs) && d.reason.includes(MINE),
+    `the refusal must name what it found AND what it wanted: ${d.reason}`,
+  );
 });
 
 test("a ZERO-CONFIG studio is refused — it is a studio, but it cannot be this one", () => {
@@ -100,7 +123,10 @@ test("minimal JSON carrying the expected dir is NOT accepted as a studio", () =>
 
 test("a bogus contract version carrying the expected dir is refused", () => {
   const d = reuseDecision({
-    body: JSON.stringify({ contractVersion: "definitely-not-openrig", manifest: { consumer: { dir: MINE } } }),
+    body: JSON.stringify({
+      contractVersion: "definitely-not-openrig",
+      manifest: { consumer: { dir: MINE } },
+    }),
     expectedDir: MINE,
   });
   assert.equal(d.outcome, NOT_MINE);
@@ -149,8 +175,11 @@ test("ordinary spellings of the SAME directory all reuse", (t) => {
     "symlink alias": path.join(link, ".runtime", "surfaces"),
   };
   for (const [label, spelling] of Object.entries(spellings)) {
-    assert.equal(fs.realpathSync(spelling), fs.realpathSync(overlay),
-      `fixture broken: ${label} does not reach the same target`);
+    assert.equal(
+      fs.realpathSync(spelling),
+      fs.realpathSync(overlay),
+      `fixture broken: ${label} does not reach the same target`,
+    );
     const d = reuseDecision({ body: studio(overlay), expectedDir: spelling });
     assert.equal(d.outcome, REUSE, `${label} was refused as foreign: ${d.reason}`);
   }
@@ -160,8 +189,10 @@ test("a genuinely different directory is still refused after normalisation", () 
   // The negative half of the case above. Canonicalising must not become
   // "everything matches".
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "alias-neg-"));
-  const mine = path.join(base, "a"), theirs = path.join(base, "b");
-  fs.mkdirSync(mine); fs.mkdirSync(theirs);
+  const mine = path.join(base, "a"),
+    theirs = path.join(base, "b");
+  fs.mkdirSync(mine);
+  fs.mkdirSync(theirs);
   const d = reuseDecision({ body: studio(theirs), expectedDir: mine + "/" });
   assert.equal(d.outcome, NOT_MINE, "normalisation collapsed two different directories");
 });
@@ -180,8 +211,12 @@ test("a listener answering 404 at /api/contract is FOREIGN, never nothing", asyn
   // against the foreign server. Every server in my own first pass answered 200,
   // so this case was outside the shape of that harness entirely.
   const s = await serve((req, res) => {
-    if (req.url.startsWith("/api/contract")) { res.writeHead(404); return res.end("nope"); }
-    res.writeHead(200, { "content-type": "text/html" }); res.end("<html>a surface</html>");
+    if (req.url.startsWith("/api/contract")) {
+      res.writeHead(404);
+      return res.end("nope");
+    }
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end("<html>a surface</html>");
   });
   t.after(() => s.stop());
 

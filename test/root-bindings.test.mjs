@@ -35,11 +35,16 @@ function appsTree(kinds) {
   // output, or the test measures something else.
   const roots = Object.create(null);
   for (const k of kinds) roots[k] = { required: true };
-  fs.writeFileSync(path.join(dir, "app.json"), JSON.stringify({
-    manifest_version: 1, id: "probe", name: "PROBE",
-    surface: { entry: "p.html", path: "/surfaces/p.html", glyph: "▣" },
-    roots,
-  }));
+  fs.writeFileSync(
+    path.join(dir, "app.json"),
+    JSON.stringify({
+      manifest_version: 1,
+      id: "probe",
+      name: "PROBE",
+      surface: { entry: "p.html", path: "/surfaces/p.html", glyph: "▣" },
+      roots,
+    }),
+  );
   return root;
 }
 
@@ -73,8 +78,10 @@ test("a kind containing a GLOB binds literally and never reads the filesystem", 
 
   const { bindings } = bind(["zzz*"]);
   assert.deepEqual(Object.keys(bindings), ["zzz*"]);
-  assert.ok(!("zzz1" in bindings) && !("zzz2" in bindings),
-    "a filename from the working directory was bound as a declared root kind");
+  assert.ok(
+    !("zzz1" in bindings) && !("zzz2" in bindings),
+    "a filename from the working directory was bound as a declared root kind",
+  );
 });
 
 test("the four conventional kinds keep their conventional homes", () => {
@@ -84,9 +91,17 @@ test("the four conventional kinds keep their conventional homes", () => {
   // deep-equal against an object literal fails on the prototype alone and would
   // read as a mismatch in the paths. State the property; do not let it show up
   // as noise in an unrelated assertion.
-  assert.equal(Object.getPrototypeOf(bindings), null, "bindings must not inherit from Object.prototype");
+  assert.equal(
+    Object.getPrototypeOf(bindings),
+    null,
+    "bindings must not inherit from Object.prototype",
+  );
   assert.deepEqual({ ...bindings }, { ...conventional("/m") });
-  assert.deepEqual(generated, [], "a conventional kind must not be reported as a generated default");
+  assert.deepEqual(
+    generated,
+    [],
+    "a conventional kind must not be reported as a generated default",
+  );
 });
 
 test("an unheard-of kind binds under the media root AND is reported as generated", () => {
@@ -106,8 +121,11 @@ test("kinds named after Object internals survive instead of vanishing", () => {
   // manifest, so neither is hypothetical.
   const { bindings } = bind(["__proto__", "constructor"], "/m");
   const round = JSON.parse(JSON.stringify(bindings));
-  assert.equal(round.constructor, path.join("/m", "constructor"),
-    "a kind named constructor resolved through the prototype chain");
+  assert.equal(
+    round.constructor,
+    path.join("/m", "constructor"),
+    "a kind named constructor resolved through the prototype chain",
+  );
   assert.equal(Object.keys(round).length, 2, `both kinds must survive: ${JSON.stringify(round)}`);
 });
 

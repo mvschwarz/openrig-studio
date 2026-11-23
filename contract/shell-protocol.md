@@ -10,7 +10,8 @@ and an agent sidebar. This document is what a surface may rely on.
 
 - A row with `path` is loaded same-origin: `{origin}{path}`.
 - A row with `url` is loaded as given (external surfaces).
-- Deep link: `?s=<id>` opens that surface directly and survives reload;
+- Deep link: `?s=<id>` opens that surface directly and survives reload; `&h=<place>` opens it at a place (the same filter as the
+  `hash` of `open-surface`);
   the shell keeps the address bar in sync as the user switches surfaces.
 
 ## Surface lifecycle (stable)
@@ -37,9 +38,15 @@ code for this — just answer HTTP.
 
 Send from inside your iframe with `parent.postMessage(msg, "*")`:
 
+The shell hears only surfaces on **its own origin**, and sends its own messages (`markup`,
+`header-action`, `header-overflow`) only to them. A `url` row on another origin, such as a
+project app on its own listener (`server-hooks.md`), is shown but can't drive the shell: these
+messages act as the signed-in person on this Studio.
+
 | Message | Effect |
 |---|---|
-| `{ "t": "open-surface", "id": "<surface-id>" }` | The shell activates that surface (same as a rail click). Unknown ids are ignored. |
+| `{ "t": "open-surface", "id": "<surface-id>" }` | The shell activates that surface (same as a rail click). Unknown ids are ignored. Heard only from one of this Studio's own app frames. |
+| `{ "t": "open-surface", "id": "<surface-id>", "hash": "#<place>" }` | Opens that surface **at a place**: its page's fragment (e.g. `#open=<path>`), without a reload when it's already open. The place is `#` then letters, digits and `%._~!*'()=&-`, at most 1024 characters; anything else is ignored. Back takes the place off again. |
 | `{ "t": "open-agent" }` | The shell opens the agent sidebar. |
 | `{ "t": "open-agent", "seat": "<seat-name>" }` | Opens the sidebar with that roster seat highlighted. Unknown seats open the sidebar unhighlighted. |
 | `{ "t": "header", … }` | Declares the surface's half of the header. See *The header splits in half* below. |

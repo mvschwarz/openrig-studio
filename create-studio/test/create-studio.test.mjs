@@ -24,13 +24,14 @@ import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG = path.resolve(HERE, "..");
 const CLI = path.join(PKG, "index.mjs");
 const SCHEMA = JSON.parse(
-  fs.readFileSync(path.resolve(PKG, "..", "contract", "surface-row.schema.json"), "utf8")
+  fs.readFileSync(path.resolve(PKG, "..", "contract", "surface-row.schema.json"), "utf8"),
 );
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "create-studio-test-"));
@@ -67,8 +68,14 @@ test("emits a runnable project and reports success", () => {
   const dir = tmp();
   const r = run(["my-surface", "--dir", dir]);
   assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(fs.readdirSync(path.join(dir, "my-surface")).sort(),
-    [".gitignore", "README.md", "my-surface.html", "studio.json", "surfaces.json", "surfaces.row.json"]);
+  assert.deepEqual(fs.readdirSync(path.join(dir, "my-surface")).sort(), [
+    ".gitignore",
+    "README.md",
+    "my-surface.html",
+    "studio.json",
+    "surfaces.json",
+    "surfaces.row.json",
+  ]);
   assert.match(r.stdout, /created/);
 });
 
@@ -78,13 +85,16 @@ test("emitted row is schema-shaped: required present, exactly one target, stable
   const { row } = emitted(dir, "my-surface");
 
   for (const key of SCHEMA.required) assert.ok(key in row, `missing required field ${key}`);
-  assert.ok(("path" in row) !== ("url" in row), "must carry exactly one of path|url");
+  assert.ok("path" in row !== "url" in row, "must carry exactly one of path|url");
 
   for (const key of Object.keys(row)) {
     const prop = SCHEMA.properties[key];
     assert.ok(prop, `emitted unknown field ${key}`);
-    assert.equal(prop["x-stability"], "stable",
-      `emitted ${key}, which is ${prop["x-stability"]} — the scaffolder emits stable fields only`);
+    assert.equal(
+      prop["x-stability"],
+      "stable",
+      `emitted ${key}, which is ${prop["x-stability"]} — the scaffolder emits stable fields only`,
+    );
   }
   assert.match(row.path, /^\//);
 });
@@ -109,7 +119,7 @@ test("emitted surface targets the contract version and only stable endpoints", (
 });
 
 test("the emitted surface ADOPTS the runtime helper and can show a degraded state", () => {
-  // A review found the SDK shipped the change-signal helper with ZERO surfaces
+  // The SDK once shipped the change-signal helper with ZERO surfaces
   // using it — every reference outside the helper itself was in a test. The
   // scaffolder is the highest-leverage place to fix that: every surface anyone
   // generates from here gets the primitive, which is the whole thesis of
@@ -118,15 +128,25 @@ test("the emitted surface ADOPTS the runtime helper and can show a degraded stat
   assert.equal(run(["my-surface", "--dir", dir]).code, 0);
   const { html } = emitted(dir, "my-surface");
 
-  assert.match(html, /import \{[^}]*watchSignal[^}]*\} from "\/signal\.js"/,
-    "the emitted surface no longer imports the runtime helper");
+  assert.match(
+    html,
+    /import \{[^}]*watchSignal[^}]*\} from "\/signal\.js"/,
+    "the emitted surface no longer imports the runtime helper",
+  );
   // An import only works from a module, so this is load-bearing rather than style.
-  assert.match(html, /<script type="module">/,
-    "the surface imports a module from a classic script, which cannot execute");
+  assert.match(
+    html,
+    /<script type="module">/,
+    "the surface imports a module from a classic script, which cannot execute",
+  );
   // Degraded must be visible in the UI, not only in the console
   // (contract/shell-protocol.md), so there has to be somewhere to show it.
   assert.match(html, /id="degraded"/, "the emitted surface has nowhere to render a degraded state");
-  assert.match(html, /onDegraded/, "the surface imports the helper but never asks to be told about failure");
+  assert.match(
+    html,
+    /onDegraded/,
+    "the surface imports the helper but never asks to be told about failure",
+  );
 });
 
 test("the emitted README documents the primitives the emitted PAGE already uses", () => {
@@ -140,14 +160,21 @@ test("the emitted README documents the primitives the emitted PAGE already uses"
 
   // Keyed on what the PAGE actually imports, so this cannot drift into a fixed
   // list that stops matching the code it describes.
-  const imported = (html.match(/import \{([^}]*)\} from "\/signal\.js"/) || [, ""])[1]
-    .split(",").map((s) => s.trim()).filter(Boolean);
-  assert.ok(imported.length >= 2, `positive control: parsed ${imported.length} imports from the page`);
+  const imported = (html.match(/import \{([^}]*)\} from "\/signal\.js"/)?.[1] ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  assert.ok(
+    imported.length >= 2,
+    `positive control: parsed ${imported.length} imports from the page`,
+  );
 
   for (const fn of imported) {
-    assert.ok(readme.includes(fn),
+    assert.ok(
+      readme.includes(fn),
       `the emitted page imports ${fn} but the emitted README never mentions it — ` +
-      `the code does something the shipped docs do not explain`);
+        `the code does something the shipped docs do not explain`,
+    );
   }
   for (const doc of ["change-signal.md", "focus.md", "drive.md"]) {
     assert.ok(readme.includes(doc), `the emitted README does not point at contract/${doc}`);
@@ -163,8 +190,10 @@ test("the emitted README names the file that was actually emitted", () => {
   const { readme } = emitted(dir, "my-surface");
 
   assert.ok(readme.includes("my-surface.html"), "the README never names the emitted page");
-  assert.ok(!/`surface\.html`/.test(readme),
-    "the emitted README refers to `surface.html`, which is the TEMPLATE's name and does not exist here");
+  assert.ok(
+    !/`surface\.html`/.test(readme),
+    "the emitted README refers to `surface.html`, which is the TEMPLATE's name and does not exist here",
+  );
   assert.ok(!readme.includes("{{"), "an unreplaced template token reached the emitted README");
 });
 
@@ -179,19 +208,99 @@ test("the emitted surface is AGENT-DRIVABLE out of the box", () => {
   assert.equal(run(["my-surface", "--dir", dir]).code, 0);
   const { html } = emitted(dir, "my-surface");
 
-  assert.match(html, /import \{[^}]*driveSurface[^}]*\} from "\/signal\.js"/,
-    "the emitted surface no longer imports the drive helper");
-  assert.match(html, /driveSurface\(\{/, "the surface imports the drive helper but never adopts it");
+  assert.match(
+    html,
+    /import \{[^}]*driveSurface[^}]*\} from "\/signal\.js"/,
+    "the emitted surface no longer imports the drive helper",
+  );
+  assert.match(
+    html,
+    /driveSurface\(\{/,
+    "the surface imports the drive helper but never adopts it",
+  );
   assert.match(html, /apply:/, "the drive adoption has no apply, so an op would land nowhere");
+  // Ops are per surface (contract/drive.md): driveSurface throws without the surface id, and a module
+  // script that throws never boots, so the page would sit at "Reading the runtime contract" forever.
+  assert.match(
+    html,
+    /driveSurface\(\{\s*(?:\/\/[^\n]*\n\s*)*surface: "my-surface",/,
+    "the drive adoption doesn't name this surface's id",
+  );
+  assert.match(
+    html,
+    /"surface":"my-surface"/,
+    "the page's own curl example would post an op addressed to no surface",
+  );
 
   // The ops it claims to handle must be ones it CAN handle. A starter advertising
   // a vocabulary it does not implement would report success for things it does not
   // do — worse than offering less.
-  for (const [op, capability] of [["op.refresh", "refresh"], ["op.say", "showNotice"]]) {
+  for (const [op, capability] of [
+    ["op.refresh", "refresh"],
+    ["op.say", "showSaid"],
+  ]) {
     assert.ok(html.includes(op), `the drive adoption does not handle ${op}`);
-    assert.ok(html.includes(capability + "("),
-      `${op} is handled but the surface has no ${capability}() to honour it with`);
+    assert.ok(
+      html.includes(capability + "("),
+      `${op} is handled but the surface has no ${capability}() to honour it with`,
+    );
   }
+});
+
+test("a driven 'say' stays on screen when the same op also refreshes", async () => {
+  // The emitted page's own module, run against a stub page: the import of the runtime helper is replaced by stand-ins
+  // that hand back the drive handler, and fetch answers the two reads the page makes.
+  const dir = tmp();
+  assert.equal(run(["my-surface", "--dir", dir]).code, 0);
+  const { html } = emitted(dir, "my-surface");
+  const code = html
+    .match(/<script type="module">([\s\S]*?)<\/script>/)[1]
+    .replace(
+      /import \{[^}]*\} from "\/signal\.js";/,
+      "const { watchSignal, driveSurface } = helpers;",
+    );
+  const node = () => ({
+    textContent: "",
+    innerHTML: "",
+    className: "",
+    hidden: true,
+    addEventListener() {},
+  });
+  const nodes = {};
+  let apply = null;
+  const ctx = {
+    document: { querySelector: (q) => (nodes[q] ??= node()) },
+    fetch: async (url) => ({
+      json: async () =>
+        url === "/api/contract"
+          ? { contractVersion: "0.1.0", capabilities: ["observe.factory-state", "stream.events"] }
+          : {
+              ok: true,
+              rig: "my-rig",
+              seats: [],
+              queue: [],
+              generatedAt: new Date().toISOString(),
+            },
+    }),
+    EventSource: class {
+      addEventListener() {}
+      close() {}
+    },
+    setInterval: () => 0,
+    clearInterval() {},
+    setTimeout: () => 0,
+    clearTimeout() {},
+    parent: { postMessage() {} },
+    location: { reload() {} },
+    helpers: { watchSignal() {}, driveSurface: (o) => (apply = o.apply) },
+  };
+  vm.createContext(ctx);
+  vm.runInContext(`(async () => {${code}})()`, ctx);
+  assert.equal(typeof apply, "function", "the page adopted the drive helper");
+  await apply({ say: "pulling the latest state", refresh: true });
+  assert.equal(nodes["#said"].textContent, "pulling the latest state");
+  assert.equal(nodes["#said"].hidden, false);
+  assert.match(nodes["#content"].innerHTML, /my-rig/, "control: the refresh did redraw the data");
 });
 
 // ------------------------------------------------------------------ escaping
@@ -200,13 +309,13 @@ test("the emitted surface is AGENT-DRIVABLE out of the box", () => {
 // Markdown.
 
 const HOSTILE = [
-  ['double quote', 'say "hello" now'],
-  ['backslash', "back\\slash and \\\" mix"],
-  ['newline', "line one\nline two"],
-  ['html metachars', '<strong>OWNED</strong> & <img src=x onerror=alert(1)>'],
-  ['markdown fence', "```json\nnot really\n```"],
-  ['json braces', '{"injected": true}'],
-  ['unicode + quote', '◆ "◆" ◆'],
+  ["double quote", 'say "hello" now'],
+  ["backslash", 'back\\slash and \\" mix'],
+  ["newline", "line one\nline two"],
+  ["html metachars", "<strong>OWNED</strong> & <img src=x onerror=alert(1)>"],
+  ["markdown fence", "```json\nnot really\n```"],
+  ["json braces", '{"injected": true}'],
+  ["unicode + quote", '◆ "◆" ◆'],
 ];
 
 for (const [label, value] of HOSTILE) {
@@ -235,13 +344,21 @@ for (const [label, value] of HOSTILE) {
     assert.ok(block, "emitted README lost its json block");
     const lines = block[1].split("\n");
     const indent = (l) => l.match(/^ */)[0].length;
-    assert.equal(indent(lines[0]), indent(lines[lines.length - 1]),
-      "json block is ragged: opening and closing braces are at different indents");
+    assert.equal(
+      indent(lines[0]),
+      indent(lines[lines.length - 1]),
+      "json block is ragged: opening and closing braces are at different indents",
+    );
     JSON.parse(block[1]);
   });
 }
 
-for (const [label, value] of [['double quote', '"'], ['backslash', "\\"], ['newline', "\n"], ['angle bracket', "<"]]) {
+for (const [label, value] of [
+  ["double quote", '"'],
+  ["backslash", "\\"],
+  ["newline", "\n"],
+  ["angle bracket", "<"],
+]) {
   test(`glyph survives ${label}`, () => {
     const dir = tmp();
     const r = run(["my-surface", "--dir", dir, "--glyph", value]);
@@ -333,8 +450,11 @@ test("a mid-generation failure leaves no project and no staging residue", () => 
   const r = run(["halfway", "--dir", dir], { env: { OPENRIG_STUDIO_CREATE_FAIL_AFTER: "2" } });
   assert.notEqual(r.code, 0);
   assert.match(r.stderr, /nothing was written/);
-  assert.deepEqual(entries(dir), [],
-    "destination or hidden staging directory survived a failed generation");
+  assert.deepEqual(
+    entries(dir),
+    [],
+    "destination or hidden staging directory survived a failed generation",
+  );
 });
 
 test("failure injection is inert when unset (the atomicity test is not self-fulfilling)", () => {
@@ -345,22 +465,40 @@ test("failure injection is inert when unset (the atomicity test is not self-fulf
 
 // -------------------------------------------------------------- packaged bin
 
-test("the packed tarball exposes a working bin through npm's own resolution", { timeout: 180_000 }, () => {
-  const dir = tmp();
-  const packed = execSync(`npm pack ${JSON.stringify(PKG)} --pack-destination ${JSON.stringify(dir)}`,
-    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim().split("\n").pop();
-  const tarball = path.join(dir, packed);
-  assert.ok(fs.existsSync(tarball), "npm pack produced no tarball");
+test(
+  "the packed tarball exposes a working bin through npm's own resolution",
+  { timeout: 180_000 },
+  () => {
+    const dir = tmp();
+    const packed = execSync(
+      `npm pack ${JSON.stringify(PKG)} --pack-destination ${JSON.stringify(dir)}`,
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    )
+      .trim()
+      .split("\n")
+      .pop();
+    const tarball = path.join(dir, packed);
+    assert.ok(fs.existsSync(tarball), "npm pack produced no tarball");
 
-  const out = path.join(dir, "out");
-  fs.mkdirSync(out);
-  execSync(`npm exec --yes --package=${JSON.stringify(tarball)} -- create-studio packed-check`,
-    { cwd: out, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const out = path.join(dir, "out");
+    fs.mkdirSync(out);
+    execSync(`npm exec --yes --package=${JSON.stringify(tarball)} -- create-studio packed-check`, {
+      cwd: out,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
-  assert.deepEqual(fs.readdirSync(path.join(out, "packed-check")).sort(),
-    [".gitignore", "README.md", "packed-check.html", "studio.json", "surfaces.json", "surfaces.row.json"]);
-  JSON.parse(fs.readFileSync(path.join(out, "packed-check", "surfaces.row.json"), "utf8"));
-});
+    assert.deepEqual(fs.readdirSync(path.join(out, "packed-check")).sort(), [
+      ".gitignore",
+      "README.md",
+      "packed-check.html",
+      "studio.json",
+      "surfaces.json",
+      "surfaces.row.json",
+    ]);
+    JSON.parse(fs.readFileSync(path.join(out, "packed-check", "surfaces.row.json"), "utf8"));
+  },
+);
 
 // ------------------------------------------------------------ suite sanity
 

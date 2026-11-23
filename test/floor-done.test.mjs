@@ -13,127 +13,474 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const surface = fs.readFileSync(path.join(REPO, "app", "surfaces", "floor.html"), "utf8");
-const DONE = { rows: [
-  { id: "qitem-20261023070000-aaaa", state: "done", title: "Fix the README typo.", source: "assistant@lab", destination: "lab-impl@lab",
-    closedAt: "2026-10-23T07:00:00.000Z", decision: { reason: "no-follow-on", target: null }, result: "Fixed <b>line 12</b>.", resultRead: true,
-    resolution: null, artifact: "docs/README.md@1a2b3c4", handedOffTo: null, handedOffFrom: null },
-  { id: "qitem-20261023065900-bbbb", state: "done", title: "Answer a question", source: "lab-qa@lab", destination: "lab-impl@lab",
-    closedAt: "2026-10-23T06:59:00.000Z", decision: { reason: null, target: null }, result: null, resultRead: true, resolution: null, artifact: null },
-  { id: "qitem-20261023065800-cccc", state: "done", title: "Unread", source: "lab-qa@lab", destination: "lab-impl@lab",
-    closedAt: "2026-10-23T06:58:00.000Z", decision: { reason: "handed_off_to", target: "qitem-x" }, result: null, resultRead: false, artifact: null },
-], coverage: { looked: 40, ours: 3, shown: 3, limit: 100 } };
-const SEATS = [{ seat: "lab-impl@lab" }, { seat: "lab-qa@lab" }];
-const OPEN = [{ id: "qitem-20261023071000-dddd", state: "pending", destination: "lab-impl@lab", source: "assistant@lab", tags: [], updated: "2026-10-23T07:10:00.000Z", title: "Open work" }];
+const DONE = {
+  rows: [
+    {
+      id: "task-20261023070000-aaaa",
+      state: "done",
+      title: "Fix the README typo.",
+      source: "assistant@lab",
+      destination: "lab-build@lab",
+      closedAt: "2026-10-23T07:00:00.000Z",
+      decision: { reason: "no-follow-on", target: null },
+      result: "Fixed <b>line 12</b>.",
+      resultRead: true,
+      resolution: null,
+      artifact: "docs/README.md@1a2b3c4",
+      handedOffTo: null,
+      handedOffFrom: null,
+    },
+    {
+      id: "task-20261023065900-bbbb",
+      state: "done",
+      title: "Answer a question",
+      source: "lab-check@lab",
+      destination: "lab-build@lab",
+      closedAt: "2026-10-23T06:59:00.000Z",
+      decision: { reason: null, target: null },
+      result: null,
+      resultRead: true,
+      resolution: null,
+      artifact: null,
+    },
+    {
+      id: "task-20261023065800-cccc",
+      state: "done",
+      title: "Unread",
+      source: "lab-check@lab",
+      destination: "lab-build@lab",
+      closedAt: "2026-10-23T06:58:00.000Z",
+      decision: { reason: "handed_off_to", target: "task-x" },
+      result: null,
+      resultRead: false,
+      artifact: null,
+    },
+  ],
+  coverage: { looked: 40, ours: 3, shown: 3, limit: 100 },
+};
+const SEATS = [{ seat: "lab-build@lab" }, { seat: "lab-check@lab" }];
+const OPEN = [
+  {
+    id: "task-20261023071000-dddd",
+    state: "pending",
+    destination: "lab-build@lab",
+    source: "assistant@lab",
+    tags: [],
+    updated: "2026-10-23T07:10:00.000Z",
+    title: "Open work",
+  },
+];
 
-const freePort = () => new Promise((resolve, reject) => { const s = net.createServer(); s.once("error", reject); s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
 async function stateFrom(fixture) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "floor-done-"));
   fs.cpSync(path.join(REPO, "app"), path.join(dir, "app"), { recursive: true });
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
   fs.writeFileSync(path.join(dir, "fixtures", "factory-state.json"), JSON.stringify(fixture));
-  const port = await freePort(), proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port), "--fixtures", path.join(dir, "fixtures")], { cwd: dir, stdio: "ignore" });
+  const port = await freePort(),
+    proc = spawn(
+      process.execPath,
+      [
+        path.join(dir, "app", "serve-studio.mjs"),
+        "--port",
+        String(port),
+        "--fixtures",
+        path.join(dir, "fixtures"),
+      ],
+      { cwd: dir, stdio: "ignore" },
+    );
   try {
-    for (let i = 0; i < 100; i++) { try { return await (await fetch(`http://127.0.0.1:${port}/api/factory/state`)).json(); } catch { await new Promise((r) => setTimeout(r, 100)); } }
+    for (let i = 0; i < 100; i++) {
+      try {
+        return await (await fetch(`http://127.0.0.1:${port}/api/factory/state`)).json();
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
     throw new Error("runtime never answered");
-  } finally { proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); }
+  } finally {
+    proc.kill();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 test("the runtime carries `done` through in its declared shape; absent stays absent; a malformed one is carried as unreadable, never as none", async () => {
   const s = await stateFrom({ rig: "lab", attached: true, seats: [], queue: OPEN, done: DONE });
-  assert.deepEqual(s.done, DONE); assert.deepEqual(s.queue, OPEN, "queue is unchanged");
-  assert.equal("done" in await stateFrom({ rig: "lab", attached: true, seats: [], queue: [] }), false, "a generator that sends no done: absent, not empty");
-  for (const bad of ["nope", { rows: [null] }, { rows: [{ title: "no id" }] }, { rows: "x" }, null]) {
+  assert.deepEqual(s.done, DONE);
+  assert.deepEqual(s.queue, OPEN, "queue is unchanged");
+  assert.equal(
+    "done" in (await stateFrom({ rig: "lab", attached: true, seats: [], queue: [] })),
+    false,
+    "a generator that sends no done: absent, not empty",
+  );
+  for (const bad of [
+    "nope",
+    { rows: [null] },
+    { rows: [{ title: "no id" }] },
+    { rows: "x" },
+    null,
+  ]) {
     const s2 = await stateFrom({ rig: "lab", attached: true, seats: [], queue: OPEN, done: bad });
-    assert.deepEqual(s2.done, { rows: [], coverage: { unreadable: "the finished work this box sent wasn't in the declared shape" } }, JSON.stringify(bad));
+    assert.deepEqual(
+      s2.done,
+      {
+        rows: [],
+        coverage: { unreadable: "the finished work this box sent wasn't in the declared shape" },
+      },
+      JSON.stringify(bad),
+    );
     assert.deepEqual(s2.queue, OPEN, "a bad finished-work block never costs the open work");
   }
-  assert.deepEqual((await stateFrom({ rig: "lab", attached: true, seats: [], queue: [], done: { rows: [] } })).done, { rows: [], coverage: {} });
+  assert.deepEqual(
+    (await stateFrom({ rig: "lab", attached: true, seats: [], queue: [], done: { rows: [] } }))
+      .done,
+    { rows: [], coverage: {} },
+  );
 });
 
 // The surface's own script, run with just enough of a page for render() and the find box.
 function page() {
-  const el = (sel) => ({ sel, innerHTML: "", textContent: "", value: "", className: "", lastElementChild: { textContent: "" }, hidden: false,
-    addEventListener() {}, querySelectorAll() { return rowsOf(this.innerHTML); } });
-  const els = { "#content": el("#content"), "#rig": el("#rig"), "#updated": el("#updated"), "#connection": el("#connection"), "#find": el("#find"), "#found": el("#found"), "#findbox": el("#findbox"), "#nomatch-open": el("#nomatch-open"), "#nomatch-done": el("#nomatch-done") };
+  const el = (sel) => ({
+    sel,
+    innerHTML: "",
+    textContent: "",
+    value: "",
+    className: "",
+    lastElementChild: { textContent: "" },
+    hidden: false,
+    addEventListener() {},
+    querySelectorAll() {
+      return rowsOf(this.innerHTML);
+    },
+  });
+  const els = {
+    "#content": el("#content"),
+    "#rig": el("#rig"),
+    "#updated": el("#updated"),
+    "#connection": el("#connection"),
+    "#find": el("#find"),
+    "#found": el("#found"),
+    "#findbox": el("#findbox"),
+    "#nomatch-open": el("#nomatch-open"),
+    "#nomatch-done": el("#nomatch-done"),
+    ".eyebrow": el(".eyebrow"),
+  };
   const rows = new Map();
-  const rowsOf = (html) => [...html.matchAll(/<tr data-id="([^"]+)">/g)].map((m) => rows.get(m[1]) || rows.set(m[1], { dataset: { id: m[1] }, hidden: false }).get(m[1]));
-  const ctx = { document: { querySelector: (s) => els[s] }, fetch: () => new Promise(() => {}), EventSource: function () {}, setInterval, clearInterval, setTimeout, clearTimeout, parent: { postMessage() {} }, console };
+  const rowsOf = (html) =>
+    [...html.matchAll(/<tr data-id="([^"]+)">/g)].map(
+      (m) => rows.get(m[1]) || rows.set(m[1], { dataset: { id: m[1] }, hidden: false }).get(m[1]),
+    );
+  // Private off: the page fails closed on an unreadable flag (test/floor-private.test.mjs), so it is stated here.
+  const ctx = {
+    document: { querySelector: (s) => els[s] },
+    fetch: () => new Promise(() => {}),
+    EventSource: function () {},
+    setInterval,
+    clearInterval,
+    setTimeout,
+    clearTimeout,
+    parent: { postMessage() {} },
+    console,
+    localStorage: { getItem: () => null },
+    addEventListener() {},
+    location: { reload() {} },
+  };
   vm.createContext(ctx);
-  vm.runInContext(surface.match(/<script>([\s\S]*)<\/script>/)[1].replace(/\bboot\(\);\s*$/, ""), ctx);
+  vm.runInContext(
+    surface.match(/<script>([\s\S]*)<\/script>/)[1].replace(/\bboot\(\);\s*$/, ""),
+    ctx,
+  );
   return { ctx, els, rowsOf };
 }
 
+test("layout: Result has a real width and breaks only between words; under 600px finished work stacks (work, result, one muted line)", () => {
+  const css = surface.match(/<style>([\s\S]*?)<\/style>/)[1];
+  const rule = css.match(/\n\s*\.result \{([^}]*)\}/)[1];
+  assert.match(rule, /min-width: 28ch/);
+  assert.match(rule, /max-width: 40ch/);
+  assert.match(rule, /overflow-wrap: break-word/);
+  assert.doesNotMatch(rule, /anywhere/, "no mid-word splits ('addres|ses')");
+  const narrow = css.slice(css.indexOf("@media (max-width: 600px)"));
+  assert.match(
+    narrow,
+    /table\.done-table \{ min-width: 0; \}/,
+    "no 720px table forcing a sideways scroll",
+  );
+  assert.match(narrow, /\.done-table thead \{ display: none; \}/);
+  assert.match(
+    narrow,
+    /\.done-table td\.done-decision::after, \.done-table td\.artifact::after \{ content: "\\00a0·"; \}/,
+    "decision · artifact · closed on one line, each dot tied to the item before it (no line starts with one)",
+  );
+  assert.match(
+    narrow,
+    /\.done-table td\.artifact::before, \.done-table td\.done-closed::before \{ content: " "; \}/,
+  );
+  for (const shared of ["route", "numeric", "empty"])
+    assert.doesNotMatch(
+      narrow,
+      new RegExp("\\." + shared + "\\b"),
+      `the narrow rules don't name the open tables' .${shared}`,
+    );
+  assert.match(css, /\n\s*\.done-work \{ min-width: 24ch; \}/, "Work keeps a real width at 1280");
+  assert.match(css, /\n\s*\.done-narrow \{ display: none; \}/);
+  assert.match(narrow, /\.done-table \.done-narrow \{ display: inline; \}/);
+});
+
 test("FLOOR draws 'Done recently': id, decision, result (escaped), artifact; 'not recorded' and 'couldn't be read' are said; the open count is open work only", () => {
   const { ctx, els } = page();
-  ctx.render({ ok: true, rig: "lab", generatedAt: "2026-10-23T07:11:00.000Z", attached: true, seats: SEATS, queue: OPEN, done: DONE });
+  ctx.render({
+    ok: true,
+    rig: "lab",
+    generatedAt: "2026-10-23T07:11:00.000Z",
+    attached: true,
+    seats: SEATS,
+    queue: OPEN,
+    done: DONE,
+  });
   const h = els["#content"].innerHTML;
   assert.match(h, /<b>1<\/b><span>queue items<\/span>/, "finished work doesn't count as queued");
   assert.match(h, /<h2>Done recently · 3<\/h2>/);
-  assert.match(h, /The newest 3 of this rig's finished work, from the newest 40 finished items on this box\./);
-  assert.match(h, /<span class="item-id">qitem-20261023070000-aaaa<\/span>/);
-  assert.match(h, /<td class="route"><span title="no-follow-on">Done, nothing follows<\/span><\/td>/, "the decision in plain words, the queue's word in the tooltip");
-  assert.match(h, /<th>Work<\/th><th>Result<\/th><th>Decision<\/th><th>Artifact<\/th><th class="numeric">Closed<\/th>/, "the answer right after the work (ux 07:42Z)");
-  assert.match(h, /<td class="result">Fixed &lt;b&gt;line 12&lt;\/b&gt;\.<\/td>/, "result text is escaped, never markup");
-  assert.match(h, /<td class="artifact">docs\/<wbr>README\.md@<wbr>1a2b3c4<\/td>/, "an artifact breaks after / @ : #, not inside a word");
-  assert.equal((h.match(/<span class="unset">not recorded<\/span>/g) || []).length, 4, "row b: decision, result and artifact; row c: artifact only (its decision is recorded, its result couldn't be read)");
+  assert.match(
+    h,
+    /This rig's 3 most recent finished items \(from the last 40 finished in this workspace\)\./,
+    "wording; 'in this workspace'",
+  );
+  assert.match(h, /<table class="done-table" aria-label="Finished work">/);
+  const closedCell = h.match(
+    /<tr data-id="task-20261023070000-aaaa">[\s\S]*?<td class="numeric done-closed">([^<]*)<\/td>/,
+  )[1];
+  assert.doesNotMatch(
+    closedCell,
+    /\d:\d\d:\d\d|2026/,
+    `a short form, no seconds, no year: ${closedCell}`,
+  );
+  assert.match(closedCell, /\d{1,2}:\d\d/, closedCell);
+  assert.match(h, /<span class="item-id">task-20261023070000-aaaa<\/span>/);
+  assert.match(
+    h,
+    /<td class="route done-decision"><span title="no-follow-on">Done<\/span><\/td>/,
+    "the decision in plain words, the queue's word in the tooltip",
+  );
+  assert.match(
+    h,
+    /<th>Work<\/th><th>Result<\/th><th>Status<\/th><th>Artifact<\/th><th class="numeric">Closed<\/th>/,
+    "the answer right after the work",
+  );
+  assert.match(
+    h,
+    /<td class="result">Fixed &lt;b&gt;line 12&lt;\/b&gt;\.<\/td>/,
+    "result text is escaped, never markup",
+  );
+  assert.match(
+    h,
+    /<td class="artifact">docs\/<wbr>README\.md@<wbr>1a2b3c4<\/td>/,
+    "an artifact breaks after / @ : #, not inside a word",
+  );
+  // Wide, each missing field reads "not recorded" under its column head; stacked on a narrow screen the heads are gone, so the
+  // decision says "decision not recorded": done-narrow shows only there. A missing artifact reads "No file recorded" at
+  // every width ("no artifact" would claim there was none).
+  assert.equal(
+    (h.match(/<span class="unset">not recorded<\/span>/g) || []).length,
+    1,
+    "row b: its result",
+  );
+  assert.equal(
+    (
+      h.match(
+        /<span class="unset"><span class="done-narrow">status <\/span>not recorded<\/span>/g,
+      ) || []
+    ).length,
+    1,
+    "row b: its decision",
+  );
+  assert.equal(
+    (h.match(/<span class="unset">No file recorded<\/span>/g) || []).length,
+    2,
+    "rows b and c: their artifact",
+  );
+  assert.doesNotMatch(h, /no artifact/);
+  assert.match(
+    h,
+    /<td class="queue-title done-work">Fix the README typo\./,
+    "the Work cell has its own class for its width",
+  );
   assert.match(h, /<td class="result"><span class="unset">couldn't be read<\/span><\/td>/);
-  assert.match(h, /<span title="handed_off_to">Handed off to qitem-x<\/span>/);
+  assert.match(h, /<span title="handed_off_to">Handed off to task-x<\/span>/);
   ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: [], queue: [] });
-  assert.doesNotMatch(els["#content"].innerHTML, /Done recently/, "a provider that sends no done: no section");
-  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: [], queue: [], done: { rows: [], coverage: { unreadable: "rig queue timed out" } } });
+  assert.doesNotMatch(
+    els["#content"].innerHTML,
+    /Done recently/,
+    "a provider that sends no done: no section",
+  );
+  ctx.render({
+    ok: true,
+    rig: "lab",
+    generatedAt: "x",
+    attached: true,
+    seats: [],
+    queue: [],
+    done: { rows: [], coverage: { unreadable: "rig queue timed out" } },
+  });
   assert.match(els["#content"].innerHTML, /Finished work couldn't be read: rig queue timed out\./);
 });
 
 test("find by id looks only at the floor's own rows: matches are kept, others hidden, and a miss says so plainly", () => {
   const { ctx, els, rowsOf } = page();
-  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: OPEN, done: DONE });
-  els["#find"].value = "aaaa"; ctx.findWork();
-  assert.equal(els["#nomatch-open"].hidden, false, "the queue says it has no match instead of standing empty"); assert.equal(els["#nomatch-done"].hidden, true);
-  assert.match(els["#content"].innerHTML, /<tr id="nomatch-open" hidden><td class="empty" colspan="4">No match in the queue\.<\/td><\/tr>/);
-  assert.match(els["#content"].innerHTML, /<tr id="nomatch-done" hidden><td class="empty" colspan="5">No match in finished work\.<\/td><\/tr>/);
+  ctx.render({
+    ok: true,
+    rig: "lab",
+    generatedAt: "x",
+    attached: true,
+    seats: SEATS,
+    queue: OPEN,
+    done: DONE,
+  });
+  els["#find"].value = "aaaa";
+  ctx.findWork();
+  assert.equal(
+    els["#nomatch-open"].hidden,
+    false,
+    "the queue says it has no match instead of standing empty",
+  );
+  assert.equal(els["#nomatch-done"].hidden, true);
+  assert.match(
+    els["#content"].innerHTML,
+    /<tr id="nomatch-open" hidden><td class="empty" colspan="4">No match in the queue\.<\/td><\/tr>/,
+  );
+  assert.match(
+    els["#content"].innerHTML,
+    /<tr id="nomatch-done" hidden><td class="empty done-empty" colspan="5">No match in finished work\.<\/td><\/tr>/,
+  );
   const rows = rowsOf(els["#content"].innerHTML);
-  assert.deepEqual(rows.filter((r) => !r.hidden).map((r) => r.dataset.id), ["qitem-20261023070000-aaaa"]);
+  assert.deepEqual(
+    rows.filter((r) => !r.hidden).map((r) => r.dataset.id),
+    ["task-20261023070000-aaaa"],
+  );
   assert.equal(els["#found"].textContent, "0 open, 1 finished");
-  els["#find"].value = "qitem-from-another-rig"; ctx.findWork();
-  assert.equal(els["#found"].textContent, "No work with that id in this rig's open work or its newest 3 finished items (older finished work isn't searched).");
+  els["#find"].value = "task-from-another-rig";
+  ctx.findWork();
+  assert.equal(
+    els["#found"].textContent,
+    "No work with that id in this rig's open work or its newest 3 finished items (older finished work isn't searched).",
+  );
   assert.ok(rowsOf(els["#content"].innerHTML).every((r) => r.hidden));
-  els["#find"].value = ""; ctx.findWork(); assert.equal(els["#found"].textContent, ""); assert.ok(rowsOf(els["#content"].innerHTML).every((r) => !r.hidden));
-  assert.doesNotMatch(surface.slice(surface.indexOf("function findWork"), surface.indexOf("findInput.addEventListener")), /fetch\(/, "the find box reads nothing");
+  els["#find"].value = "";
+  ctx.findWork();
+  assert.equal(els["#found"].textContent, "");
+  assert.ok(rowsOf(els["#content"].innerHTML).every((r) => !r.hidden));
+  assert.doesNotMatch(
+    surface.slice(
+      surface.indexOf("function findWork"),
+      surface.indexOf("findInput.addEventListener"),
+    ),
+    /fetch\(/,
+    "the find box reads nothing",
+  );
 });
 
 // Review fixes on the first candidate. Each fails on it.
 test("find counts only this floor's work: another rig's open item a generator still sends is neither found nor shown", () => {
   const { ctx, els, rowsOf } = page();
-  const foreign = { id: "qitem-20261023071100-ffff", state: "pending", destination: "y@other", source: "x@other", tags: [], updated: "x", title: "theirs" };
-  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: [...OPEN, foreign], done: DONE });
-  els["#find"].value = "ffff"; ctx.findWork();
+  const foreign = {
+    id: "task-20261023071100-ffff",
+    state: "pending",
+    destination: "y@other",
+    source: "x@other",
+    tags: [],
+    updated: "x",
+    title: "theirs",
+  };
+  ctx.render({
+    ok: true,
+    rig: "lab",
+    generatedAt: "x",
+    attached: true,
+    seats: SEATS,
+    queue: [...OPEN, foreign],
+    done: DONE,
+  });
+  els["#find"].value = "ffff";
+  ctx.findWork();
   assert.match(els["#found"].textContent, /^No work with that id in this rig's open work/);
   assert.ok(rowsOf(els["#content"].innerHTML).every((r) => r.hidden));
-  els["#find"].value = "dddd"; ctx.findWork(); assert.equal(els["#found"].textContent, "1 open, 0 finished");
+  els["#find"].value = "dddd";
+  ctx.findWork();
+  assert.equal(els["#found"].textContent, "1 open, 0 finished");
 });
 
 test("bounded and unreadable finished work are said as such: no 'yet', and find doesn't claim a miss it can't know", () => {
   const { ctx, els } = page();
-  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: OPEN, done: { rows: [], coverage: { looked: 100, ours: 0, shown: 0, limit: 100 } } });
-  assert.match(els["#content"].innerHTML, /None of this rig's work among the newest 100 finished items on this box\./); assert.doesNotMatch(els["#content"].innerHTML, /yet/);
-  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: OPEN, done: { rows: [], coverage: { unreadable: "rig queue timed out" } } });
-  els["#find"].value = "qitem-anything"; ctx.findWork();
-  assert.equal(els["#found"].textContent, "Not in this rig's open work. Finished work couldn't be read, so this can't say whether it finished.");
+  ctx.render({
+    ok: true,
+    rig: "lab",
+    generatedAt: "x",
+    attached: true,
+    seats: SEATS,
+    queue: OPEN,
+    done: { rows: [], coverage: { looked: 100, ours: 0, shown: 0, limit: 100 } },
+  });
+  assert.match(
+    els["#content"].innerHTML,
+    /None of this rig's work is among the newest 100 finished items in this workspace\./,
+  );
+  assert.doesNotMatch(els["#content"].innerHTML, /yet/);
+  ctx.render({
+    ok: true,
+    rig: "lab",
+    generatedAt: "x",
+    attached: true,
+    seats: SEATS,
+    queue: OPEN,
+    done: { rows: [], coverage: { unreadable: "rig queue timed out" } },
+  });
+  els["#find"].value = "task-anything";
+  ctx.findWork();
+  assert.equal(
+    els["#found"].textContent,
+    "Not in this rig's open work. Finished work couldn't be read, so this can't say whether it finished.",
+  );
 });
 
 test("a hidden element stays hidden whatever a class says: the stylesheet makes [hidden] win", () => {
   assert.match(surface, /\[hidden\] \{ display: none !important; \}/);
-  assert.match(surface, /\.find \{ display: flex;/, "the rule [hidden] has to beat is still there (positive control)");
+  assert.match(
+    surface,
+    /\.find \{ display: flex;/,
+    "the rule [hidden] has to beat is still there (positive control)",
+  );
   assert.match(surface, /<div class="find" id="findbox" role="search" hidden>/);
 });
 
 test("an artifact reference wraps without changing its text: an apostrophe or ampersand survives the break points", () => {
   const { ctx, els } = page();
   const ref = "folder/owner's-output#1 & more@v2:x";
-  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: [], done: { rows: [{ ...DONE.rows[0], artifact: ref }], coverage: { looked: 1 } } });
+  ctx.render({
+    ok: true,
+    rig: "lab",
+    generatedAt: "x",
+    attached: true,
+    seats: SEATS,
+    queue: [],
+    done: { rows: [{ ...DONE.rows[0], artifact: ref }], coverage: { looked: 1 } },
+  });
   const cell = els["#content"].innerHTML.match(/<td class="artifact">([\s\S]*?)<\/td>/)[1];
   assert.doesNotMatch(cell, /&#<wbr>/, "no entity is cut");
-  const text = cell.replace(/<wbr>/g, "").replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+  const text = cell
+    .replace(/<wbr>/g, "")
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"');
   assert.equal(text, ref, "the rendered text is the reference itself");
   assert.equal((cell.match(/<wbr>/g) || []).length, 4, "after /, #, @ and :");
 });
@@ -142,17 +489,43 @@ test("an artifact reference wraps without changing its text: an apostrophe or am
 // the resolution first, then a different closing note, labelled. Fails on da0d723, which showed the note and hid the resolution.
 test("Result shows the resolution AND a different closing note; either alone is the result; an unread note doesn't hide the resolution", () => {
   const { ctx, els } = page();
-  const row = (extra) => ({ ...DONE.rows[1], id: `qitem-r-${Object.keys(extra).join("-")}`, ...extra });
-  const rows = [row({ resolution: "Outcome: README fixed in 4c1e9a2; the revision added the macOS note.", result: "Correction: line 41, not 40.", resultRead: true }),
+  const row = (extra) => ({
+    ...DONE.rows[1],
+    id: `task-r-${Object.keys(extra).join("-")}`,
+    ...extra,
+  });
+  const rows = [
+    row({
+      resolution: "Outcome: README fixed in 4c1e9a2; the revision added the macOS note.",
+      result: "Correction: line 41, not 40.",
+      resultRead: true,
+    }),
     row({ resolution: "Only an outcome.", result: null, resultRead: true }),
     row({ resolution: null, result: "Only a closing note.", resultRead: true }),
     row({ resolution: "Same text.", result: "Same text.", resultRead: true }),
-    row({ resolution: "Outcome stands.", result: null, resultRead: false })];
-  ctx.render({ ok: true, rig: "lab", generatedAt: "x", attached: true, seats: SEATS, queue: [], done: { rows, coverage: { looked: 5 } } });
-  const cells = [...els["#content"].innerHTML.matchAll(/<td class="result">([\s\S]*?)<\/td>/g)].map((m) => m[1]);
-  assert.equal(cells[0], 'Outcome: README fixed in 4c1e9a2; the revision added the macOS note.\n<span class="result-note">Closing note: Correction: line 41, not 40.</span>');
+    row({ resolution: "Outcome stands.", result: null, resultRead: false }),
+  ];
+  ctx.render({
+    ok: true,
+    rig: "lab",
+    generatedAt: "x",
+    attached: true,
+    seats: SEATS,
+    queue: [],
+    done: { rows, coverage: { looked: 5 } },
+  });
+  const cells = [...els["#content"].innerHTML.matchAll(/<td class="result">([\s\S]*?)<\/td>/g)].map(
+    (m) => m[1],
+  );
+  assert.equal(
+    cells[0],
+    'Outcome: README fixed in 4c1e9a2; the revision added the macOS note.\n<span class="result-note">Closing note: Correction: line 41, not 40.</span>',
+  );
   assert.equal(cells[1], "Only an outcome.");
   assert.equal(cells[2], "Only a closing note.");
   assert.equal(cells[3], "Same text.", "the same text isn't shown twice");
-  assert.equal(cells[4], 'Outcome stands.\n<span class="unset">(the closing note couldn\'t be read)</span>');
+  assert.equal(
+    cells[4],
+    'Outcome stands.\n<span class="unset">(the closing note couldn\'t be read)</span>',
+  );
 });

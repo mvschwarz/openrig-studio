@@ -23,18 +23,28 @@
 
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-const base = (p) => String(p ?? "").split("/").filter(Boolean).pop() || String(p ?? "");
+const base = (p) =>
+  String(p ?? "")
+    .split("/")
+    .filter(Boolean)
+    .pop() || String(p ?? "");
 
 // Kind comes from the RUNTIME, not from the filename. The verb already decided —
 // re-deciding here by extension is two places computing one property, and they
 // disagree first on the files that matter (a .txt holding a terminal capture, a
 // .md that is really a log).
 const ICONS = {
-  image: "▣", video: "▶", audio: "♪", markdown: "❡", html: "◈", text: "≡", other: "○",
+  image: "▣",
+  video: "▶",
+  audio: "♪",
+  markdown: "❡",
+  html: "◈",
+  text: "≡",
+  other: "○",
 };
 
-let host = null;      // the modal element, created once
-let onKey = null;     // the ESC handler, so it can be removed
+let host = null; // the modal element, created once
+let onKey = null; // the ESC handler, so it can be removed
 let lastFocus = null; // where focus was before opening
 
 // WHICH OPEN IS CURRENT. The modal is SHARED, and a read is async: click a slow
@@ -66,25 +76,57 @@ function sheet() {
 function markdown(src) {
   const lines = esc(src).split("\n");
   const out = [];
-  let inCode = false, inList = false;
-  const inline = (t) => t
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
-    // Links: the TEXT is rendered, the href is only allowed for schemes that
-    // cannot execute. `javascript:` in a markdown link is the obvious hole.
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, href) =>
-      /^(https?:|\/|#)/i.test(href) ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>` : text);
-  const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+  let inCode = false,
+    inList = false;
+  const inline = (t) =>
+    t
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+      // Links: the TEXT is rendered, the href is only allowed for schemes that
+      // cannot execute. `javascript:` in a markdown link is the obvious hole.
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, href) =>
+        /^(https?:|\/|#)/i.test(href)
+          ? `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`
+          : text,
+      );
+  const closeList = () => {
+    if (inList) {
+      out.push("</ul>");
+      inList = false;
+    }
+  };
 
   for (const raw of lines) {
-    if (/^```/.test(raw)) { closeList(); out.push(inCode ? "</code></pre>" : "<pre><code>"); inCode = !inCode; continue; }
-    if (inCode) { out.push(raw); continue; }
+    if (/^```/.test(raw)) {
+      closeList();
+      out.push(inCode ? "</code></pre>" : "<pre><code>");
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) {
+      out.push(raw);
+      continue;
+    }
     const h = raw.match(/^(#{1,6})\s+(.*)$/);
-    if (h) { closeList(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+    if (h) {
+      closeList();
+      out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`);
+      continue;
+    }
     const li = raw.match(/^\s*[-*+]\s+(.*)$/);
-    if (li) { if (!inList) { out.push("<ul>"); inList = true; } out.push(`<li>${inline(li[1])}</li>`); continue; }
-    if (!raw.trim()) { closeList(); continue; }
+    if (li) {
+      if (!inList) {
+        out.push("<ul>");
+        inList = true;
+      }
+      out.push(`<li>${inline(li[1])}</li>`);
+      continue;
+    }
+    if (!raw.trim()) {
+      closeList();
+      continue;
+    }
     closeList();
     out.push(`<p>${inline(raw)}</p>`);
   }
@@ -152,7 +194,9 @@ function ensureHost() {
       </header>
       <div class="fv-body" data-fv-body></div>
     </div>`;
-  host.addEventListener("click", (e) => { if (e.target.closest("[data-fv-close]")) closeViewer(); });
+  host.addEventListener("click", (e) => {
+    if (e.target.closest("[data-fv-close]")) closeViewer();
+  });
   document.body.append(host);
   return host;
 }
@@ -165,10 +209,13 @@ export async function openFile(path, { title } = {}) {
   h.querySelector("[data-fv-name]").textContent = title || base(path);
   h.querySelector("[data-fv-kind]").textContent = "";
   h.querySelector("[data-fv-icon]").textContent = ICONS.other;
-  h.querySelector("[data-fv-body]").innerHTML = `<p class="fv-note">Opening ${esc(base(path))}…</p>`;
+  h.querySelector("[data-fv-body]").innerHTML =
+    `<p class="fv-note">Opening ${esc(base(path))}…</p>`;
   h.classList.add("open");
   if (!onKey) {
-    onKey = (e) => { if (e.key === "Escape") closeViewer(); };
+    onKey = (e) => {
+      if (e.key === "Escape") closeViewer();
+    };
     window.addEventListener("keydown", onKey);
   }
   h.querySelector(".fv-close").focus();
@@ -200,15 +247,20 @@ export function closeViewer() {
   // would otherwise write into a hidden body and be there on the next open.
   generation++;
   host.classList.remove("open");
-  host.querySelector("[data-fv-body]").innerHTML = "";  // stop any playing media
-  if (onKey) { window.removeEventListener("keydown", onKey); onKey = null; }
-  try { lastFocus?.focus?.(); } catch {}
+  host.querySelector("[data-fv-body]").innerHTML = ""; // stop any playing media
+  if (onKey) {
+    window.removeEventListener("keydown", onKey);
+    onKey = null;
+  }
+  try {
+    lastFocus?.focus?.();
+  } catch {}
 }
 
 /**
  * A chain entry: ICON + FILENAME, click-to-open. Not a thumbnail.
  *
- * The PRD is explicit and the reason is worth keeping: a feedback chain is a list
+ * Deliberately, and the reason is worth keeping: a feedback chain is a list
  * of things to READ IN ORDER, and a wall of thumbnails turns an ordered story into
  * a contact sheet. The icon says what KIND it is; the name says which one it is.
  */
@@ -219,7 +271,9 @@ export function fileLink(path, { title, kind } = {}) {
   a.innerHTML = `<span class="fv-link-icon">${esc(ICONS[kind] || ICONS.other)}</span><span class="fv-link-name"></span>`;
   a.querySelector(".fv-link-name").textContent = title || base(path);
   a.title = `open ${base(path)}`;
-  a.addEventListener("click", () => { openFile(path, { title }).catch(() => {}); });
+  a.addEventListener("click", () => {
+    openFile(path, { title }).catch(() => {});
+  });
   return a;
 }
 

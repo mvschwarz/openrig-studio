@@ -32,11 +32,15 @@ import { fileURLToPath } from "node:url";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const META = fs.readFileSync(path.join(REPO, "contract", "contract-meta.md"), "utf8");
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once("error", reject);
-  s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
 
 async function start(withOverlay) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "parity-"));
@@ -52,15 +56,23 @@ async function start(withOverlay) {
     args.push("--surfaces", overlay);
   }
   const port = await freePort();
-  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port), ...args],
-    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(
+    process.execPath,
+    [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port), ...args],
+    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] },
+  );
   const deadline = Date.now() + 10_000;
   for (;;) {
     try {
-      const r = await (await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" })).json();
+      const r = await (
+        await fetch(`http://127.0.0.1:${port}/api/contract`, { cache: "no-store" })
+      ).json();
       return { response: r, stop: () => proc.kill() };
     } catch {
-      if (Date.now() > deadline) { proc.kill(); throw new Error("runtime never came up"); }
+      if (Date.now() > deadline) {
+        proc.kill();
+        throw new Error("runtime never came up");
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
   }
@@ -78,8 +90,10 @@ const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArr
 // timestamps and counts and would differ by design — only the shape is.
 function divergences(documented, live, at = "response", out = []) {
   if ((documented === null) !== (live === null)) {
-    out.push(`${at}: documented as ${documented === null ? "null" : "an object"} but served as ` +
-      `${live === null ? "null" : "an object"}`);
+    out.push(
+      `${at}: documented as ${documented === null ? "null" : "an object"} but served as ` +
+        `${live === null ? "null" : "an object"}`,
+    );
     return out;
   }
   if (!isPlainObject(documented) || !isPlainObject(live)) return out;
@@ -88,10 +102,12 @@ function divergences(documented, live, at = "response", out = []) {
   const l = Object.keys(live).sort();
   const undocumented = l.filter((k) => !d.includes(k));
   const unserved = d.filter((k) => !l.includes(k));
-  if (undocumented.length) out.push(`${at}: served but NOT documented — ${undocumented.join(", ")}`);
+  if (undocumented.length)
+    out.push(`${at}: served but NOT documented — ${undocumented.join(", ")}`);
   if (unserved.length) out.push(`${at}: documented but NOT served — ${unserved.join(", ")}`);
 
-  for (const k of d.filter((k) => l.includes(k))) divergences(documented[k], live[k], `${at}.${k}`, out);
+  for (const k of d.filter((k) => l.includes(k)))
+    divergences(documented[k], live[k], `${at}.${k}`, out);
   return out;
 }
 
@@ -122,8 +138,11 @@ test("positive control: the comparator descends and can report at EVERY level", 
 test("zero-config: the documented example and the served response agree at every level", async (t) => {
   const s = await start(false);
   t.after(() => s.stop());
-  assert.deepEqual(divergences(example("`GET /api/contract` returns:"), s.response), [],
-    "the documented /api/contract example and the zero-config response have diverged");
+  assert.deepEqual(
+    divergences(example("`GET /api/contract` returns:"), s.response),
+    [],
+    "the documented /api/contract example and the zero-config response have diverged",
+  );
 });
 
 test("overlay-configured: the documented consumer example agrees with the served block", async (t) => {
@@ -136,9 +155,13 @@ test("overlay-configured: the documented consumer example agrees with the served
   const live = s.response.manifest.consumer;
   assert.ok(live, "positive control: an overlay-configured runtime must report a consumer block");
   assert.deepEqual(
-    divergences(example("With an overlay configured, `manifest\\.consumer` is populated:"), live, "manifest.consumer"),
+    divergences(
+      example("With an overlay configured, `manifest\\.consumer` is populated:"),
+      live,
+      "manifest.consumer",
+    ),
     [],
-    "the documented consumer example and the served consumer block have diverged"
+    "the documented consumer example and the served consumer block have diverged",
   );
 });
 
@@ -162,12 +185,17 @@ test("the documented capabilities are exactly the ones served", async (t) => {
   t.after(() => s.stop());
 
   const documented = example("`GET /api/contract` returns:").capabilities;
-  assert.ok(Array.isArray(documented) && documented.length,
-    "positive control: contract-meta.md's example carries no capabilities to compare");
+  assert.ok(
+    Array.isArray(documented) && documented.length,
+    "positive control: contract-meta.md's example carries no capabilities to compare",
+  );
 
-  assert.deepEqual([...s.response.capabilities].sort(), [...documented].sort(),
+  assert.deepEqual(
+    [...s.response.capabilities].sort(),
+    [...documented].sort(),
     "the capabilities the runtime serves and the ones contract-meta.md documents have diverged — " +
-    "feature detection follows the DOCUMENT, so this gap is what a consumer acts on");
+      "feature detection follows the DOCUMENT, so this gap is what a consumer acts on",
+  );
 });
 
 test("every namespace with a served verb is advertised", async (t) => {
@@ -188,16 +216,24 @@ test("every namespace with a served verb is advertised", async (t) => {
   assert.ok(routes.length >= 4, `positive control: the runtime reports ${routes.length} routes`);
 
   // namespace -> the capability prefix that advertises it
-  const NAMESPACE = { "/api/contract": "contract", "/api/factory/state": "observe",
-    "/api/events": "stream", "/api/focus": "focus", "/api/drive": "drive" };
+  const NAMESPACE = {
+    "/api/contract": "contract",
+    "/api/factory/state": "observe",
+    "/api/events": "stream",
+    "/api/focus": "focus",
+    "/api/drive": "drive",
+  };
   const caps = s.response.capabilities;
   const unadvertised = [...new Set(routes)]
     .filter((r) => NAMESPACE[r])
     .filter((r) => !caps.some((c) => c === NAMESPACE[r] || c.startsWith(NAMESPACE[r] + ".")));
 
-  assert.deepEqual(unadvertised, [],
+  assert.deepEqual(
+    unadvertised,
+    [],
     `the runtime answers these verbs but advertises no capability for them, so a consumer ` +
-    `following contract-meta.md's "check before use" concludes they are absent: ${unadvertised.join(", ")}`);
+      `following contract-meta.md's "check before use" concludes they are absent: ${unadvertised.join(", ")}`,
+  );
 });
 
 test("positive control: this suite is capable of failing", () => {

@@ -55,22 +55,28 @@ function shellScript() {
 }
 
 // Module-level collections: declared at the IIFE's own two-space indent.
-const collections = (src) => src.split("\n").flatMap((line, i) => {
-  const m = /^ {2}const\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+(Map|Set)\s*\(/.exec(line);
-  return m ? [{ name: m[1], kind: m[2], line: i + 1 }] : [];
-});
+const collections = (src) =>
+  src.split("\n").flatMap((line, i) => {
+    const m = /^ {2}const\s+([A-Za-z_$][\w$]*)\s*=\s*new\s+(Map|Set)\s*\(/.exec(line);
+    return m ? [{ name: m[1], kind: m[2], line: i + 1 }] : [];
+  });
 
 test("positive control: the script, the state block, and the collections are all found", () => {
   // Without this the file passes by parsing nothing — the failure it exists to
   // prevent, one level up.
   const src = shellScript();
   assert.ok(src.length > 2000, `extracted only ${src.length} chars of shell script`);
-  assert.ok(src.includes(MARKER), "the state block's header comment is gone; this test cannot locate it");
+  assert.ok(
+    src.includes(MARKER),
+    "the state block's header comment is gone; this test cannot locate it",
+  );
   const found = collections(src);
   assert.ok(found.length >= 3, `found only ${found.length} module-level collections`);
   for (const expect of ["surfaceListeners", "markupListeners", "declaredHeaders"]) {
-    assert.ok(found.some((c) => c.name === expect),
-      `${expect} is no longer a module-level collection — this test is checking the wrong thing`);
+    assert.ok(
+      found.some((c) => c.name === expect),
+      `${expect} is no longer a module-level collection — this test is checking the wrong thing`,
+    );
   }
 });
 
@@ -85,19 +91,29 @@ test("every module-level collection is declared in the state block at the top", 
   for (let i = blockLine; i < lines.length; i++) {
     const t = lines[i].trim();
     if (t === "" || t.startsWith("//")) continue;
-    if (/^const\s+[A-Za-z_$][\w$]*\s*=\s*new\s+(Map|Set)\s*\(/.test(t)) { blockEnd = i + 1; continue; }
+    if (/^const\s+[A-Za-z_$][\w$]*\s*=\s*new\s+(Map|Set)\s*\(/.test(t)) {
+      blockEnd = i + 1;
+      continue;
+    }
     break;
   }
 
   const stragglers = collections(src)
     .filter((c) => c.line > blockEnd)
-    .map((c) => `${c.name} (${c.kind}) declared at line ${c.line}, outside the state block which ends at ${blockEnd}`);
+    .map(
+      (c) =>
+        `${c.name} (${c.kind}) declared at line ${c.line}, outside the state block which ends at ${blockEnd}`,
+    );
 
-  assert.deepEqual(stragglers, [],
+  assert.deepEqual(
+    stragglers,
+    [],
     "a module-level collection in app/shell.html is declared outside the state block. " +
-    "Four temporal dead zones have shipped from exactly this — a collection declared beside the " +
-    "code that fires it, read by activate() during boot, producing a live-looking page with a " +
-    "blank header rather than an error:\n  " + stragglers.join("\n  "));
+      "Four temporal dead zones have shipped from exactly this — a collection declared beside the " +
+      "code that fires it, read by activate() during boot, producing a live-looking page with a " +
+      "blank header rather than an error:\n  " +
+      stragglers.join("\n  "),
+  );
 });
 
 test("positive control: this suite is capable of failing", () => {

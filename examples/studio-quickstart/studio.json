@@ -1,0 +1,6 @@
+{
+  "apps": ["notes"],
+  "appsRoot": ".",
+  "port": 8890,
+  "roots": { "notes": "./notes" }
+}

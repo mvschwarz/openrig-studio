@@ -21,11 +21,15 @@ import { readAddress, writeAddress } from "../app/signal.js";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once("error", reject);
-  s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
 
 async function start({ identityHeader } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "focus-"));
@@ -33,23 +37,42 @@ async function start({ identityHeader } = {}) {
   fs.cpSync(path.join(REPO, "fixtures"), path.join(dir, "fixtures"), { recursive: true });
   const port = await freePort();
   const extra = identityHeader ? ["--identity-header", identityHeader] : [];
-  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port), ...extra],
-    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(
+    process.execPath,
+    [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port), ...extra],
+    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] },
+  );
   const base = `http://127.0.0.1:${port}`;
   const deadline = Date.now() + 10_000;
   for (;;) {
-    try { await (await fetch(`${base}/api/contract`)).json(); break; }
-    catch {
-      if (Date.now() > deadline) { proc.kill(); throw new Error("runtime never came up"); }
+    try {
+      await (await fetch(`${base}/api/contract`)).json();
+      break;
+    } catch {
+      if (Date.now() > deadline) {
+        proc.kill();
+        throw new Error("runtime never came up");
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
   }
   return {
     dir,
-    read: async (since) => (await fetch(`${base}/api/focus${since === undefined ? "" : `?since=${encodeURIComponent(since)}`}`,
-      { cache: "no-store" })).json(),
-    write: async (patch, headers = {}) => (await fetch(`${base}/api/focus`,
-      { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(patch) })).json(),
+    read: async (since) =>
+      (
+        await fetch(
+          `${base}/api/focus${since === undefined ? "" : `?since=${encodeURIComponent(since)}`}`,
+          { cache: "no-store" },
+        )
+      ).json(),
+    write: async (patch, headers = {}) =>
+      (
+        await fetch(`${base}/api/focus`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify(patch),
+        })
+      ).json(),
     contract: async () => (await fetch(`${base}/api/contract`, { cache: "no-store" })).json(),
     stop: () => proc.kill(),
   };
@@ -59,7 +82,8 @@ async function start({ identityHeader } = {}) {
 const walk = (root, out = []) => {
   for (const name of fs.readdirSync(root)) {
     const full = path.join(root, name);
-    if (fs.statSync(full).isDirectory()) walk(full, out); else out.push(full);
+    if (fs.statSync(full).isDirectory()) walk(full, out);
+    else out.push(full);
   }
   return out;
 };
@@ -107,7 +131,11 @@ test("a second writer cannot blank a field the first wrote", async (t) => {
   await s.write({ selection: ["shape-7"], by: "pinner" });
 
   const got = (await s.read()).focus;
-  assert.deepEqual(got.view, { page: 2 }, "the second writer blanked the view it had no opinion about");
+  assert.deepEqual(
+    got.view,
+    { page: 2 },
+    "the second writer blanked the view it had no opinion about",
+  );
   assert.deepEqual(got.selection, ["shape-7"], "the second writer's own field did not land");
   assert.equal(got.surface, "canvas", "an untouched field was lost");
 });
@@ -136,12 +164,16 @@ test("a VIEW change with an UNCHANGED selection is reported as a change", async 
   await s.write({ surface: "canvas", selection: ["shape-7"], view: { page: 2 }, by: "a" });
   const before = (await s.read()).marker;
 
-  await s.write({ view: { page: 3 }, by: "a" });          // selection untouched
+  await s.write({ view: { page: 3 }, by: "a" }); // selection untouched
   const after = await s.read(before);
 
   assert.equal(after.changed, true, "a view change with an unchanged selection reported nothing");
   assert.notEqual(after.marker, before, "the marker did not move for a real change");
-  assert.deepEqual(after.focus.selection, ["shape-7"], "the selection was disturbed by a view write");
+  assert.deepEqual(
+    after.focus.selection,
+    ["shape-7"],
+    "the selection was disturbed by a view write",
+  );
 });
 
 test("an unchanged record reports changed:false — so the marker is not always-moving", async (t) => {
@@ -202,9 +234,16 @@ test("selection is carried as its SURFACE means it, with no universal schema imp
   for (const sample of [shapes, paths, slots]) {
     await s.write({ ...sample, by: "a" });
     const got = (await s.read()).focus;
-    assert.equal(got.surface, sample.surface, "the record must name the surface that gives selection meaning");
-    assert.deepEqual(got.selection, sample.selection,
-      `selection was not carried verbatim for ${sample.surface} — a schema was imposed on it`);
+    assert.equal(
+      got.surface,
+      sample.surface,
+      "the record must name the surface that gives selection meaning",
+    );
+    assert.deepEqual(
+      got.selection,
+      sample.selection,
+      `selection was not carried verbatim for ${sample.surface} — a schema was imposed on it`,
+    );
   }
 });
 
@@ -221,8 +260,8 @@ test("at is server-set; a caller cannot dictate when focus last changed", async 
 
 test("by is CALLER-DECLARED in this runtime — the documented downgrade, pinned", async (t) => {
   // `by` had the most careful documentation in this slice and the least test
-  // protection: a review planted it as SERVER-SET and every focus test still
-  // passed. That is a claim with no control behind it, not a latent bug — and the
+  // protection: planting it as SERVER-SET left every focus test still
+  // passing. That is a claim with no control behind it, not a latent bug — and the
   // distinction matters, because a server-set `by` is CORRECT for a runtime that
   // has a real identity for its caller. focus.md says such a runtime MUST override
   // it.
@@ -241,19 +280,28 @@ test("by is CALLER-DECLARED in this runtime — the documented downgrade, pinned
   t.after(() => s.stop());
 
   await s.write({ surface: "canvas", selection: ["shape-7"], by: "agent-alpha" });
-  assert.equal((await s.read()).focus.by, "agent-alpha",
-    "the caller's declared attribution was not recorded — this runtime has no identity to replace it with");
+  assert.equal(
+    (await s.read()).focus.by,
+    "agent-alpha",
+    "the caller's declared attribution was not recorded — this runtime has no identity to replace it with",
+  );
 
   await s.write({ view: { page: 3 }, by: "human-at-the-keyboard" });
-  assert.equal((await s.read()).focus.by, "human-at-the-keyboard",
-    "a second writer's attribution did not land — `by` is not tracking the caller");
+  assert.equal(
+    (await s.read()).focus.by,
+    "human-at-the-keyboard",
+    "a second writer's attribution did not land — `by` is not tracking the caller",
+  );
 
   // ...and the absent case is NULL rather than an invented identity. A runtime
   // that filled this in would be manufacturing attribution, which is worse than
   // reporting none: a consumer cannot tell a fabricated actor from a real one.
   await s.write({ note: "no by field on this write" });
-  assert.equal((await s.read()).focus.by, null,
-    "a write that declared no actor produced an actor anyway");
+  assert.equal(
+    (await s.read()).focus.by,
+    null,
+    "a write that declared no actor produced an actor anyway",
+  );
 });
 
 test("a runtime WITH a real identity overrides what the caller claims", async (t) => {
@@ -261,16 +309,19 @@ test("a runtime WITH a real identity overrides what the caller claims", async (t
   // MUST override `by`. It said so while no runtime could, which made it a
   // promise about other people's implementations. This one can now.
   //
-  // The case is real: a provider on the founder's box derives the user from a
-  // proxy-set access header, and migrating it to the platform verb would have
-  // traded header-verified attribution for self-declared — a regression on the one
-  // box where that header exists.
+  // The case is real: a provider behind an authenticating proxy derives the user
+  // from a proxy-set access header, and migrating it to the platform verb would
+  // trade header-verified attribution for self-declared — a regression wherever
+  // that header exists.
   const s = await start({ identityHeader: "x-verified-user" });
   t.after(() => s.stop());
 
   await s.write({ surface: "canvas", by: "i-said-so" }, { "x-verified-user": "real@example.com" });
-  assert.equal((await s.read()).focus.by, "real@example.com",
-    "the caller's claim beat the verified identity — the override is the whole point");
+  assert.equal(
+    (await s.read()).focus.by,
+    "real@example.com",
+    "the caller's claim beat the verified identity — the override is the whole point",
+  );
 });
 
 test("configured but no identity present yields NULL, never the caller's claim", async (t) => {
@@ -285,8 +336,11 @@ test("configured but no identity present yields NULL, never the caller's claim",
   t.after(() => s.stop());
 
   await s.write({ surface: "canvas", by: "i-said-so" });
-  assert.equal((await s.read()).focus.by, null,
-    "a configured runtime accepted the caller's claim as if it were verified");
+  assert.equal(
+    (await s.read()).focus.by,
+    null,
+    "a configured runtime accepted the caller's claim as if it were verified",
+  );
 });
 
 test("an UNCONFIGURED runtime ignores the header entirely", async (t) => {
@@ -296,9 +350,15 @@ test("an UNCONFIGURED runtime ignores the header entirely", async (t) => {
   const s = await start();
   t.after(() => s.stop());
 
-  await s.write({ surface: "canvas", by: "i-said-so" }, { "x-verified-user": "attacker@example.com" });
-  assert.equal((await s.read()).focus.by, "i-said-so",
-    "an unconfigured runtime honoured an inbound identity header it was never told to trust");
+  await s.write(
+    { surface: "canvas", by: "i-said-so" },
+    { "x-verified-user": "attacker@example.com" },
+  );
+  assert.equal(
+    (await s.read()).focus.by,
+    "i-said-so",
+    "an unconfigured runtime honoured an inbound identity header it was never told to trust",
+  );
 });
 
 test("/api/contract says WHICH kind of attribution this runtime produces", async (t) => {
@@ -308,12 +368,17 @@ test("/api/contract says WHICH kind of attribution this runtime produces", async
   // know attribution is verified, not who by.
   const plain = await start();
   t.after(() => plain.stop());
-  assert.deepEqual((await plain.contract()).focus, { attribution: "caller-declared", identityHeader: null });
+  assert.deepEqual((await plain.contract()).focus, {
+    attribution: "caller-declared",
+    identityHeader: null,
+  });
 
   const verified = await start({ identityHeader: "x-verified-user" });
   t.after(() => verified.stop());
-  assert.deepEqual((await verified.contract()).focus,
-    { attribution: "verified", identityHeader: "x-verified-user" });
+  assert.deepEqual((await verified.contract()).focus, {
+    attribution: "verified",
+    identityHeader: "x-verified-user",
+  });
 });
 
 test("a malformed write is refused by name rather than silently ignored", async (t) => {

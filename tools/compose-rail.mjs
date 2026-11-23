@@ -19,11 +19,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
+import { vendorDirectory } from "./vendor.mjs";
 
 let STUDIO_ROOT = process.cwd();
-export const setStudioRoot = (p) => { STUDIO_ROOT = p; };
+export const setStudioRoot = (p) => {
+  STUDIO_ROOT = p;
+};
 
 // Writes only inside the studio directory it was given.
 const insideRepo = (p) => {
@@ -51,8 +52,11 @@ const providerDir = (appsRoot, pkg) => path.join(appsRoot, "providers", path.bas
 function readProviderDeclaration(appsRoot, pkg) {
   const p = path.join(providerDir(appsRoot, pkg), "provider.json");
   if (!fs.existsSync(p)) return null;
-  try { return readJson(p); }
-  catch (e) { return { __error: `provider.json for ${pkg} is not valid JSON: ${e.message}` }; }
+  try {
+    return readJson(p);
+  } catch (e) {
+    return { __error: `provider.json for ${pkg} is not valid JSON: ${e.message}` };
+  }
 }
 
 // Every provider PRESENT on the box, whether or not an enabled app references
@@ -62,15 +66,21 @@ function readProviderDeclaration(appsRoot, pkg) {
 function availableProviders(appsRoot) {
   const root = path.join(appsRoot, "providers");
   const out = new Map();
-  let names = [];
-  try { names = fs.readdirSync(root); } catch { return out; }
+  let names;
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return out;
+  }
   for (const name of names) {
     const p = path.join(root, name, "provider.json");
     if (!fs.existsSync(p)) continue;
     try {
       const d = readJson(p);
       if (d.package) out.set(d.package, d);
-    } catch { /* a malformed declaration is reported where it is used */ }
+    } catch {
+      /* a malformed declaration is reported where it is used */
+    }
   }
   return out;
 }
@@ -80,7 +90,14 @@ function availableProviders(appsRoot) {
 export const verbMatches = (declared, wanted) =>
   declared === wanted || (declared.endsWith("/") && wanted.startsWith(declared));
 
-export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioRoot, log = () => {} }) {
+export function composeRail({
+  appsRoot,
+  enabled,
+  doors = [],
+  runtimeDir,
+  studioRoot,
+  log = () => {},
+}) {
   if (studioRoot) STUDIO_ROOT = studioRoot;
   const surfacesOut = insideRepo(path.join(runtimeDir, "surfaces"));
   const vendorOut = insideRepo(path.join(runtimeDir, "vendor"));
@@ -109,20 +126,30 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
   for (const id of enabled) {
     const appDir = path.join(appsRoot, "apps", id);
     const manifestPath = path.join(appDir, "app.json");
-    if (!fs.existsSync(manifestPath)) { missing.push(`${id}: no app.json at ${appDir}`); continue; }
+    if (!fs.existsSync(manifestPath)) {
+      missing.push(`${id}: no app.json at ${appDir}`);
+      continue;
+    }
 
     const m = readJson(manifestPath);
     // A SELF-SERVED app (`surface.url`) has no `entry` to copy and no overlay
     // `path` — something else already serves it, and the contract makes `url` and
-    // `path` mutually exclusive (app-manifest.md). Composition emitted only a
-    // path row and unconditionally joined `m.surface.entry`, so a schema-valid
-    // URL app could not compose at all (review.r2). It gets a URL row and skips
+    // `path` mutually exclusive (app-manifest.md). It gets a URL row and skips
     // the copy; it may still declare a provider and calls below.
     if (typeof m.surface.url === "string" && m.surface.url) {
-      rows.push({ id: m.id, name: m.name, glyph: m.surface.glyph, url: m.surface.url, hint: m.surface.hint });
+      rows.push({
+        id: m.id,
+        name: m.name,
+        glyph: m.surface.glyph,
+        url: m.surface.url,
+        hint: m.surface.hint,
+      });
     } else {
       const entry = path.join(appDir, m.surface.entry);
-      if (!fs.existsSync(entry)) { missing.push(`${id}: surface entry missing (${m.surface.entry})`); continue; }
+      if (!fs.existsSync(entry)) {
+        missing.push(`${id}: surface entry missing (${m.surface.entry})`);
+        continue;
+      }
 
       // The seam resolves /surfaces/<file> to <overlay>/<file>, flat.
       fs.copyFileSync(entry, path.join(surfacesOut, path.basename(m.surface.path)));
@@ -132,8 +159,16 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
       const appVendor = path.join(appDir, "vendor");
       if (fs.existsSync(appVendor)) {
         for (const entryName of fs.readdirSync(appVendor)) {
-          fs.cpSync(path.join(appVendor, entryName), path.join(vendorOut, entryName), { recursive: true });
+          fs.cpSync(path.join(appVendor, entryName), path.join(vendorOut, entryName), {
+            recursive: true,
+          });
         }
+      }
+      for (const name of m.vendor || []) {
+        if (fs.existsSync(path.join(appVendor, name))) continue;
+        const source = vendorDirectory(appsRoot, appDir, name);
+        if (!fs.existsSync(source)) continue; // Closure diagnostics name missing assets.
+        fs.cpSync(source, path.join(vendorOut, name), { recursive: true });
       }
 
       rows.push({
@@ -164,7 +199,7 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
     if (m.verbs?.length && !readProviderDeclaration(appsRoot, m.provider?.package ?? "")) {
       warnings.push(
         `${m.id}: declares verbs[] — LEGACY, superseded by calls{}. Honoured while ` +
-        `${m.provider?.package ?? "its provider"} ships no provider.json; see contract/app-manifest.md`
+          `${m.provider?.package ?? "its provider"} ships no provider.json; see contract/app-manifest.md`,
       );
     }
 
@@ -176,13 +211,22 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
         // companions merge across apps below, and merging into the first app's
         // parsed manifest would edit one app's declaration on behalf of another.
         const run = { ...m.provider.run, companions: [...(m.provider.run?.companions ?? [])] };
-        providerRuns.set(pkg, { package: pkg, run, serves: m.provider.serves ?? [], verbs: [...(m.verbs ?? [])], declaredBy: m.id });
+        providerRuns.set(pkg, {
+          package: pkg,
+          run,
+          serves: m.provider.serves ?? [],
+          verbs: [...(m.verbs ?? [])],
+          declaredBy: m.id,
+        });
       } else {
         const first = providerRuns.get(pkg);
         if (m.provider.run?.entry && first.run?.entry !== m.provider.run.entry) {
-          missing.push(`${m.id}: declares ${pkg} entry "${m.provider.run.entry}" but ${first.declaredBy} declared "${first.run?.entry}"`);
+          missing.push(
+            `${m.id}: declares ${pkg} entry "${m.provider.run.entry}" but ${first.declaredBy} declared "${first.run?.entry}"`,
+          );
         }
-        for (const s of m.provider.serves ?? []) if (!first.serves.includes(s)) first.serves.push(s);
+        for (const s of m.provider.serves ?? [])
+          if (!first.serves.includes(s)) first.serves.push(s);
         for (const v of m.verbs ?? []) if (!first.verbs.includes(v)) first.verbs.push(v);
         // Companions merge like serves and verbs, and for the same reason:
         // first-declaration-wins on the whole run spec would DROP a companion
@@ -192,9 +236,14 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
         // how to start one process, so it is reported rather than resolved.
         for (const c of m.provider.run?.companions ?? []) {
           const seen = first.run.companions.find((x) => x.entry === c.entry);
-          if (!seen) { first.run.companions.push(c); continue; }
+          if (!seen) {
+            first.run.companions.push(c);
+            continue;
+          }
           if (JSON.stringify(seen.args ?? []) !== JSON.stringify(c.args ?? [])) {
-            missing.push(`${m.id}: declares ${pkg} companion "${c.entry}" with different args than ${first.declaredBy} declared`);
+            missing.push(
+              `${m.id}: declares ${pkg} companion "${c.entry}" with different args than ${first.declaredBy} declared`,
+            );
           }
         }
       }
@@ -210,11 +259,14 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
   for (const [pkg, spec] of providerRuns) {
     const decl = available.get(pkg) ?? readProviderDeclaration(appsRoot, pkg);
     if (!decl) continue;
-    if (decl.__error) { refusals.push(decl.__error); continue; }
+    if (decl.__error) {
+      refusals.push(decl.__error);
+      continue;
+    }
     if (spec.run?.entry && decl.run?.entry) {
       warnings.push(
         `${pkg}: run spec declared BOTH by its provider.json and by app "${spec.declaredBy}" — ` +
-        `the provider wins and the app's copy is ignored. Remove run/serves/verbs from that app.json`
+          `the provider wins and the app's copy is ignored. Remove run/serves/verbs from that app.json`,
       );
     }
     spec.run = { ...decl.run, companions: [...(decl.run?.companions ?? [])] };
@@ -243,7 +295,7 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
       if (!(spec.verbs ?? []).some((d) => verbMatches(d, v))) {
         warnings.push(
           `${pkg}: signals.verbs names ${v}, which this provider does not declare in verbs[] — ` +
-          `a consumer polling it would be polling a route this backend does not answer`
+            `a consumer polling it would be polling a route this backend does not answer`,
         );
       }
     }
@@ -274,10 +326,15 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
     }
     return null;
   };
-  for (const [verb, want] of calls) {
+  // Select required providers before diagnosing optional calls. An earlier
+  // optional call can be served by a provider selected later in this same pass.
+  for (const [verb, want] of [...calls].sort(
+    (a, b) => Number(b[1].required) - Number(a[1].required),
+  )) {
     if (servedBy(verb)) continue;
-    const elsewhere = [...available.entries()]
-      .find(([pkg, d]) => !providerRuns.has(pkg) && (d.verbs ?? []).some((x) => verbMatches(x, verb)));
+    const elsewhere = [...available.entries()].find(
+      ([pkg, d]) => !providerRuns.has(pkg) && (d.verbs ?? []).some((x) => verbMatches(x, verb)),
+    );
     const who = want.by.join(", ");
     if (elsewhere && want.required) {
       const [pkg, decl] = elsewhere;
@@ -291,11 +348,13 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
       providers.add(pkg);
       log(`${pkg} — started for ${verb}, required by ${who}`);
     } else if (elsewhere) {
-      warnings.push(`${who}: calls ${verb} (optional); ${elsewhere[0]} declares it but is not started`);
+      warnings.push(
+        `${who}: calls ${verb} (optional); ${elsewhere[0]} declares it but is not started`,
+      );
     } else if (want.required) {
       refusals.push(
         `${who}: calls ${verb} and it is REQUIRED, but no installed provider declares it. ` +
-        `Nothing on this box answers that verb`
+          `Nothing on this box answers that verb`,
       );
     } else {
       warnings.push(`${who}: calls ${verb} (optional) and nothing installed declares it`);
@@ -316,14 +375,22 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
   const ownManifest = path.join(STUDIO_ROOT, "surfaces.json");
   if (fs.existsSync(ownManifest)) {
     let own = [];
-    try { own = readJson(ownManifest).surfaces ?? []; }
-    catch (e) { refusals.push(`studio surfaces.json is not valid JSON: ${e.message}`); }
+    try {
+      own = readJson(ownManifest).surfaces ?? [];
+    } catch (e) {
+      refusals.push(`studio surfaces.json is not valid JSON: ${e.message}`);
+    }
     for (const row of own) {
-      if (!row?.path) { rows.push({ ...row }); continue; }   // a url row needs no page
+      if (!row?.path) {
+        rows.push({ ...row });
+        continue;
+      } // a url row needs no page
       const file = path.basename(row.path);
       const src = path.join(STUDIO_ROOT, file);
       if (!fs.existsSync(src)) {
-        missing.push(`studio surface "${row.id}": page missing (${file} not in the studio directory)`);
+        missing.push(
+          `studio surface "${row.id}": page missing (${file} not in the studio directory)`,
+        );
         continue;
       }
       fs.copyFileSync(src, path.join(surfacesOut, file));
@@ -337,16 +404,36 @@ export function composeRail({ appsRoot, enabled, doors = [], runtimeDir, studioR
   // and does not install, hung on the rail by absolute URL. Vault-shaped.
   for (const d of doors) rows.push({ ...d });
 
-  return { rows, providers, providerRuns, missing, warnings, refusals, calls, ownSurfaceIds, surfacesOut, vendorOut };
+  return {
+    rows,
+    providers,
+    providerRuns,
+    missing,
+    warnings,
+    refusals,
+    calls,
+    ownSurfaceIds,
+    surfacesOut,
+    vendorOut,
+  };
 }
 
 // Write the overlay manifest the SDK reads. chatSeats is RUNTIME state — a live
 // rig roster must never be written back into a source-controlled file — so it
 // only ever lands here, in the composed copy.
-export function writeOverlayManifest({ surfacesOut, rows, chatSeats, chatLocalPort, welcome, primaryRig }) {
+export function writeOverlayManifest({
+  surfacesOut,
+  rows,
+  chatSeats,
+  chatSeatsFrom,
+  chatLocalPort,
+  welcome,
+  primaryRig,
+}) {
   const dir = insideRepo(surfacesOut);
   const doc = {
-    _note: "COMPOSED AT BOOT from installed apps + box doors. Do not edit — edit the app's app.json or studio.config.json.",
+    _note:
+      "COMPOSED AT BOOT from installed apps + box doors. Do not edit — edit the app's app.json or studio.config.json.",
     surfaces: rows,
   };
   // Array.isArray, not `.length`: an EMPTY roster is a declaration — "this studio
@@ -354,6 +441,9 @@ export function writeOverlayManifest({ surfacesOut, rows, chatSeats, chatLocalPo
   // PACKAGE document, which is how the SDK's invented fixture seat reached real
   // boxes. Writing [] is what makes an honest empty sidebar possible.
   if (Array.isArray(chatSeats)) doc.chatSeats = chatSeats;
+  // Where the roster came from ("declared", "rig" or "none"), so the runtime warns only about a roster someone
+  // declared, and the panel says a rig's members came from the rig.
+  if (chatSeatsFrom) doc.chatSeatsFrom = chatSeatsFrom;
   // The endpoint travels WITH the roster or the tiles are decorative. Omitted
   // deliberately when no terminal can be served, so the shell reports
   // listed-but-not-attachable instead of failing on click.

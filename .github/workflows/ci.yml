@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every maintained Node line at or above engines.node.
+        node: [22, 24, 26]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      # The release tools and their tests need Python 3; the runner image has it.
+      - run: python3 --version
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run check:comments
+      - run: npm test
+      - run: npm pack --dry-run

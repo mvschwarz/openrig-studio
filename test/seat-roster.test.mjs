@@ -17,15 +17,34 @@ import { resolveRoster, resolveRig, DECLARED, RIG, NONE } from "../tools/seat-ro
 // .gitignore fix exists to stop, one layer over, and a fixture is where it is
 // easiest to not notice.
 const nodes = [
-  { logicalId: "alpha.impl", rigName: "example-rig", canonicalSessionName: "alpha-impl@example-rig", sessionStatus: "running" },
-  { logicalId: "alpha.qa", rigName: "example-rig", canonicalSessionName: "alpha-qa@example-rig", sessionStatus: "detached" },
-  { logicalId: "beta.review", rigName: "example-rig", canonicalSessionName: "beta-review@example-rig", sessionStatus: "exited" },
+  {
+    logicalId: "alpha.dev",
+    rigName: "example-rig",
+    canonicalSessionName: "alpha-dev@example-rig",
+    sessionStatus: "running",
+  },
+  {
+    logicalId: "alpha.test",
+    rigName: "example-rig",
+    canonicalSessionName: "alpha-test@example-rig",
+    sessionStatus: "detached",
+  },
+  {
+    logicalId: "beta.review",
+    rigName: "example-rig",
+    canonicalSessionName: "beta-review@example-rig",
+    sessionStatus: "exited",
+  },
 ];
 
 test("an explicit roster wins entire", () => {
   const r = resolveRoster({ declared: [{ seat: "a@r", name: "a" }], nodes, rig: "example-rig" });
   assert.equal(r.source, DECLARED);
-  assert.deepEqual(r.seats.map((s) => s.seat), ["a@r"], "the rig roster overrode an explicit declaration");
+  assert.deepEqual(
+    r.seats.map((s) => s.seat),
+    ["a@r"],
+    "the rig roster overrode an explicit declaration",
+  );
 });
 
 test("an EMPTY explicit roster is a declaration, not an absence", () => {
@@ -42,19 +61,34 @@ test("with no declaration the rig supplies the roster, INCLUDING members that ar
   // ones would make the sidebar shrink silently when something crashes.
   const r = resolveRoster({ declared: undefined, nodes, rig: "example-rig" });
   assert.equal(r.source, RIG);
-  assert.deepEqual(r.seats.map((s) => s.status), ["running", "detached", "exited"]);
-  assert.match(r.note, /3 seat\(s\) from rig example-rig \(1 running\)/,
-    `the note must not call them all live: ${r.note}`);
+  assert.deepEqual(
+    r.seats.map((s) => s.status),
+    ["running", "detached", "exited"],
+  );
+  assert.match(
+    r.note,
+    /3 seat\(s\) from rig example-rig \(1 running\)/,
+    `the note must not call them all live: ${r.note}`,
+  );
 });
 
 test("no rig and no declaration yields an EMPTY roster, never the package fixture", () => {
-  const r = resolveRoster({ declared: undefined, nodes: [], rig: null, ambiguity: "no rig on this box" });
+  const r = resolveRoster({
+    declared: undefined,
+    nodes: [],
+    rig: null,
+    ambiguity: "no rig on this box",
+  });
   assert.equal(r.source, NONE);
   assert.deepEqual(r.seats, []);
 });
 
 test("rows without a usable seat name are dropped rather than rendered broken", () => {
-  const r = resolveRoster({ declared: undefined, rig: "r", nodes: [{ logicalId: undefined, rigName: undefined }] });
+  const r = resolveRoster({
+    declared: undefined,
+    rig: "r",
+    nodes: [{ logicalId: undefined, rigName: undefined }],
+  });
   assert.deepEqual(r.seats, []);
 });
 
@@ -88,4 +122,27 @@ test("no rigs at all is an honest empty, not an error", () => {
 
 test("positive control: this suite is capable of failing", () => {
   assert.throws(() => assert.equal(1, 2));
+});
+
+test("a Studio with a server hook never guesses its rig: only a declared one counts, and it says which rig it would have used", () => {
+  const fromWhoami = resolveRig({
+    whoamiRig: "launch-rig",
+    rigsOnBox: ["a", "b"],
+    published: true,
+  });
+  assert.equal(fromWhoami.rig, null);
+  assert.match(fromWhoami.why, /choose a rig in studio\.json/);
+  assert.match(fromWhoami.why, /started from launch-rig/);
+  const onlyOne = resolveRig({ rigsOnBox: ["only-one"], published: true });
+  assert.equal(onlyOne.rig, null);
+  assert.match(onlyOne.why, /started from only-one/);
+  assert.equal(resolveRig({ rigsOnBox: [], published: true }).rig, null);
+  assert.equal(
+    resolveRig({ declaredRig: "mine", whoamiRig: "other", published: true }).rig,
+    "mine",
+  );
+  assert.equal(resolveRig({ declaredRig: "*", published: true }).rig, "*");
+  // The loopback default (no hook) still infers for its owner.
+  assert.equal(resolveRig({ whoamiRig: "launch-rig", rigsOnBox: ["a", "b"] }).rig, "launch-rig");
+  assert.equal(resolveRig({ rigsOnBox: ["only-one"] }).rig, "only-one");
 });

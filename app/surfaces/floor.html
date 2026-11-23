@@ -72,17 +72,31 @@
     .numeric { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .working { --state: var(--working); }
     .idle { --state: var(--idle); }
-    .blocked { --state: var(--blocked); }
+    .blocked, .attention_required { --state: var(--blocked); }
     .stalled { --state: var(--stalled); }
     .down { --state: var(--down); }
     .queue-title { color: var(--text); font-weight: 600; }
     .queue-state { color: var(--idle); font-size: 10px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
     .route { color: var(--muted); overflow-wrap: anywhere; }
     .item-id { display: block; margin-top: 3px; color: var(--muted); font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
-    .result { max-width: 40ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+    /* The result gets a real width; Artifact takes what's left. Words break only where they must, never mid-word. */
+    .result { min-width: 28ch; max-width: 40ch; white-space: pre-wrap; overflow-wrap: break-word; }
+    .done-work { min-width: 24ch; }
+    .done-narrow { display: none; }
+    /* Words only the stacked tables need (their column heads are gone below 600px). */
+    .narrow-word { display: none; }
     .artifact { color: var(--muted); overflow-wrap: break-word; }
     .unset { color: var(--muted); font-style: italic; }
+    /* Open in Files: wide, a text link after the file's place, its tap area padded to well over 24px without moving the line;
+       narrow, a small button on its own line (below). */
+    .files-open { color: var(--working); white-space: nowrap; padding: 6px 0; margin: -6px 0; }
+    .files-open:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
+    /* Watch in terminal: an open task's agents in the Terminal's agents view, on its own line under the work's id. */
+    .watch-line { display: block; margin-top: 6px; }
+    .watch-open { color: var(--working); white-space: nowrap; padding: 6px 0; margin: -6px 0; }
+    .watch-open:focus-visible { outline: 2px solid var(--working); outline-offset: 2px; }
     .result-note { display: block; margin-top: 6px; color: var(--muted); }
+    .result a { color: var(--working); overflow-wrap: anywhere; }
     .coverage { margin: -4px 0 10px; color: var(--muted); font-size: 11px; }
     /* An element marked hidden stays hidden, whatever display a class gives it (the find box is display:flex). */
     [hidden] { display: none !important; }
@@ -90,11 +104,61 @@
     .find input { flex: 1 1 260px; max-width: 420px; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
     .find output { color: var(--muted); font-size: 11px; }
     .notice { padding: 18px; color: var(--blocked); }
+    .idle-note { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
     footer { margin-top: 22px; color: var(--muted); font-size: 11px; }
     @media (max-width: 600px) {
       main { padding: 18px; }
       header { align-items: start; flex-direction: column; }
       .metric { flex: 1 1 auto; }
+      /* Finished work as stacked blocks: the work and its id, the result, then one muted line (status · artifact · closed). */
+      table.done-table { min-width: 0; }
+      .done-table thead { display: none; }
+      .done-table tbody, .done-table tr { display: block; }
+      .done-table tr { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+      .done-table td { display: block; padding: 0; border-bottom: 0; }
+      .done-table td.result { min-width: 0; max-width: none; margin-top: 6px; }
+      /* Finished work's own classes (done-*), never the class names the open-work tables use. */
+      .done-table td.done-decision, .done-table td.artifact, .done-table td.done-closed { display: inline; margin-top: 6px; color: var(--muted); font-size: 10.5px; text-align: left; }
+      .done-table td.done-decision { display: inline-block; }
+      /* status · artifact · closed: each dot ends the item before it (a no-break space ties it there), so a wrapped line never
+         starts with one. */
+      .done-table td.done-decision::after, .done-table td.artifact::after { content: "\00a0·"; }
+      .done-table td.artifact::before, .done-table td.done-closed::before { content: " "; }
+      .done-table td.done-empty { padding: 4px 0; }
+      .done-table td.done-work { min-width: 0; }
+      .done-table .done-narrow { display: inline; }
+      /* A file that opens in Files: the button on its own line under the place (14px, 36px high, a 44px tap area), and the
+         closing time on its own line after it, so no " · " is left hanging. */
+      .done-table .files-sep { display: none; }
+      .done-table .files-open { position: relative; display: flex; align-items: center; width: fit-content; min-height: 36px; margin: 8px 0 4px; padding: 3px 12px;
+        border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); font-size: 14px; font-weight: 600; text-decoration: none; }
+      .done-table .files-open::after { content: ""; position: absolute; inset: -4px 0; }
+      .done-table tr.has-files td.done-closed { display: block; margin-top: 4px; }
+      .done-table tr.has-files td.done-closed::before, .done-table tr.has-files td.artifact::after { content: none; }
+      /* Watch in terminal: the same small button as Open in Files, on its own line under the work's id (14px, 36px high, a 44px
+         tap area). */
+      .watch-line { margin-top: 0; }
+      .watch-open { position: relative; display: flex; align-items: center; width: fit-content; min-height: 36px; margin: 8px 0 4px; padding: 3px 12px;
+        border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap; text-decoration: none; }
+      .watch-open::after { content: ""; position: absolute; inset: -4px 0; }
+      /* Seats and Queue stacked like finished work: the seat or the work on top, then one muted line (pod / member · state ·
+         lifecycle · age · pending; state · from · to). Each part is one unit, so an address or "acme / lead" is never split: the
+         line breaks between parts, and inside one only when it is longer than the line. A dot ends the item before it, so a
+         wrapped line never starts with one. Empty cells take no room. */
+      table.seats-table, table.queue-table { min-width: 0; }
+      .seats-table thead, .queue-table thead { display: none; }
+      .seats-table tbody, .queue-table tbody { display: block; }
+      .seats-table tr, .queue-table tr { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 1ch; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+      .seats-table td, .queue-table td { min-width: 0; padding: 0; border-bottom: 0; color: var(--muted); font-size: 10.5px; text-align: left; overflow-wrap: anywhere; }
+      .seats-table td.seat-name { flex: 0 0 100%; margin-bottom: 6px; color: var(--text); font-size: 12px; }
+      .seats-table td:empty { display: none; }
+      /* Queue: the work, its id, the state line, then Watch in terminal last, as an action ends an item in finished work. */
+      .queue-table td.queue-title { display: contents; }
+      .queue-table .queue-name { flex: 0 0 100%; color: var(--text); font-size: 12px; }
+      .queue-table .item-id { flex: 0 0 100%; margin: 3px 0 6px; }
+      .queue-table .watch-line { order: 1; flex: 0 0 100%; }
+      .seats-table td:not(.seat-name):not(:last-child)::after, .queue-table td:not(.queue-title):not(:last-child)::after { content: "\00a0·"; }
+      .seats-table .narrow-word, .queue-table .narrow-word { display: inline; }
     }
   </style>
 </head>
@@ -104,7 +168,7 @@
       <div><div class="eyebrow">Live activity</div><h1 id="rig">Rig floor</h1></div>
       <div id="connection" class="connection"><span class="pulse"></span><span>connecting</span></div>
     </header>
-    <div class="find" id="findbox" role="search" hidden><input id="find" type="search" placeholder="Find work by id (qitem-…)" aria-label="Find work by id" autocomplete="off" spellcheck="false"><output id="found" aria-live="polite"></output></div>
+    <div class="find" id="findbox" role="search" hidden><input id="find" type="search" placeholder="Find work by id" aria-label="Find work by id" autocomplete="off" spellcheck="false"><output id="found" aria-live="polite"></output></div>
     <div id="content"><div class="notice">Reading the runtime contract…</div></div>
     <footer id="updated"></footer>
   </main>
@@ -117,137 +181,242 @@
     let events;
     let pollTimer;
     let reconnectTimer;
+    let demo = false;
 
     const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, char => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
     })[char]);
 
-    function setConnection(mode, label) {
-      connection.className = `connection ${mode}`;
-      connection.lastElementChild.textContent = label;
+    // A finished item's artifact opens in Files when it sits inside one of this Studio's Files folders (GET /api/files/roots). The
+    // link carries the folder's name and the rest ("work/summary.csv"), never the box's absolute path: a URL shows in screenshots and
+    // history. Folders that can't be read, or a Studio without Files (404), leave the path as plain text.
+    function inRoots(p, roots) {
+      if (typeof p !== 'string' || !p.startsWith('/') || p.includes('/../') || p.endsWith('/..')) return false;
+      return (roots || []).some((r) => typeof r === 'string' && r.startsWith('/') && (p === r || p.startsWith(r.endsWith('/') ? r : `${r}/`)));
     }
+    // Folders that share a last name are told apart as name~1, name~2, in the order Files lists them.
+    function rootNames(rs) {
+      const base = (x) => x.slice(x.lastIndexOf('/') + 1), count = new Map();
+      for (const r of rs) count.set(base(r), (count.get(base(r)) || 0) + 1);
+      const taken = new Set(rs.map(base).filter((b) => count.get(b) === 1)), next = new Map();
+      return rs.map((r) => {
+        const b = base(r); if (count.get(b) === 1) return b;
+        let k = next.get(b) || 1, n; do n = `${b}~${k++}`; while (taken.has(n));
+        next.set(b, k); taken.add(n); return n;
+      });
+    }
+    // The deepest folder that holds the path wins.
+    function placeOf(p, roots) {
+      if (!inRoots(p, roots)) return null;
+      const rs = (roots || []).filter((r) => typeof r === 'string' && r.startsWith('/')).map((r) => r.replace(/\/+$/, ''));
+      const r = rs.filter((x) => p === x || p.startsWith(`${x}/`)).sort((a, b) => b.length - a.length)[0];
+      return `${rootNames(rs)[rs.indexOf(r)]}${p.slice(r.length)}`;
+    }
+    // null until an answer arrives; a network failure leaves it null (asked again on the next refresh), any HTTP answer settles it
+    // ([] when it isn't a readable list). Never awaited by a refresh: the folders only add links once known, by drawing again the
+    // answer that is ON SCREEN now (onScreen), never an older one: a not-attached, degraded or unreadable answer drawn since clears
+    // it, so late folders can't bring old work back.
+    let filesRoots = null, rootsAsked = false, onScreen = null;
+    function readRoots() {
+      if (filesRoots !== null || rootsAsked) return;
+      rootsAsked = true;
+      fetch('/api/files/roots', { cache: 'no-store' }).then(async (r) => {
+        const j = r.ok ? await r.json().catch(() => null) : null;
+        filesRoots = j && j.ok !== false && Array.isArray(j.roots) ? j.roots.map((x) => (typeof x === 'string' ? x : x?.path)).filter((x) => typeof x === 'string') : [];
+        if (filesRoots.length && onScreen) render(onScreen);
+      }).catch(() => {}).finally(() => { rootsAsked = false; });
+    }
+    // A place is a named folder and the rest. A folder mounted at "/" has no name, so its places would be the absolute path itself:
+    // those stay plain text.
+    const filesPlace = (p) => { const place = placeOf(p, filesRoots); return place && !place.startsWith('/') ? place : null; };
+    const filesHref = (place) => { const hash = `#open=${encodeURIComponent(place)}`; return { hash, href: `/?s=files&h=${encodeURIComponent(hash)}` }; };
+    // Watch in terminal: an open task's agents, in the Terminal's agents view (#agents&view=qitem:<id>), on a box whose Studio says it has
+    // one (GET /api/studio/place: agents.watch). Asked as the Files folders are: null until an answer, a network failure asks again on
+    // the next refresh, any HTTP answer settles it (a Studio without the place route answers 404, so no link). Only ids in the task
+    // view's shape.
+    let agentsWatch = null, placeAsked = false;
+    function readPlace() {
+      if (agentsWatch !== null || placeAsked) return;
+      placeAsked = true;
+      fetch('/api/studio/place', { cache: 'no-store' }).then(async (r) => {
+        const j = r.ok ? await r.json().catch(() => null) : null;
+        agentsWatch = !!(j && j.agents && typeof j.agents.watch === 'string');
+        if (agentsWatch && onScreen) render(onScreen);
+      }).catch(() => {}).finally(() => { placeAsked = false; });
+    }
+    const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+    const watchLink = (id, destination) => {
+      if (agentsWatch !== true || !TASK_ID.test(String(id ?? ''))) return '';
+      // A task addressed to a person (OpenRig's @external seats) has no terminal to watch.
+      if (String(destination ?? '').endsWith('@external')) return '';
+      const hash = `#agents&view=${encodeURIComponent(`qitem:${id}`)}`;
+      return `<span class="watch-line"><a class="watch-open" href="${escapeHtml(`/?s=terminal&h=${encodeURIComponent(hash)}`)}" target="_top" data-surface="terminal" data-hash="${escapeHtml(hash)}">Watch in terminal</a></span>`;
+    };
+
+    function setConnection(mode, label) {
+      connection.className = `connection ${demo ? 'polling' : mode}`;
+      connection.lastElementChild.textContent = demo ? 'Demo · example data' : label;
+    }
+    // The change stream's own state (live, polling) says how this page hears about changes, not whether there is anything to hear
+    // about. While the last answer said "not attached", that stays the signal: the stream opening, failing or falling back to polling
+    // doesn't paint it green or "polling". An attached answer clears it.
+    let detachedLabel = null, transport = null;
+    const setTransport = (mode, label) => { transport = { mode, label }; setConnection(detachedLabel ? 'down' : mode, detachedLabel ?? label); };
 
     function render(state) {
+      onScreen = null;
+      readRoots();
+      readPlace();
+      demo = state.mode === 'demo';
+      document.querySelector('.eyebrow').textContent = demo ? 'Demo · example data' : 'Workspace activity';
+      if (demo) setConnection('polling', 'Demo · example data');
       if (!state.ok) {
+        setConnection('down', 'state unavailable');
         content.innerHTML = `<div class="notice">Data degraded: ${escapeHtml(state.degraded || 'unknown reason')}</div>`;
+        document.querySelector('#findbox').hidden = true;
         rig.textContent = 'Rig floor';
         updated.textContent = '';
         return;
       }
 
-      // NOT ATTACHED is a different fact from ATTACHED-AND-QUIET, and rendering
-      // them the same way is how a box with no rig showed an empty floor under a
-      // green live signal — the fiction this surface exists to stop. The
-      // generator distinguishes three causes; a viewer can only act on the
-      // difference if the floor says which one it is.
+      // Three different facts, each said once and plainly: no rig attached, a rig that couldn't be read, and an
+      // attached rig with nothing going on. Rendering a missing rig like a quiet one is how a box with no rig showed an
+      // empty floor under a green live signal; saying both at once reads as a contradiction.
       if (state.attached === false) {
+        const unreadable = state.reason === 'rig-error';
         const why = {
           'no-rig': 'No rig is running on this box.',
           'no-rig-cli': 'The rig CLI is not installed on this box.',
           'rig-error': 'The rig is installed but could not be read.',
         }[state.reason] || 'This box is not attached to a rig.';
-        rig.textContent = 'Not attached';
+        rig.textContent = unreadable ? 'Rig unreadable' : 'Not attached';
         content.innerHTML = `<div class="notice"><strong>${escapeHtml(why)}</strong>` +
-          (state.detail ? `<br/><span>${escapeHtml(state.detail)}</span>` : '') +
-          `<br/><span>This is not an idle rig — there is nothing attached to report on.</span></div>`;
+          (state.detail ? `<br/><span>${escapeHtml(state.detail)}</span>` : '') + `</div>`;
+        document.querySelector('#findbox').hidden = true;
         updated.textContent = state.generatedAt ? `checked ${new Date(state.generatedAt).toLocaleTimeString()}` : '';
-        setConnection('down', state.reason === 'rig-error' ? 'rig unreadable' : 'no rig');
+        detachedLabel = unreadable ? 'rig unreadable' : 'not attached';
+        setConnection('down', detachedLabel);
         return;
       }
+      if (detachedLabel !== null) { detachedLabel = null; if (transport) setConnection(transport.mode, transport.label); }
 
       rig.textContent = state.rig;
-      const working = state.seats.filter(seat => seat.state === 'working').length;
-      const attention = state.seats.filter(seat => ['blocked', 'stalled', 'down'].includes(seat.state)).length;
+      // A box's customer seat (customer: true, from the provider) is the person's own entry, not an agent, and a connected assistant's
+      // caller seats (member caller-<id>) aren't agents on the team either. Neither is listed under Seats or counted as working or
+      // needing attention; their open requests show under Queue. They stay in state.seats, so find-by-id and finished work still know
+      // their work.
+      const isCaller = (seat) => typeof seat.member === 'string' && seat.member.startsWith('caller-');
+      const team = state.seats.filter(seat => seat.customer !== true && !isCaller(seat));
+      const working = team.filter(seat => seat.state === 'working').length;
+      // attention_required is OpenRig's word for a seat waiting on a person (a login, a prompt): it needs attention most of all.
+      const attention = team.filter(seat => ['attention_required', 'blocked', 'stalled', 'down'].includes(seat.state)).length;
       const pending = state.queue.length;
-      const seats = state.seats.map(seat => `
+      const idle = team.length > 0 && working === 0 && attention === 0 && pending === 0;
+      const seats = team.map(seat => `
         <tr>
           <td class="seat-name">${escapeHtml(seat.seat)}</td>
           <td>${escapeHtml(seat.pod)} / ${escapeHtml(seat.member)}</td>
           <td><span class="state-tag ${escapeHtml(seat.state)}"><span class="state-pip"></span>${escapeHtml(seat.state)}</span></td>
           <td>${escapeHtml(seat.lifecycle)}</td>
-          <td class="numeric">${seat.ageMinutes == null ? 'unknown' : `${escapeHtml(seat.ageMinutes)}m`}</td>
-          <td class="numeric">${escapeHtml(seat.pendingWork)}</td>
+          <td class="numeric"><span class="narrow-word">age </span>${seat.ageMinutes == null ? 'unknown' : `${escapeHtml(seat.ageMinutes)}m`}</td>
+          <td class="numeric">${escapeHtml(seat.pendingWork)}<span class="narrow-word"> pending</span></td>
         </tr>`).join('') || '<tr><td class="empty" colspan="6">No seats reported.</td></tr>';
       // Ids and the find box come with finished work: a generator that sends no `done` gets the floor exactly as before.
       const showIds = !!(state.done && Array.isArray(state.done.rows));
       document.querySelector('#findbox').hidden = !showIds;
       const queue = state.queue.map(item => `
         <tr${showIds ? ` data-id="${escapeHtml(item.id)}"` : ''}>
-          <td class="queue-title">${escapeHtml(item.title)}${showIds ? `<span class="item-id">${escapeHtml(item.id)}</span>` : ''}</td>
+          <td class="queue-title"><span class="queue-name">${escapeHtml(item.title)}</span>${showIds ? `<span class="item-id">${escapeHtml(item.id)}</span>` : ''}${watchLink(item.id, item.destination)}</td>
           <td class="queue-state">${escapeHtml(item.state)}</td>
-          <td class="route">${escapeHtml(item.source)}</td>
-          <td class="route">${escapeHtml(item.destination)}</td>
+          <td class="route"><span class="narrow-word">from </span>${escapeHtml(item.source)}</td>
+          <td class="route"><span class="narrow-word">to </span>${escapeHtml(item.destination)}</td>
         </tr>`).join('') || '<tr><td class="empty" colspan="4">Queue is clear.</td></tr>';
       // While a find is on, a table with no matching row says so instead of standing empty under its count.
       const queueRows = queue + (showIds && state.queue.length ? '<tr id="nomatch-open" hidden><td class="empty" colspan="4">No match in the queue.</td></tr>' : '');
 
-      // Work that finished, from a provider that sends `done` (an older one doesn't, and then this section isn't drawn). The answer
-      // a seat closed the work with is its result; a field the work doesn't carry reads "not recorded", and a result the provider
-      // couldn't read says so instead of looking empty.
+      // Work that finished, from a provider that sends `done` (one that doesn't gets no such section). The answer a seat closed the
+      // work with is its result; a field the work doesn't carry reads "not recorded", and a result the provider couldn't read says so
+      // instead of looking empty.
       const unset = (text) => `<span class="unset">${text}</span>`;
-      // A closure in plain words; the queue's own word stays in the tooltip.
-      const SAY = { 'no-follow-on': 'Done, nothing follows', handed_off_to: 'Handed off to', blocked_on: 'Blocked on', denied: 'Denied', canceled: 'Canceled', escalation: 'Escalated' };
-      const decisionOf = (d) => !d?.reason ? unset('not recorded')
+      // A closure in plain words; the queue's own word stays in the tooltip. Only what the closed row proves: a decision about this work
+      // can still be waiting.
+      const SAY = { 'no-follow-on': 'Done', handed_off_to: 'Handed off to', blocked_on: 'Blocked on', denied: 'Denied', canceled: 'Canceled', escalation: 'Escalated' };
+      // Stacked on a narrow screen the column heads are gone, so a missing status says which it is (done-narrow).
+      const decisionOf = (d) => !d?.reason ? unset('<span class="done-narrow">status </span>not recorded')
         : `<span title="${escapeHtml(d.reason)}">${escapeHtml(SAY[d.reason] || d.reason)}${d.target ? `${SAY[d.reason] && /to$|on$/.test(SAY[d.reason]) ? ' ' : ': '}${escapeHtml(d.target)}` : ''}</span>`;
-      // An artifact reference may break after "@", ":", "/" or "#", not inside a word.
-      // Split the raw text first and escape each part: inserting after escaping would cut an entity (&#39;) apart.
+      // An artifact reference may break after "@", ":", "/" or "#", not inside a word. Split the raw text first and escape each part:
+      // inserting after escaping would cut an entity (&#39;) apart.
       const breakable = (t) => String(t).split(/(?<=[@:/#])/).map(escapeHtml).join('<wbr>');
+      // A web address in a result opens. Split the raw text first, as above; only http and https become links, and closing punctuation
+      // stays outside.
+      const linked = (t) => String(t).split(/(https?:\/\/[^\s<>"']+)/g).map((part, i) => { if (i % 2 === 0) return escapeHtml(part); const [, url, tail] = part.match(/^(.*?)([).,;:!?\]]*)$/); return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>${escapeHtml(tail)}`; }).join('');
+      // A file inside Files shows its place there (what Files will show when it opens), the full path in the tooltip, then "Open in
+      // Files"; a web address opens; any other artifact keeps its full path, the only thing that can be told.
+      const artifactCell = (a, place) => {
+        if (!a) return unset('No file recorded');
+        if (!place) return /^https?:\/\/[^\s<>"']+$/.test(a) ? `<a href="${escapeHtml(a)}" target="_blank" rel="noopener noreferrer">${breakable(a)}</a>` : breakable(a);
+        const { hash, href } = filesHref(place);
+        return `<span class="files-place" title="${escapeHtml(a)}">${breakable(place)}</span><span class="files-sep"> · </span>`
+          + `<a class="files-open" href="${escapeHtml(href)}" target="_top" data-surface="files" data-hash="${escapeHtml(hash)}">Open in Files</a>`;
+      };
       const done = state.done && Array.isArray(state.done.rows) ? state.done : null;
       const doneRows = done ? done.rows.map(item => {
         if (!item || typeof item !== 'object') return '';
         const decision = decisionOf(item.decision);
-        // Both answers a finished item can carry: its resolution (the outcome stored on the item, often the whole answer) first,
-        // then the note it was closed with when that says something else. Either one alone is the result.
+        // Both answers a finished item can carry: its resolution (the outcome stored on the item, often the whole answer) first, then
+        // the note it was closed with when that says something else. Either one alone is the result.
         const text = (v) => (typeof v === 'string' && v.trim() !== '' ? v : null);
         const outcome = text(item.resolution), note = item.resultRead === false ? null : text(item.result);
         const parts = [];
-        if (outcome) parts.push(escapeHtml(outcome));
-        if (note && note !== outcome) parts.push(outcome ? `<span class="result-note">Closing note: ${escapeHtml(note)}</span>` : escapeHtml(note));
+        if (outcome) parts.push(linked(outcome));
+        if (note && note !== outcome) parts.push(outcome ? `<span class="result-note">Closing note: ${linked(note)}</span>` : linked(note));
         if (item.resultRead === false) parts.push(outcome ? unset("(the closing note couldn't be read)") : unset("couldn't be read"));
         const result = parts.length ? parts.join('\n') : unset('not recorded');
         const closed = Date.parse(item.closedAt || '');
+        const place = item.artifact ? filesPlace(item.artifact) : null;
         return `
-        <tr data-id="${escapeHtml(item.id)}">
-          <td class="queue-title">${escapeHtml(item.title)}<span class="item-id">${escapeHtml(item.id)}</span></td>
+        <tr data-id="${escapeHtml(item.id)}"${place ? ' class="has-files"' : ''}>
+          <td class="queue-title done-work">${escapeHtml(item.title)}<span class="item-id">${escapeHtml(item.id)}</span></td>
           <td class="result">${result}</td>
-          <td class="route">${decision}</td>
-          <td class="artifact">${item.artifact ? breakable(item.artifact) : unset('not recorded')}</td>
-          <td class="numeric">${Number.isFinite(closed) ? escapeHtml(new Date(closed).toLocaleString(undefined, { timeZoneName: 'short' })) : unset('unknown')}</td>
-        </tr>`; }).join('') || `<tr><td class="empty" colspan="5">None of this rig's work among the newest ${escapeHtml(done.coverage?.looked ?? 0)} finished items on this box.</td></tr>` : '';
+          <td class="route done-decision">${decision}</td>
+          <td class="artifact">${artifactCell(item.artifact, place)}</td>
+          <td class="numeric done-closed">${Number.isFinite(closed) ? escapeHtml(new Date(closed).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })) : unset('unknown')}</td>
+        </tr>`; }).join('') || `<tr><td class="empty done-empty" colspan="5">None of this rig's work is among the newest ${escapeHtml(done.coverage?.looked ?? 0)} finished items in this workspace.</td></tr>` : '';
       const cov = done?.coverage || {};
       const doneSection = !done ? '' : cov.unreadable
         ? `<section><h2>Done recently</h2><div class="notice">Finished work couldn't be read: ${escapeHtml(cov.unreadable)}.</div></section>`
         : `<section>
           <h2>Done recently · ${done.rows.length}</h2>
-          <p class="coverage">The newest ${escapeHtml(done.rows.length)} of this rig's finished work, from the newest ${escapeHtml(cov.looked ?? 0)} finished items on this box.</p>
-          <div class="table-wrap"><table aria-label="Finished work">
-            <thead><tr><th>Work</th><th>Result</th><th>Decision</th><th>Artifact</th><th class="numeric">Closed</th></tr></thead>
-            <tbody>${doneRows}${done.rows.length ? '<tr id="nomatch-done" hidden><td class="empty" colspan="5">No match in finished work.</td></tr>' : ''}</tbody>
+          <p class="coverage">This rig's ${escapeHtml(done.rows.length)} most recent finished item${done.rows.length === 1 ? '' : 's'} (from the last ${escapeHtml(cov.looked ?? 0)} finished in this workspace).</p>
+          <div class="table-wrap"><table class="done-table" aria-label="Finished work">
+            <thead><tr><th>Work</th><th>Result</th><th>Status</th><th>Artifact</th><th class="numeric">Closed</th></tr></thead>
+            <tbody>${doneRows}${done.rows.length ? '<tr id="nomatch-done" hidden><td class="empty done-empty" colspan="5">No match in finished work.</td></tr>' : ''}</tbody>
           </table></div>
         </section>`;
 
       content.innerHTML = `
         ${welcomeHtml()}
+        ${idle ? `<p class="idle-note">${escapeHtml(state.rig)} is idle: no seat is working and the queue is clear.</p>` : ''}
         <div class="metrics" aria-label="Rig summary">
           <div class="metric"><b>${working}</b><span>working now</span></div>
           <div class="metric"><b>${attention}</b><span>need attention</span></div>
           <div class="metric"><b>${pending}</b><span>queue items</span></div>
         </div>
         <section>
-          <h2>Seats · ${state.seats.length}</h2>
-          <div class="table-wrap"><table aria-label="Rig seats">
+          <h2>Seats · ${team.length}</h2>
+          <div class="table-wrap"><table class="seats-table" aria-label="Rig seats">
             <thead><tr><th>Seat</th><th>Pod / member</th><th>State</th><th>Lifecycle</th><th class="numeric">Age</th><th class="numeric">Pending</th></tr></thead>
             <tbody>${seats}</tbody>
           </table></div>
         </section>
         <section>
           <h2>Queue · ${state.queue.length}</h2>
-          <div class="table-wrap"><table aria-label="Rig queue">
+          <div class="table-wrap"><table class="queue-table" aria-label="Rig queue">
             <thead><tr><th>Work</th><th>State</th><th>Source</th><th>Destination</th></tr></thead>
             <tbody>${queueRows}</tbody>
           </table></div>
         </section>${doneSection}`;
-      lastState = state;
+      lastState = state; onScreen = state;
       findWork();
       updated.textContent = `Runtime snapshot · ${new Date(state.generatedAt).toLocaleString()}`;
     }
@@ -275,6 +444,14 @@
     }
     findInput.addEventListener('input', findWork);
 
+    // A link to a work entry (#q=<id>) opens this same Find. Polls keep what the reader types; only a new address replaces it.
+    function findFromHash() {
+      findInput.value = location.hash ? new URLSearchParams(location.hash.slice(1)).get('q') || '' : '';
+      if (lastState) findWork();
+    }
+    addEventListener('hashchange', findFromHash);
+    findFromHash();
+
     // The box's own introduction, declared in its manifest. Absent on a box
     // that declares none, which is the normal case — this surface ships to
     // every install and must not assume it is anybody's landing page.
@@ -299,6 +476,12 @@
     content.addEventListener('click', (e) => {
       const b = e.target.closest('.wagent');
       if (b) parent.postMessage({ t: 'open-agent', seat: b.dataset.seat }, '*');
+      // Open in Files and Watch in terminal: the shell switches surfaces in place (open-surface, this origin only); with no shell around
+      // this page, the link's own /?s=<surface>&h= opens the Studio there.
+      const a = e.target.closest('a[data-surface]');
+      if (!a || window.parent === window) return;
+      e.preventDefault();
+      window.parent.postMessage({ t: 'open-surface', id: a.dataset.surface, ...(a.dataset.hash ? { hash: a.dataset.hash } : {}) }, location.origin);
     });
 
     async function loadWelcome() {
@@ -315,6 +498,7 @@
         const state = await response.json();
         render(state);
       } catch (error) {
+        onScreen = null;
         content.innerHTML = `<div class="notice">Unable to read floor state: ${escapeHtml(error.message)}</div>`;
       }
     }
@@ -322,29 +506,26 @@
     function startPolling() {
       clearInterval(pollTimer);
       pollTimer = setInterval(refresh, 15000);
-      setConnection('polling', 'polling fallback');
+      setTransport('polling', 'polling fallback');
     }
 
     function connectEvents() {
       clearTimeout(reconnectTimer);
       if (events) events.close();
-      events = new EventSource('/api/events');
-      events.onopen = () => {
+      const source = events = new EventSource('/api/events');
+      source.onopen = () => {
         clearInterval(pollTimer);
-        setConnection('live', 'live signal');
+        setTransport('live', 'live signal');
         refresh();
       };
-      events.onmessage = () => refresh();
-      events.addEventListener('degraded', () => {
-        events.close();
-        startPolling();
-        reconnectTimer = setTimeout(connectEvents, 15000);
-      });
-      events.onerror = () => {
-        events.close();
+      source.onmessage = () => refresh();
+      const retry = () => {
+        source.close();
         startPolling();
         reconnectTimer = setTimeout(connectEvents, 15000);
       };
+      source.addEventListener('degraded', retry);
+      source.onerror = retry;
     }
 
     async function boot() {
@@ -363,6 +544,7 @@
         await refresh();
         connectEvents();
       } catch (error) {
+        onScreen = null;
         content.innerHTML = `<div class="notice">Cannot start: ${escapeHtml(error.message)}</div>`;
         startPolling();
       }

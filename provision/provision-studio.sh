@@ -32,8 +32,8 @@
 #   STUDIO_PORT=8890 STUDIO_USER=studio ./provision-studio.sh
 #   ./provision-studio.sh --dry-run             # print plan, touch nothing
 #
-# A bare host gets FOUR apps, not everything: workspace, rig-designer, factory,
-# files. Two providers, no ffmpeg, and no licence to go and acquire. The run
+# A bare host gets THREE apps, not everything: workspace, rig-designer and
+# files. One provider, no ffmpeg, and no licence to go and acquire. The run
 # prints what it left out and how to ask for it.
 #
 # THE SYSTEMD UNIT IS NAMED PER STUDIO, not per box:
@@ -69,11 +69,11 @@ NODE_MAJOR="${NODE_MAJOR:-22}"
 # THE SET, and why each earns a slot on a bare host:
 #   workspace     - no provider at all; the thing you actually work in
 #   rig-designer  - no provider at all; shows the rig being driven
-#   factory       - studio-factory; the rig floor, which is what OpenRig IS
-#   files         - studio-host; browsing the box, the most universal verb set
-# Two providers, no ffmpeg, no licence to acquire. Everything else is one
+#   files         - studio-host; browsing the box, the most universal verb set,
+#                   and the live rig state the SDK's own FLOOR shows
+# One provider, no ffmpeg, no licence to acquire. Everything else is one
 # `APPS=` away and the summary says so.
-APPS_DEFAULT="workspace rig-designer factory files"
+APPS_DEFAULT="workspace rig-designer files"
 APPS_EXPLICIT="${APPS:+yes}"
 # `APPS=all` is the documented escape hatch back to install-everything.
 APPS_ALL=""
@@ -352,9 +352,9 @@ LEGACY_UNIT="openrig-studio.service"
 # only appears at reboot, when the box starts the second studio and the first never
 # comes back.
 #
-# Found by cloud-impl on a live box with a reboot scheduled and held: the real
-# studio was serving happily while its unit pointed at a test studio that had
-# FAILED its own verification. That reboot would have booted the broken one.
+# For example, a live studio can be serving happily while its unit points at a
+# test studio that FAILED its own verification; the next reboot would start the
+# broken one.
 #
 # The name is derived from STUDIO_DIR, so it is stable across reprovisions of the
 # same studio and distinct between different ones. One box with several studios is

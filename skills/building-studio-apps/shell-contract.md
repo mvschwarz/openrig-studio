@@ -63,7 +63,8 @@ half-invented one is worse than either half.
 
 **Which rig, when it is not obvious:** declared in `studio.json` beats the managed session the
 studio was started from, which beats the only rig on the box. Several rigs and nothing declared is
-reported as ambiguous with the candidates named — it will not union them or pick the first.
+reported as ambiguous with the candidates named — it will not union them or pick the first. A studio
+with a server hook installed never infers a rig at all: only a declared one counts.
 
 **Check `GET /api/contract` → `manifest.seats`** for `{ count, source, attachable }`. `source` is
 the field that matters: `"package"` while you have an overlay configured means your declaration

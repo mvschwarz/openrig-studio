@@ -37,7 +37,9 @@ to disagree with it.
 
 ## `provider.json` — what a backend is
 
-Lives at `providers/<package>/provider.json`. The provider is authoritative
+Lives at `providers/<name>/provider.json`, where `<name>` is the last part of its
+package (`providers/studio-cutdown` for `@openrig/studio-cutdown`): that is how
+the box finds the provider an app names. The provider is authoritative
 about itself; an app may not override any of this.
 
 ```json
@@ -108,6 +110,11 @@ declares how to create one.
 `marker` is the file whose presence means "already seeded". Seeding runs **only
 into an absent or empty directory** — a directory with contents and no marker is
 somebody's data, and the box refuses rather than seeding over it.
+
+The launcher records initialized roots in `.studio-state/seeded-roots.json`,
+outside generated `.runtime` files. Removing a marker later does not initialize
+the root again. Only an enabled provider's declared initializer can run; binding
+an ordinary project directory does not implicitly make it a video project.
 
 This was hardcoded in the boot tool as one provider's file name, module export
 and marker, which made first-run seeding a video-studio feature that no other
@@ -221,6 +228,10 @@ Root kinds are an **open vocabulary**: name any kind your app needs, and the box
 binds it in `studio.json`. Every hardcoded path in the apps migrated so far
 existed because nothing in the format asked where the user's data lives.
 
+| field | stability | meaning |
+|---|---|---|
+| `roots.<kind>.required` | stable | `false` if the app works without that root. An install refuses a declared root the box doesn't bind unless it says `"required": false`, which is reported and installed; leaving `required` out means required |
+
 ### `calls` — the verbs this app uses
 
 ```json
@@ -249,13 +260,19 @@ whether an unserved verb is a missing nicety or a dead product.
 
 | field | stability | meaning |
 |---|---|---|
-| `vendor[]` | stable | bare directory names under your `vendor/`, shipped with the app |
+| `vendor[]` | stable | bare directory names under your `vendor/`, or the Apps root's shared `vendor/` |
 | `requires.binaries[]` | stable | binaries the app NEEDS, whoever satisfies them |
 | `requires.ffmpeg_filters[]` | provisional | filters without which the app cannot work |
 | `requires.ffmpeg_filters_preferred[]` | provisional | filters that degrade a feature, and must not block an install |
 
 `vendor` entries are **bare directory names**. Prose in that field reads fine to
 a human and installs nothing.
+
+An app's own `vendor/<name>` wins. If it is absent, the composer and installer
+resolve an explicitly declared name from `<appsRoot>/vendor/<name>`. This lets
+several apps use one shared module without enabling another app to serve it.
+The launcher serves these fixed-name assets with their MIME type and ETag
+revalidation; they are not immutable URLs.
 
 The required/preferred split on filters is load-bearing: a filter that only
 draws a caption should not refuse a working studio on a box whose ffmpeg build
@@ -266,6 +283,62 @@ it. Keeping both legible means an installer can accept a provider that ships its
 own ffmpeg without pretending the need was never there.
 
 ---
+
+### Workspace and demo data
+
+`tools/studio.mjs` defaults to `studio.json` `mode: "workspace"` and passes
+`STUDIO_MODE=workspace` to providers. Real sources return their data or an
+unavailable reason, never bundled sample work. `mode: "demo"` selects examples;
+the shell and Floor label them as example data. A standalone reference runtime
+also defaults to demo. Relative `appsRoot` and root bindings resolve against the
+Studio directory, independently of the launcher's current directory.
+
+### Shell and existing team terminals
+
+The launcher's read-only `GET /api/studio/place` reports `terminal` and `team`
+as a configured available path or `null`, with separate reasons under
+`terminals`. Route availability does not report whether agents are running.
+These are launcher endpoints, separate from the reference runtime's verb table.
+
+Install ttyd, then choose private Unix socket paths in your own directory:
+
+```sh
+export STUDIO_TERMINAL_SOCKET="$PWD/.terminals/shell.sock"
+node <sdk>/tools/start-terminal.mjs shell
+```
+
+Keep the same variable on the Studio launcher. Its `/terminal/` page and
+WebSocket reach only that fixed listener. The WebSocket opens only from this
+Studio's own pages: its `Origin` must be the Studio's own address or a
+`STUDIO_ALLOWED_ORIGINS` value, and never `null`. Every answer on `/terminal/`
+and `/team/` may be framed only by this Studio's own pages
+(`frame-ancestors 'self'`, `X-Frame-Options: SAMEORIGIN`). A new browser view starts a shell;
+closing it ends that shell. Use tmux for work that must outlive a view.
+Keep Unix socket paths at most 100 bytes long. The terminal launcher reports
+ready after its new socket exists with mode 0600. If ttyd has not bound it
+within five seconds, the launcher stops its own child and reports failure.
+
+For the full team client, install the Herdr client matching your existing
+server, pin its SHA256, and select its existing session:
+
+```sh
+export STUDIO_HERDR_BIN=/absolute/path/to/herdr
+export STUDIO_HERDR_SHA256=<sha256-of-that-client>
+export HERDR_SOCKET_PATH=/absolute/path/to/existing-herdr.sock
+export STUDIO_HERDR_SESSION=existing-session-name
+export STUDIO_TEAM_SOCKET="$PWD/.terminals/team.sock"
+node <sdk>/tools/start-terminal.mjs team
+```
+
+This uses `herdr session attach`, never a create/open command. Full Herdr needs
+no Core version floor. A guarded per-agent mode can have its own Core contract
+requirement; the full client does not acquire it. Herdr clients share focus and
+terminal sizing; use browser copy and paste rather than native clipboard
+shortcuts. Closing a client keeps the agents and their existing work running.
+The launcher binds loopback. A Studio reached from other machines puts its own
+sign-in in front (`contract/server-hooks.md`); these routes add no account,
+session service or credentials of their own.
+
 
 ## `studio.json` — what this box has
 
@@ -289,7 +362,7 @@ own ffmpeg without pretending the need was never there.
 |---|---|---|
 | `apps[]` | stable | which installed apps are ON |
 | `appsRoot` | stable | where apps and providers live |
-| `port` | stable | the public port; the box owns one origin |
+| `port` | stable | the public port; the box owns one origin. The runtime takes `port + 1`, providers free ports above it |
 | `roots` | stable | binds each root KIND to a real location; an array binds several |
 | `doors[]` | provisional | external services hung on the rail by absolute URL — not apps, not installed |
 | `fixtures` | provisional | a fixtures directory, when no provider generates real state |

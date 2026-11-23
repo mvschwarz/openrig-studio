@@ -15,9 +15,17 @@
 //   Markdown — see assertMarkdownSafe below.
 
 export const escapeHtml = (value) =>
-  String(value ?? "").replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[c]);
+  String(value ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[c],
+  );
 
 // A value destined for a JS string literal inside <script>. Returns the quotes
 // too, so the template writes `= {{TOKEN_JS}};` with no quotes of its own.
@@ -36,16 +44,16 @@ export const toJsLiteral = (value) => JSON.stringify(String(value ?? ""));
 // which is exactly the kind of invisible coupling that rots. So assert it here:
 // if admission is ever loosened, generation fails loudly instead of quietly
 // emitting malformed markdown.
-const MARKDOWN_ACTIVE = /[\\`*_{}\[\]()#+!|<>]/;
+const MARKDOWN_ACTIVE = /[\\`*_{}[\]()#+!|<>]/;
 
 export function assertMarkdownSafe(values) {
   for (const [key, value] of Object.entries(values)) {
     if (MARKDOWN_ACTIVE.test(String(value ?? ""))) {
       throw new Error(
         `refusing to emit: ${key} contains a markdown-active character (${JSON.stringify(value)}). ` +
-        `Values reaching the emitted README must be markdown-inert; admission should have ` +
-        `rejected this earlier. If the name rules were loosened, the README template needs ` +
-        `context-aware escaping before that change can ship.`
+          `Values reaching the emitted README must be markdown-inert; admission should have ` +
+          `rejected this earlier. If the name rules were loosened, the README template needs ` +
+          `context-aware escaping before that change can ship.`,
       );
     }
   }
@@ -55,6 +63,6 @@ export function assertMarkdownSafe(values) {
 // e.g. leave an already-JSON-encoded *_JS token alone while HTML-escaping the rest.
 export function render(template, vars, escape = (value) => value) {
   return template.replace(/\{\{(\w+)\}\}/g, (whole, key) =>
-    key in vars ? escape(vars[key], key) : whole
+    key in vars ? escape(vars[key], key) : whole,
   );
 }

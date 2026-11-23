@@ -44,20 +44,34 @@ const INSTALL = path.join(REPO, "tools", "install-app.mjs");
 
 // A minimal ultralight app that declares ONE root kind and nothing else, so the
 // only thing under test is whether that kind binds.
-function makeApp(dir, kind) {
+function makeApp(dir, kind, spec = { required: true }) {
   const app = path.join(dir, "probe-app");
   fs.mkdirSync(path.join(app, "app"), { recursive: true });
-  fs.writeFileSync(path.join(app, "app", "probe.html"),
-    "<!doctype html><html><head><title>PROBE</title></head><body>probe</body></html>");
-  fs.writeFileSync(path.join(app, "app.json"), JSON.stringify({
-    manifest_version: 1,
-    id: "probe-app",
-    name: "PROBE",
-    summary: "Root-kind binding probe.",
-    category: "studio",
-    surface: { entry: "app/probe.html", path: "/surfaces/probe.html", glyph: "▣", hint: "probe" },
-    roots: { [kind]: { required: true } },
-  }, null, 2));
+  fs.writeFileSync(
+    path.join(app, "app", "probe.html"),
+    "<!doctype html><html><head><title>PROBE</title></head><body>probe</body></html>",
+  );
+  fs.writeFileSync(
+    path.join(app, "app.json"),
+    JSON.stringify(
+      {
+        manifest_version: 1,
+        id: "probe-app",
+        name: "PROBE",
+        summary: "Root-kind binding probe.",
+        category: "studio",
+        surface: {
+          entry: "app/probe.html",
+          path: "/surfaces/probe.html",
+          glyph: "▣",
+          hint: "probe",
+        },
+        roots: { [kind]: spec },
+      },
+      null,
+      2,
+    ),
+  );
   return app;
 }
 
@@ -91,10 +105,16 @@ test("OPEN: a root kind the SDK has never heard of binds from studio.json roots{
 
   // Assert on CONTENT, not exit status alone: a refusal for an unrelated reason
   // would also produce a non-zero exit and would read as this bug.
-  assert.match(r.stdout, /root "fleet" binds to/,
-    `expected "fleet" to bind from studio.json roots{}.\n--- stdout ---\n${r.stdout}`);
-  assert.doesNotMatch(r.stdout, /root "fleet" has no binding/,
-    "the kind was declared and bound in studio.json, so it must not be refused");
+  assert.match(
+    r.stdout,
+    /root "fleet" binds to/,
+    `expected "fleet" to bind from studio.json roots{}.\n--- stdout ---\n${r.stdout}`,
+  );
+  assert.doesNotMatch(
+    r.stdout,
+    /root "fleet" has no binding/,
+    "the kind was declared and bound in studio.json, so it must not be refused",
+  );
   assert.equal(r.status, 0, `install should succeed.\n--- stdout ---\n${r.stdout}`);
 });
 
@@ -110,8 +130,11 @@ test("LEGACY: the four original keys still bind by their own studio.json names",
   });
   const r = install(studio, makeApp(dir, "project"));
 
-  assert.match(r.stdout, /root "project" binds to/,
-    `sliceRoot must still bind the "project" kind.\n--- stdout ---\n${r.stdout}`);
+  assert.match(
+    r.stdout,
+    /root "project" binds to/,
+    `sliceRoot must still bind the "project" kind.\n--- stdout ---\n${r.stdout}`,
+  );
   assert.equal(r.status, 0, `legacy binding must not regress.\n--- stdout ---\n${r.stdout}`);
 });
 
@@ -126,11 +149,40 @@ test("STILL REFUSES: a declared kind with no binding is a refusal, not a silent 
   // turn this into an accept.
   const r = install(studio, makeApp(dir, "telemetry"));
 
-  assert.match(r.stdout, /root "telemetry" has no binding/,
-    `an unbound kind must still refuse.\n--- stdout ---\n${r.stdout}`);
+  assert.match(
+    r.stdout,
+    /root "telemetry" has no binding/,
+    `an unbound kind must still refuse.\n--- stdout ---\n${r.stdout}`,
+  );
   assert.notEqual(r.status, 0, "an unbound root must fail the install");
   // And the refusal must name WHERE to bind it, or the operator is told a fact
   // without being told the shape that accepts it.
-  assert.match(r.stdout + (r.stderr ?? ""), /roots\.telemetry|roots\b/,
-    `the refusal should name the studio.json key that would bind it.\n--- stdout ---\n${r.stdout}`);
+  assert.match(
+    r.stdout + (r.stderr ?? ""),
+    /roots\.telemetry|roots\b/,
+    `the refusal should name the studio.json key that would bind it.\n--- stdout ---\n${r.stdout}`,
+  );
+});
+
+test("OPTIONAL: a root declared required:false with no binding is reported and installed; one with no required field still refuses", () => {
+  const dir = tmp();
+  const studio = makeStudio(dir, { apps: [], appsRoot: path.join(dir, "studio", "apps") });
+  const optional = install(studio, makeApp(dir, "work", { required: false }));
+  assert.match(
+    optional.stdout,
+    /root "work" is optional and has no binding on this box/,
+    optional.stdout,
+  );
+  assert.doesNotMatch(optional.stdout, /REFUSED/, optional.stdout);
+  assert.equal(
+    optional.status,
+    0,
+    `an optional unbound root must not fail the install.\n${optional.stdout}${optional.stderr}`,
+  );
+
+  const dir2 = tmp();
+  const studio2 = makeStudio(dir2, { apps: [], appsRoot: path.join(dir2, "studio", "apps") });
+  const unsaid = install(studio2, makeApp(dir2, "work", {}));
+  assert.match(unsaid.stdout, /root "work" has no binding/, unsaid.stdout);
+  assert.notEqual(unsaid.status, 0, "a root that doesn't say required:false is required");
 });

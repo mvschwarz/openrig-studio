@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notes</title>
+<style>
+  /* Dark, like the Studio shell it sits in. */
+  :root { color-scheme: dark; --bg: #121214; --fg: rgba(255,255,255,.95); --muted: rgba(255,255,255,.6); --line: rgba(255,255,255,.12); --hover: rgba(255,255,255,.08); --bad: #f08a8a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 17px; margin: 0; flex: 1; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); cursor: pointer; }
+  main { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; align-items: start; }
+  ul { list-style: none; margin: 0; padding: 8px; border-right: 1px solid var(--line); min-height: calc(100vh - 56px); }
+  @media (max-width: 640px) { main { grid-template-columns: 1fr; } ul { min-height: 0; border-right: 0; border-bottom: 1px solid var(--line); } }
+  li button { width: 100%; text-align: left; border: 0; border-radius: 6px; }
+  li button:hover { background: var(--hover); }
+  li button[aria-current="true"] { background: var(--line); }
+  .meta { display: block; color: var(--muted); font-size: 12px; }
+  article { padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .notice { padding: 16px; color: var(--muted); }
+  .notice.bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<header><h1>Notes</h1><button id="refresh" type="button">Refresh</button></header>
+<p id="notice" class="notice" role="status">Reading the notes folder…</p>
+<main hidden><ul id="list"></ul><article id="note" aria-live="polite"></article></main>
+<script>
+// A minimal Studio app: everything it shows comes from its provider's two verbs, on the Studio's own origin.
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let selected = null;
+  async function getJson(url) {
+    const res = await fetch(url, { cache: "no-store" });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.error ?? `${url} answered ${res.status}`);
+    return body;
+  }
+  // Reads can overlap (two clicks, or Refresh while a note is opening). Only the most recently started read of each
+  // kind may change the page, so a slow answer for an earlier choice never replaces a later one.
+  let openSeq = 0, loadSeq = 0;
+  async function open(name) {
+    const mine = ++openSeq;
+    selected = name;
+    for (const b of $("list").querySelectorAll("button")) b.setAttribute("aria-current", String(b.dataset.name === name));
+    let text;
+    try { text = (await getJson(`/api/notes/item?name=${encodeURIComponent(name)}`)).text; }
+    catch (e) { text = `Couldn't open ${name}: ${e.message}`; }
+    if (mine === openSeq) $("note").textContent = text;
+  }
+  async function load() {
+    const mine = ++loadSeq;
+    try {
+      const { notes } = await getJson("/api/notes");
+      if (mine !== loadSeq) return;
+      $("notice").hidden = notes.length > 0;
+      $("notice").className = "notice";
+      $("notice").textContent = "No notes yet. Add a .md file to the notes folder and press Refresh.";
+      document.querySelector("main").hidden = notes.length === 0;
+      $("list").replaceChildren(...notes.map((n) => {
+        const li = document.createElement("li"), b = document.createElement("button");
+        b.type = "button"; b.dataset.name = n.name; b.textContent = n.name;
+        const meta = document.createElement("span"); meta.className = "meta"; meta.textContent = `${n.bytes} bytes · ${new Date(n.modified).toLocaleString()}`;
+        b.append(meta); b.addEventListener("click", () => open(n.name)); li.append(b); return li;
+      }));
+      if (notes.length) await open(notes.some((n) => n.name === selected) ? selected : notes[0].name);
+    } catch (e) {
+      if (mine !== loadSeq) return;
+      $("notice").hidden = false; $("notice").className = "notice bad";
+      $("notice").textContent = `Couldn't read the notes: ${e.message}`;
+    }
+  }
+  $("refresh").addEventListener("click", load);
+  load();
+})();
+</script>
+</body>
+</html>

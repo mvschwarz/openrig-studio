@@ -31,7 +31,7 @@ export function emitProject(dest, files) {
       staged += 1;
       if (failAfter > 0 && staged >= failAfter) {
         throw new Error(
-          `OPENRIG_STUDIO_CREATE_FAIL_AFTER=${failAfter} — simulated mid-generation failure after ${staged} file(s)`
+          `OPENRIG_STUDIO_CREATE_FAIL_AFTER=${failAfter} — simulated mid-generation failure after ${staged} file(s)`,
         );
       }
     }
@@ -40,7 +40,11 @@ export function emitProject(dest, files) {
     fs.renameSync(staging, dest);
     return { dest, files: Object.keys(files) };
   } catch (error) {
-    try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      fs.rmSync(staging, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
     throw error;
   }
 }

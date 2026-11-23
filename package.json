@@ -1,15 +1,48 @@
 {
   "name": "@openrig/studio",
-  "version": "0.8.0",
+  "version": "0.9.0-pre.1",
   "description": "SDK for building agent-driven mini-apps: thin surfaces paired with agents, running in a shared shell.",
   "type": "module",
+  "files": [
+    "app/",
+    "contract/",
+    "create-studio/",
+    "!create-studio/test/",
+    "fixtures/",
+    "lib/",
+    "skills/",
+    "tools/",
+    "NOTICE"
+  ],
   "scripts": {
     "start": "node app/serve-studio.mjs",
     "create": "node create-studio/index.mjs",
-    "test": "node --test 'create-studio/test/*.test.mjs' 'test/*.test.mjs'"
+    "test": "node --test 'create-studio/test/*.test.mjs' 'test/*.test.mjs'",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:comments": "node scripts/check-comments.mjs",
+    "check": "npm run lint && npm run format:check && npm run check:comments && npm test",
+    "release": "node tools/studio-release.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "dependencies": {
+    "semver": "7.7.4"
+  },
+  "bundledDependencies": [
+    "semver"
+  ],
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "17.13.0",
+    "prettier": "3.9.10"
+  },
+  "bundleDependencies": [
+    "semver"
+  ]
 }

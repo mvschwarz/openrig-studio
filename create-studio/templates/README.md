@@ -122,7 +122,7 @@ Try it against the running studio:
 ```sh
 curl -X POST http://127.0.0.1:8890/api/drive \
   -H 'content-type: application/json' \
-  -d '{"say":"driven from a terminal","refresh":true}'
+  -d '{"surface":"{{ID}}","say":"driven from a terminal","refresh":true}'
 ```
 
 Reporting focus is the one you add yourself — it is what lets an agent answer

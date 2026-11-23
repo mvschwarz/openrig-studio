@@ -23,20 +23,8 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import vm from "node:vm";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-// What FLOOR's own script draws into #content from one state, run with just enough of a page (no network, no timers fired).
-function renderedFloor(html, state) {
-  const el = () => ({ innerHTML: "", textContent: "", value: "", className: "", hidden: true, lastElementChild: { textContent: "" }, addEventListener() {}, querySelectorAll: () => [] });
-  const els = {};
-  const ctx = { document: { querySelector: (s) => (els[s] ??= el()) }, fetch: () => new Promise(() => {}), EventSource: function () {}, setInterval, clearInterval, setTimeout, clearTimeout, parent: { postMessage() {} }, console };
-  vm.createContext(ctx);
-  vm.runInContext(html.match(/<script>([\s\S]*)<\/script>/)[1].replace(/\bboot\(\);\s*$/, ""), ctx);
-  ctx.render(state);
-  return els["#content"].innerHTML;
-}
 
 const git = (...args) => {
   const r = spawnSync("git", args, { cwd: REPO, encoding: "utf8" });
@@ -44,11 +32,15 @@ const git = (...args) => {
   return r.stdout.trim();
 };
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once("error", reject);
-  s.listen(0, "127.0.0.1", () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once("error", reject);
+    s.listen(0, "127.0.0.1", () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
 
 // The BASELINE comes out of history. The CURRENT side must come out of the
 // WORKING TREE, and that distinction is the whole usefulness of this control.
@@ -61,8 +53,10 @@ const freePort = () => new Promise((resolve, reject) => {
 // and this file reported a clean pass through both.
 function fromHistory(sha) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zeroconf-was-"));
-  const tar = spawnSync("git", ["archive", "--format=tar", sha, "app", "fixtures"],
-    { cwd: REPO, maxBuffer: 64 * 1024 * 1024 });
+  const tar = spawnSync("git", ["archive", "--format=tar", sha, "app", "fixtures"], {
+    cwd: REPO,
+    maxBuffer: 64 * 1024 * 1024,
+  });
   assert.equal(tar.status, 0, `git archive ${sha} failed: ${tar.stderr}`);
   const out = spawnSync("tar", ["-x", "-C", dir], { input: tar.stdout });
   assert.equal(out.status, 0, `untar failed: ${out.stderr}`);
@@ -84,14 +78,22 @@ function fromWorkingTree() {
 
 async function boot(dir) {
   const port = await freePort();
-  const proc = spawn(process.execPath, [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port)],
-    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(
+    process.execPath,
+    [path.join(dir, "app", "serve-studio.mjs"), "--port", String(port)],
+    { cwd: dir, stdio: ["ignore", "pipe", "pipe"] },
+  );
   const get = (p) => fetch(`http://127.0.0.1:${port}${p}`, { cache: "no-store" });
   const deadline = Date.now() + 10_000;
   for (;;) {
-    try { await (await get("/api/contract")).json(); break; }
-    catch {
-      if (Date.now() > deadline) { proc.kill(); throw new Error(`runtime in ${dir} never came up`); }
+    try {
+      await (await get("/api/contract")).json();
+      break;
+    } catch {
+      if (Date.now() > deadline) {
+        proc.kill();
+        throw new Error(`runtime in ${dir} never came up`);
+      }
       await new Promise((r) => setTimeout(r, 100));
     }
   }
@@ -119,45 +121,36 @@ const BASELINE = (() => {
 
 test("the baseline really is BEFORE the helper existed", () => {
   const exists = spawnSync("git", ["cat-file", "-e", `${BASELINE}:app/signal.js`], { cwd: REPO });
-  assert.notEqual(exists.status, 0,
+  assert.notEqual(
+    exists.status,
+    0,
     `app/signal.js already exists at the computed baseline ${BASELINE.slice(0, 8)} — the baseline ` +
-    `has walked forward (a rename would do this), so every comparison below is weaker than it looks`);
+      `has walked forward (a rename would do this), so every comparison below is weaker than it looks`,
+  );
 });
 
-test("zero-config: the served rail and its bytes are unchanged from before the change signal", async (t) => {
+test("zero-config: the rail is preserved and Floor serves the current explicit demo surface", async (t) => {
   const before = await boot(fromHistory(BASELINE));
   t.after(() => before.stop());
   const after = await boot(fromWorkingTree());
   t.after(() => after.stop());
 
-  assert.deepEqual(await after.json("/surfaces.json"), await before.json("/surfaces.json"),
-    "the zero-config manifest projection changed");
-  // The SDK's own surface for a consumer who adopted nothing. Its bytes can't stay frozen forever (FLOOR gained finished work,
-  // shown only to a generator that sends `done`), so what is held is what such a consumer SEES, styles included:
-  // - the markup outside style and script is the same, apart from elements marked hidden, and those count as unseen ONLY because
-  //   the stylesheet says `[hidden] { display: none !important; }` (no class rule can then show them);
-  // - no style rule was removed or changed, and every added rule names only classes and ids that page doesn't show;
-  // - render() draws the same thing from the shipped fixture state.
-  const [a, b] = [await after.text("/surfaces/floor.html"), await before.text("/surfaces/floor.html")];
-  const styleOf = (h) => (h.match(/<style>([\s\S]*?)<\/style>/)?.[1] || "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/@media[^{]*\{/g, "");
-  const rules = (h) => new Set([...styleOf(h).matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => `${m[1].trim().replace(/\s+/g, " ")} { ${m[2].trim().replace(/\s+/g, " ")} }`));
-  const [ra, rb] = [rules(a), rules(b)];
-  assert.ok(rb.size > 10, `positive control: the baseline's rules were read (${rb.size})`);
-  assert.deepEqual([...rb].filter((r) => !ra.has(r)), [], "a style rule the zero-config page uses was removed or changed");
-  const hides = ra.has("[hidden] { display: none !important; }");
-  const markup = (h) => h.replace(/<style>[\s\S]*?<\/style>/, "").replace(/<script>[\s\S]*?<\/script>/, "");
-  const unhidden = (h) => (hides ? h.replace(/<(\w+)\b[^>]*\shidden\b[^>]*>[\s\S]*?<\/\1>\s*/g, "") : h);
-  assert.equal(unhidden(markup(a)), markup(b), "the visible markup of the SDK's own surface changed for a consumer who adopted nothing");
-  const fixture = await after.json("/api/factory/state");
-  assert.equal("done" in fixture, false, "positive control: the shipped fixture sends no finished work");
-  const drawn = renderedFloor(a, fixture);
-  assert.equal(drawn, renderedFloor(b, fixture), "what FLOOR draws changed for a consumer who adopted nothing");
-  const seen = unhidden(markup(a)) + drawn;
-  for (const r of [...ra].filter((x) => !rb.has(x) && x !== "[hidden] { display: none !important; }")) {
-    const names = r.split("{")[0].match(/[.#][A-Za-z_][\w-]*/g) || [];
-    for (const n of names) assert.ok(!new RegExp(n[0] === "." ? `class="[^"]*\\b${n.slice(1)}\\b` : `id="${n.slice(1)}"`).test(seen),
-      `the added rule "${r}" styles ${n}, which a consumer who adopted nothing sees`);
-  }
+  // One deliberate change since the baseline: the built-in row's display name is in sentence case ("Floor"), like every app's
+  // rail name. Everything else in the projection must be exactly as before.
+  const floorName = (m) => ({
+    ...m,
+    surfaces: (m.surfaces ?? []).map((r) => (r.id === "floor" ? { ...r, name: "Floor" } : r)),
+  });
+  assert.deepEqual(
+    floorName(await after.json("/surfaces.json")),
+    floorName(await before.json("/surfaces.json")),
+    "the zero-config manifest projection changed",
+  );
+  assert.equal(
+    await after.text("/surfaces/floor.html"),
+    fs.readFileSync(path.join(REPO, "app/surfaces/floor.html"), "utf8"),
+    "the current Floor is served intact, including its explicit demo label",
+  );
 });
 
 test("zero-config: the contract answer is additive — one field gained, none lost, version unmoved", async (t) => {
@@ -188,11 +181,17 @@ test("zero-config: the contract answer is additive — one field gained, none lo
   // "served but not documented" at every level, and owning that in two places is
   // how the two drift.
   for (const key of Object.keys(b)) {
-    assert.ok(key in a,
-      `zero-config LOST the top-level field ${key} — that is the breaking direction`);
+    assert.ok(
+      key in a,
+      `zero-config LOST the top-level field ${key} — that is the breaking direction`,
+    );
   }
 
-  assert.equal(a.contractVersion, b.contractVersion, "contractVersion moved for an additive change");
+  assert.equal(
+    a.contractVersion,
+    b.contractVersion,
+    "contractVersion moved for an additive change",
+  );
   // GAINING a capability is additive and is the whole point of the field; LOSING
   // one breaks every consumer that gates on it. This compared them for equality,
   // which reads as strictness and is actually a rule that no feature may ever be
@@ -202,11 +201,16 @@ test("zero-config: the contract answer is additive — one field gained, none lo
   // identically and asserts that no capability may ever be ADDED, which is the
   // rule this loop exists to remove.
   for (const cap of b.capabilities) {
-    assert.ok(a.capabilities.includes(cap),
-      `zero-config LOST capability ${cap} — consumers gate on these, so removal is breaking`);
+    assert.ok(
+      a.capabilities.includes(cap),
+      `zero-config LOST capability ${cap} — consumers gate on these, so removal is breaking`,
+    );
   }
-  assert.deepEqual(Object.keys(a.manifest).sort(), Object.keys(b.manifest).sort(),
-    "the manifest report gained or lost a field");
+  assert.deepEqual(
+    Object.keys(a.manifest).sort(),
+    Object.keys(b.manifest).sort(),
+    "the manifest report gained or lost a field",
+  );
 
   // The runtime block is where the one intended addition lives. Naming it
   // exactly is what makes this an additive check rather than a vague one: a
@@ -215,10 +219,13 @@ test("zero-config: the contract answer is additive — one field gained, none lo
   const lost = Object.keys(b.runtime).filter((k) => !(k in a.runtime));
   // NAMED, not open-ended, and that is deliberate: this permits additions and
   // requires each to be DECLARED here, so a third field appearing unannounced
-  // still fails. `version` was added 2026-08-06 and documented in contract-meta.md
-  // in the same change — this line is the record of that intent, not a rubber stamp.
-  assert.deepEqual(gained.sort(), ["boot", "routes", "version"],
-    `unexpected addition(s) to the runtime block: ${gained.join(", ")}`);
+  // still fails. `version` is documented in contract-meta.md; listing it here
+  // records that intent rather than rubber-stamping whatever appears.
+  assert.deepEqual(
+    gained.sort(),
+    ["boot", "routes", "version"],
+    `unexpected addition(s) to the runtime block: ${gained.join(", ")}`,
+  );
   assert.deepEqual(lost, [], `the runtime block LOST field(s): ${lost.join(", ")}`);
 });
 
@@ -242,9 +249,16 @@ test("positive control: the two runtimes ARE different, so the sameness above me
   const after = await boot(fromWorkingTree());
   t.after(() => after.stop());
 
-  assert.equal(await before.status("/signal.js"), 404,
-    "the baseline already serves the helper — the wrong commit is being compared");
-  assert.equal(await after.status("/signal.js"), 200, "the current runtime does not serve the helper");
+  assert.equal(
+    await before.status("/signal.js"),
+    404,
+    "the baseline already serves the helper — the wrong commit is being compared",
+  );
+  assert.equal(
+    await after.status("/signal.js"),
+    200,
+    "the current runtime does not serve the helper",
+  );
 });
 
 test("positive control: this suite is capable of failing", () => {

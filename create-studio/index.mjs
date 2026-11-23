@@ -87,8 +87,14 @@ function parseArgs(argv) {
 
 function main() {
   const opts = parseArgs(process.argv.slice(2));
-  if (opts.help) { process.stdout.write(USAGE); return; }
-  if (opts.version) { process.stdout.write(`${VERSION} (contract v${CONTRACT_VERSION})\n`); return; }
+  if (opts.help) {
+    process.stdout.write(USAGE);
+    return;
+  }
+  if (opts.version) {
+    process.stdout.write(`${VERSION} (contract v${CONTRACT_VERSION})\n`);
+    return;
+  }
 
   // ---- admission: everything that can say no happens before any write ------
   const named = admitName(opts.name);
@@ -153,14 +159,21 @@ function main() {
     // reader should be able to see the thing being explained.
     [`${id}.html`]: render(
       read("surface.html"),
-      { ...vars, CONTRACT_VERSION_JS: toJsLiteral(CONTRACT_VERSION) },
-      (value, key) => (key.endsWith("_JS") ? value : escapeHtml(value))
+      { ...vars, CONTRACT_VERSION_JS: toJsLiteral(CONTRACT_VERSION), ID_JS: toJsLiteral(id) },
+      (value, key) => (key.endsWith("_JS") ? value : escapeHtml(value)),
     ),
     "surfaces.json": JSON.stringify({ surfaces: [JSON.parse(rowJson)] }, null, 2) + "\n",
-    "studio.json": JSON.stringify({
-      _note: "Boot with: OPENRIG_STUDIO_DIR=. node <sdk>/tools/studio.mjs",
-      port: 8890, apps: [], appsRoot: "./apps",
-    }, null, 2) + "\n",
+    "studio.json":
+      JSON.stringify(
+        {
+          _note: "Boot with: OPENRIG_STUDIO_DIR=. node <sdk>/tools/studio.mjs",
+          port: 8890,
+          apps: [],
+          appsRoot: "./apps",
+        },
+        null,
+        2,
+      ) + "\n",
     "surfaces.row.json": rowJson,
     // `.runtime/` is composed at boot and MUST NOT be committed. It is rebuilt
     // every start, and it carries live box state — the seat roster among it,
@@ -187,19 +200,19 @@ function main() {
   const rel = !relative ? "." : relative.startsWith("..") ? result.dest : relative;
   process.stdout.write(
     `\ncreated ${rel}/  (contract v${CONTRACT_VERSION})\n` +
-    result.files.map((f) => `  ${f}\n`).join("") +
-    // These next steps deliberately keep the surface in the developer's OWN
-    // repo. The older form told them to cp into <studio>/app/surfaces/, which in
-    // a real install is node_modules — wiped by npm ci and carried by any copy
-    // of the tree. The scaffolder is the first artifact a new developer reads;
-    // it should not teach the path the SDK exists to remove.
-    `\nnext:\n` +
-    `  node <sdk>/app/serve-studio.mjs --surfaces ${rel}   then open http://127.0.0.1:8890/\n` +
-    `  or, to run providers and apps too:\n` +
-    `    OPENRIG_STUDIO_DIR=${rel} node <sdk>/tools/studio.mjs\n\n` +
-    `It runs as-is — ${id}.html and surfaces.json are already wired.\n` +
-    `Your surface stays in YOUR repo — nothing is copied into the studio package.\n` +
-    `${rel}/README.md has the details and points at the contract docs.\n`
+      result.files.map((f) => `  ${f}\n`).join("") +
+      // These next steps deliberately keep the surface in the developer's OWN
+      // repo. The older form told them to cp into <studio>/app/surfaces/, which in
+      // a real install is node_modules — wiped by npm ci and carried by any copy
+      // of the tree. The scaffolder is the first artifact a new developer reads;
+      // it should not teach the path the SDK exists to remove.
+      `\nnext:\n` +
+      `  node <sdk>/app/serve-studio.mjs --surfaces ${rel}   then open http://127.0.0.1:8890/\n` +
+      `  or, to run providers and apps too:\n` +
+      `    OPENRIG_STUDIO_DIR=${rel} node <sdk>/tools/studio.mjs\n\n` +
+      `It runs as-is — ${id}.html and surfaces.json are already wired.\n` +
+      `Your surface stays in YOUR repo — nothing is copied into the studio package.\n` +
+      `${rel}/README.md has the details and points at the contract docs.\n`,
   );
 }
 

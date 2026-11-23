@@ -1,0 +1,8 @@
+{
+  "package": "@example/studio-notes",
+  "run": {
+    "entry": "notes-server.mjs",
+    "args": ["--port", "{{port}}", "--root", "{{root:notes}}"]
+  },
+  "verbs": ["/api/notes", "/api/notes/item"]
+}

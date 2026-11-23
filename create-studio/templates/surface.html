@@ -84,6 +84,10 @@
        last good data stays readable while the surface says it is stale. */
     #degraded { margin-bottom: 14px; }
     #degraded[hidden] { display: none; }
+    /* What a driving agent last said. Its own line, so a refresh redraws the
+       data under it without wiping the sentence that explained the refresh. */
+    #said { margin-bottom: 14px; color: var(--muted); }
+    #said[hidden] { display: none; }
 
     button {
       font: inherit; color: var(--text); cursor: pointer;
@@ -113,6 +117,7 @@
     </header>
 
     <div id="degraded" class="notice" hidden></div>
+    <p id="said" hidden></p>
 
     <div id="content">
       <div class="notice">Reading the runtime contract&hellip;</div>
@@ -158,6 +163,14 @@
 
     function showNotice(message) {
       content.innerHTML = '<div class="notice">' + esc(message) + "</div>";
+    }
+
+    // A driving agent's `say`, kept on its own line until the next one: render()
+    // only redraws #content, so a `refresh` in the same op leaves it readable.
+    const saidEl = document.querySelector("#said");
+    function showSaid(message) {
+      saidEl.textContent = message;
+      saidEl.hidden = !message;
     }
 
     // ---- render ------------------------------------------------------------
@@ -321,18 +334,21 @@
     //
     //   curl -X POST http://127.0.0.1:8890/api/drive \
     //     -H 'content-type: application/json' \
-    //     -d '{"refresh":true,"say":"pulling the latest state"}'
+    //     -d '{"surface":"{{ID}}","refresh":true,"say":"pulling the latest state"}'
     //
     // ONLY OPS THIS SURFACE CAN ACTUALLY HONOUR ARE HANDLED, and that is the point
     // rather than a limitation: a starter that pretended to accept a richer
     // vocabulary would report success for things it does not do, which is worse
     // than not offering them. Add your own as the surface grows — an op is
     // whatever YOUR surface understands, and the runtime never interprets it.
+    // Ops are delivered per surface: an agent names this surface's id in `surface`, and the
+    // helper refuses to start without it (contract/drive.md, "The op").
     driveSurface({
+      surface: {{ID_JS}},
       apply: async (op) => {
         // `say` first: a watcher should read WHY before the picture changes under
         // them, so a driven surface reads as narrated rather than haunted.
-        if (op.say) showNotice(String(op.say));
+        if (op.say) showSaid(String(op.say));
         if (op.refresh) await refresh();
         if (op.reload) location.reload();
       },

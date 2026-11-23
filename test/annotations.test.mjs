@@ -14,40 +14,52 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { startRuntime } from "./helpers/runtime.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-let nextPort = 9610;
-
 async function start({ file } = {}) {
-  const port = nextPort++;
-  const args = [path.join(REPO, "app", "serve-studio.mjs"), "--port", String(port)];
-  if (file) args.push("--annotations", file);
-  const proc = spawn(process.execPath, args, { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
-  const base = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) {
-    try { await fetch(`${base}/api/contract`, { cache: "no-store" }); break; }
-    catch { await new Promise((r) => setTimeout(r, 50)); }
-  }
+  const args = file ? ["--annotations", file] : [];
+  const { proc, ready } = startRuntime(path.join(REPO, "app", "serve-studio.mjs"), args, {
+    cwd: REPO,
+  });
+  const base = `http://127.0.0.1:${await ready}`;
   return {
     base,
-    stop: () => new Promise((r) => { proc.once("exit", r); proc.kill(); }),
+    stop: () =>
+      new Promise((r) => {
+        proc.once("exit", r);
+        proc.kill();
+      }),
     read: async (scope) =>
-      (await fetch(`${base}/api/annotations${scope === undefined ? "" : `?scope=${encodeURIComponent(scope)}`}`,
-        { cache: "no-store" })).json(),
+      (
+        await fetch(
+          `${base}/api/annotations${scope === undefined ? "" : `?scope=${encodeURIComponent(scope)}`}`,
+          { cache: "no-store" },
+        )
+      ).json(),
     write: async (body) => {
-      const res = await fetch(`${base}/api/annotations`, { method: "POST",
+      const res = await fetch(`${base}/api/annotations`, {
+        method: "POST",
         headers: { "content-type": "application/json" },
-        body: typeof body === "string" ? body : JSON.stringify(body) });
+        body: typeof body === "string" ? body : JSON.stringify(body),
+      });
       return { status: res.status, body: await res.json() };
     },
     contract: async () => (await fetch(`${base}/api/contract`, { cache: "no-store" })).json(),
   };
 }
 
-const mark = (note) => ({ id: `m-${note}`, surfaceId: "canvas", selector: "#publish", shape: "circle",
-  note, source: "human", anchor: { x: .1, y: .1, width: .2, height: .1 }, status: "anchored" });
+const mark = (note) => ({
+  id: `m-${note}`,
+  surfaceId: "canvas",
+  selector: "#publish",
+  shape: "circle",
+  note,
+  source: "human",
+  anchor: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 },
+  status: "anchored",
+});
 
 test("positive control: a fresh runtime answers a scope it has never seen", async (t) => {
   const s = await start();
@@ -61,8 +73,11 @@ test("marks round-trip through the verb verbatim", async (t) => {
   const records = [mark("tighten this"), mark("and this")];
   const written = await s.write({ scope: "canvas", records });
   assert.equal(written.status, 200);
-  assert.deepEqual((await s.read("canvas")).records, records,
-    "what came back is not what was written — the runtime is reshaping marks it is supposed to store opaquely");
+  assert.deepEqual(
+    (await s.read("canvas")).records,
+    records,
+    "what came back is not what was written — the runtime is reshaping marks it is supposed to store opaquely",
+  );
 });
 
 test("A SUB-CONTEXT IS A DIFFERENT BOARD, which is the whole point of the seam", async (t) => {
@@ -75,15 +90,24 @@ test("A SUB-CONTEXT IS A DIFFERENT BOARD, which is the whole point of the seam",
   await s.write({ scope: "artifacts", records: [mark("default board")] });
   await s.write({ scope: `artifacts${NUL}page-2`, records: [mark("page two only")] });
 
-  assert.deepEqual((await s.read("artifacts")).records.map((r) => r.note), ["default board"]);
-  assert.deepEqual((await s.read(`artifacts${NUL}page-2`)).records.map((r) => r.note), ["page two only"],
-    "a sub-context saw the default board's marks — the scopes are not isolated");
+  assert.deepEqual(
+    (await s.read("artifacts")).records.map((r) => r.note),
+    ["default board"],
+  );
+  assert.deepEqual(
+    (await s.read(`artifacts${NUL}page-2`)).records.map((r) => r.note),
+    ["page two only"],
+    "a sub-context saw the default board's marks — the scopes are not isolated",
+  );
 
   // The discriminating half: an UNRELATED context must be empty rather than
   // inheriting either of the above. Without this, a store that ignored the
   // context suffix entirely would pass the two assertions above.
-  assert.deepEqual((await s.read(`artifacts${NUL}page-3`)).records, [],
-    "an undeclared sub-context inherited marks — the suffix is being ignored");
+  assert.deepEqual(
+    (await s.read(`artifacts${NUL}page-3`)).records,
+    [],
+    "an undeclared sub-context inherited marks — the suffix is being ignored",
+  );
 });
 
 test("a read that FORGOT the scope answers empty, never everything", async (t) => {
@@ -95,7 +119,11 @@ test("a read that FORGOT the scope answers empty, never everything", async (t) =
 
   const bare = await s.read(undefined);
   assert.equal(bare.ok, true);
-  assert.deepEqual(bare.records, [], "a scope-less read returned marks belonging to a scope it did not ask for");
+  assert.deepEqual(
+    bare.records,
+    [],
+    "a scope-less read returned marks belonging to a scope it did not ask for",
+  );
   assert.equal(bare.scope, null);
 });
 
@@ -116,8 +144,7 @@ test("malformed writes are refused BY NAME rather than silently doing nothing", 
   assert.match(notJson.body.error, /JSON/);
 
   // And a refusal must not have written anything.
-  assert.deepEqual((await s.read("canvas")).records, [],
-    "a refused write still mutated the board");
+  assert.deepEqual((await s.read("canvas")).records, [], "a refused write still mutated the board");
 });
 
 test("persistence is REPORTED, and the report matches how it was started", async (t) => {
@@ -135,8 +162,11 @@ test("persistence is REPORTED, and the report matches how it was started", async
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ann-"));
   const filed = await start({ file: path.join(dir, "marks.json") });
   t.after(() => filed.stop());
-  assert.equal((await filed.contract()).annotations.persistence, "file",
-    "a runtime started with --annotations still reports memory, so the UI will say 'session only' over marks that ARE persisted");
+  assert.equal(
+    (await filed.contract()).annotations.persistence,
+    "file",
+    "a runtime started with --annotations still reports memory, so the UI will say 'session only' over marks that ARE persisted",
+  );
 });
 
 test("a file-backed runtime RELOADS what it wrote — the half that is easy to miss", async (t) => {
@@ -153,8 +183,11 @@ test("a file-backed runtime RELOADS what it wrote — the half that is easy to m
 
   const second = await start({ file });
   t.after(() => second.stop());
-  assert.deepEqual((await second.read("canvas")).records.map((r) => r.note), ["survives"],
-    "a restarted runtime lost marks it had persisted — the write path works and the load path does not");
+  assert.deepEqual(
+    (await second.read("canvas")).records.map((r) => r.note),
+    ["survives"],
+    "a restarted runtime lost marks it had persisted — the write path works and the load path does not",
+  );
 });
 
 test("negative control: a MEMORY runtime genuinely loses them, so the test above means something", async (t) => {
@@ -164,8 +197,11 @@ test("negative control: a MEMORY runtime genuinely loses them, so the test above
 
   const second = await start();
   t.after(() => second.stop());
-  assert.deepEqual((await second.read("canvas")).records, [],
-    "an unconfigured runtime persisted marks anyway — then the survival test above cannot distinguish file from memory");
+  assert.deepEqual(
+    (await second.read("canvas")).records,
+    [],
+    "an unconfigured runtime persisted marks anyway — then the survival test above cannot distinguish file from memory",
+  );
 });
 
 test("the annotations verbs are NOT reserved — stored marks are data on the box", async () => {
@@ -176,8 +212,10 @@ test("the annotations verbs are NOT reserved — stored marks are data on the bo
   // SDK_OWNED is DERIVED from app/verbs.mjs now, so read the classification at its
   // source rather than re-parsing a literal that no longer exists.
   const { RUNTIME_OWNED_VERBS } = await import("../app/verbs.mjs");
-  assert.ok(!RUNTIME_OWNED_VERBS.includes("/api/annotations"),
-    "reserving /api/annotations forbids the substitution that is the point of a provider");
+  assert.ok(
+    !RUNTIME_OWNED_VERBS.includes("/api/annotations"),
+    "reserving /api/annotations forbids the substitution that is the point of a provider",
+  );
 });
 
 test("only the ACTIVE surface may move the scope — STRUCTURAL, and it says so", () => {
@@ -191,9 +229,15 @@ test("only the ACTIVE surface may move the scope — STRUCTURAL, and it says so"
   // than the one on screen — and the marks board would swap under the user.
   const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
   const handler = shell.match(/if \(e\.data\.t === "annotation-context"\)\s*\{([\s\S]*?)\n    \}/);
-  assert.ok(handler, "shell.html no longer handles annotation-context — this test cannot find what it checks");
-  assert.match(handler[1], /e\.source === current\.contentWindow/,
-    "the annotation-context handler accepts a message without checking it came from the ACTIVE surface");
+  assert.ok(
+    handler,
+    "shell.html no longer handles annotation-context — this test cannot find what it checks",
+  );
+  assert.match(
+    handler[1],
+    /e\.source === current\.contentWindow/,
+    "the annotation-context handler accepts a message without checking it came from the ACTIVE surface",
+  );
 });
 
 test("positive control: the guard check above can fail", () => {
@@ -202,10 +246,18 @@ test("positive control: the guard check above can fail", () => {
   // trusted: same reason the leak sweep needed a live control.
   const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
   const stripped = shell.replace(/e\.source === current\.contentWindow/g, "true");
-  const handler = stripped.match(/if \(e\.data\.t === "annotation-context"\)\s*\{([\s\S]*?)\n    \}/);
-  assert.ok(handler, "the mutation broke the extractor rather than the guard — the control proves nothing");
-  assert.doesNotMatch(handler[1], /e\.source === current\.contentWindow/,
-    "the guard survived being removed, so the test above would pass with no guard at all");
+  const handler = stripped.match(
+    /if \(e\.data\.t === "annotation-context"\)\s*\{([\s\S]*?)\n    \}/,
+  );
+  assert.ok(
+    handler,
+    "the mutation broke the extractor rather than the guard — the control proves nothing",
+  );
+  assert.doesNotMatch(
+    handler[1],
+    /e\.source === current\.contentWindow/,
+    "the guard survived being removed, so the test above would pass with no guard at all",
+  );
 });
 
 test("the nested-frame target seam is wired, guarded, and falls back — STRUCTURAL", () => {
@@ -220,33 +272,54 @@ test("the nested-frame target seam is wired, guarded, and falls back — STRUCTU
 
   const handler = shell.match(/if \(e\.data\.t === "annotation-target"\)\s*\{([\s\S]*?)\n    \}/);
   assert.ok(handler, "shell.html no longer handles annotation-target");
-  assert.match(handler[1], /e\.source === current\.contentWindow/,
-    "the annotation-target handler accepts a message without checking it came from the ACTIVE surface");
+  assert.match(
+    handler[1],
+    /e\.source === current\.contentWindow/,
+    "the annotation-target handler accepts a message without checking it came from the ACTIVE surface",
+  );
 
   const target = shell.match(/target: \(\) => \{([\s\S]*?)\n    \},/);
   assert.ok(target, "shell.html no longer exposes target() on studioShell");
   // The chain walk is the whole point: a nested frame's rect is relative to its
   // PARENT's viewport, so the offsets must be added or every anchor lands at the
   // wrong place while looking perfectly computed.
-  assert.match(target[1], /outerRect\.left \+ innerRect\.left/,
-    "target() does not add the outer frame offset — nested anchors will be off by the surface frame's position");
-  assert.match(target[1], /catch/,
-    "target() does not guard the cross-origin read; a cross-origin nested frame would throw instead of degrading");
-  assert.match(target[1], /surfaceDoc\(\)/,
-    "target() has no fallback to the surface frame for the no-target / not-a-frame cases");
-  // review.r2 IMPORTANT — the cross-origin FALSE ANCHOR. A cross-origin declared
+  assert.match(
+    target[1],
+    /outerRect\.left \+ innerRect\.left/,
+    "target() does not add the outer frame offset — nested anchors will be off by the surface frame's position",
+  );
+  assert.match(
+    target[1],
+    /catch/,
+    "target() does not guard the cross-origin read; a cross-origin nested frame would throw instead of degrading",
+  );
+  assert.match(
+    target[1],
+    /surfaceDoc\(\)/,
+    "target() has no fallback to the surface frame for the no-target / not-a-frame cases",
+  );
+  // The cross-origin FALSE ANCHOR. A cross-origin declared
   // target must degrade SPATIAL-ONLY (a rect, no readable doc), NOT fall back to
   // the surface document: resolving a record's selector against the outer host
   // when it was meant for the cross-origin frame is a false anchor (host and
   // nested doc both carrying `#publish`). target() returns spatialOnly for that
   // case, and the layer refuses to element-anchor a doc-less view.
-  assert.match(target[1], /spatialOnly:\s*true/,
-    "a cross-origin declared target still falls back to the surface document — the false anchor the contract forbids");
+  assert.match(
+    target[1],
+    /spatialOnly:\s*true/,
+    "a cross-origin declared target still falls back to the surface document — the false anchor the contract forbids",
+  );
   const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
-  assert.match(layer, /spatialOnly[\s\S]*return \{ doc: null/,
-    "the layer's view() does not honour spatialOnly — it would fall back to the surface document");
-  assert.match(layer, /if \(!v \|\| !v\.doc \|\| !selector\) return null/,
-    "elementAnchor no longer refuses a doc-less (spatial-only) view — a cross-origin selector could resolve");
+  assert.match(
+    layer,
+    /spatialOnly[\s\S]*return \{ doc: null/,
+    "the layer's view() does not honour spatialOnly — it would fall back to the surface document",
+  );
+  assert.match(
+    layer,
+    /if \(!v \|\| !v\.doc \|\| !selector\) return null/,
+    "elementAnchor no longer refuses a doc-less (spatial-only) view — a cross-origin selector could resolve",
+  );
 });
 
 test("the layer anchors through the shell's view, not the surface frame directly", () => {
@@ -257,14 +330,20 @@ test("the layer anchors through the shell's view, not the surface frame directly
   const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
   const anchor = layer.match(/const elementAnchor = \(selector\) => \{([\s\S]*?)\n  \};/);
   assert.ok(anchor, "annotations.js no longer defines elementAnchor");
-  assert.doesNotMatch(anchor[1], /active\(\)\.frame/,
-    "elementAnchor reaches for the surface frame directly, bypassing the nested-frame view");
+  assert.doesNotMatch(
+    anchor[1],
+    /active\(\)\.frame/,
+    "elementAnchor reaches for the surface frame directly, bypassing the nested-frame view",
+  );
   assert.match(anchor[1], /view\(\)/, "elementAnchor does not consult the shell-resolved view");
 
   const at = layer.match(/const elementAt = \(event\) => \{([\s\S]*?)\n  \};/);
   assert.ok(at, "annotations.js no longer defines elementAt");
-  assert.doesNotMatch(at[1], /active\(\)\.frame/,
-    "elementAt reaches for the surface frame directly, so drawing by hand would hit the wrong document");
+  assert.doesNotMatch(
+    at[1],
+    /active\(\)\.frame/,
+    "elementAt reaches for the surface frame directly, so drawing by hand would hit the wrong document",
+  );
 });
 
 test("positive control: the two checks above can fail", () => {
@@ -274,16 +353,29 @@ test("positive control: the two checks above can fail", () => {
   const noOffset = shell.replace(/outerRect\.left \+ innerRect\.left/g, "innerRect.left");
   const t = noOffset.match(/target: \(\) => \{([\s\S]*?)\n    \},/);
   assert.ok(t, "the mutation broke the extractor rather than the property");
-  assert.doesNotMatch(t[1], /outerRect\.left \+ innerRect\.left/,
-    "the offset survived being removed, so that assertion would pass with the chain walk gone");
+  assert.doesNotMatch(
+    t[1],
+    /outerRect\.left \+ innerRect\.left/,
+    "the offset survived being removed, so that assertion would pass with the chain walk gone",
+  );
 
   const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
   // Regress the cross-origin doc-guard back to the pre-fix form (dropping the
   // v.doc check), and prove the assertion that requires it would then fail.
-  const regressed = layer.replace("if (!v || !v.doc || !selector) return null;", "if (!v || !selector) return null;");
-  assert.notEqual(regressed, layer, "the v.doc guard could not be located to mutate — the assertion proves nothing");
-  assert.doesNotMatch(regressed, /if \(!v \|\| !v\.doc \|\| !selector\) return null/,
-    "the v.doc guard survived removal, so the doc-guard assertion above cannot fail");
+  const regressed = layer.replace(
+    "if (!v || !v.doc || !selector) return null;",
+    "if (!v || !selector) return null;",
+  );
+  assert.notEqual(
+    regressed,
+    layer,
+    "the v.doc guard could not be located to mutate — the assertion proves nothing",
+  );
+  assert.doesNotMatch(
+    regressed,
+    /if \(!v \|\| !v\.doc \|\| !selector\) return null/,
+    "the v.doc guard survived removal, so the doc-guard assertion above cannot fail",
+  );
 });
 
 test("the refresh hook re-measures WITHOUT reloading — STRUCTURAL", () => {
@@ -295,18 +387,33 @@ test("the refresh hook re-measures WITHOUT reloading — STRUCTURAL", () => {
   const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
   const handler = shell.match(/if \(e\.data\.t === "annotation-refresh"\)\s*\{([\s\S]*?)\n    \}/);
   assert.ok(handler, "shell.html no longer handles annotation-refresh");
-  assert.match(handler[1], /e\.source === current\.contentWindow/,
-    "the refresh handler accepts a nudge from a surface that is not on screen");
-  assert.match(handler[1], /refreshListeners/,
-    "the refresh handler does not notify the refresh channel");
-  assert.doesNotMatch(handler[1], /surfaceListeners/,
-    "refresh fires the SURFACE channel, which reloads the board and resets undo — that is a reload, not a re-measure");
+  assert.match(
+    handler[1],
+    /e\.source === current\.contentWindow/,
+    "the refresh handler accepts a nudge from a surface that is not on screen",
+  );
+  assert.match(
+    handler[1],
+    /refreshListeners/,
+    "the refresh handler does not notify the refresh channel",
+  );
+  assert.doesNotMatch(
+    handler[1],
+    /surfaceListeners/,
+    "refresh fires the SURFACE channel, which reloads the board and resets undo — that is a reload, not a re-measure",
+  );
 
   const layer = fs.readFileSync(path.join(REPO, "app", "annotations.js"), "utf8");
-  assert.match(layer, /shell\.onRefresh\(\(\) => render\(\)\)/,
-    "the layer does not subscribe to the refresh channel");
-  assert.match(layer, /refresh: \(\) => \{ render\(\); \}/,
-    "the returned handle exposes no refresh()");
+  assert.match(
+    layer,
+    /shell\.onRefresh\(\(\) => render\(\)\)/,
+    "the layer does not subscribe to the refresh channel",
+  );
+  assert.match(
+    layer,
+    /refresh: \(\) => \{\s*render\(\);\s*\}/,
+    "the returned handle exposes no refresh()",
+  );
 });
 
 test("positive control: the refresh separation check can fail", () => {
@@ -314,11 +421,17 @@ test("positive control: the refresh separation check can fail", () => {
   // Plant the exact regression the assertion forbids: refresh reloading the board.
   const planted = shell.replace(
     /(if \(e\.data\.t === "annotation-refresh"\)[\s\S]*?)for \(const fn of refreshListeners\)/,
-    "$1for (const fn of surfaceListeners)");
-  const handler = planted.match(/if \(e\.data\.t === "annotation-refresh"\)\s*\{([\s\S]*?)\n    \}/);
+    "$1for (const fn of surfaceListeners)",
+  );
+  const handler = planted.match(
+    /if \(e\.data\.t === "annotation-refresh"\)\s*\{([\s\S]*?)\n    \}/,
+  );
   assert.ok(handler, "the mutation broke the extractor rather than planting the regression");
-  assert.match(handler[1], /surfaceListeners/,
-    "the regression could not be planted, so the doesNotMatch assertion above proves nothing");
+  assert.match(
+    handler[1],
+    /surfaceListeners/,
+    "the regression could not be planted, so the doesNotMatch assertion above proves nothing",
+  );
 });
 
 test("positive control: this suite is capable of failing", () => {
@@ -326,30 +439,41 @@ test("positive control: this suite is capable of failing", () => {
 });
 
 test("open-markup is a REQUEST from the active surface, not a seizure — STRUCTURAL", () => {
-  // studio-impl built a Mark-up button into a modal and deleted it: the message
-  // set is closed and there was no verb for it. The only route was the user
-  // knowing to reach for the header, which a surface that just opened an artifact
-  // has good reason to shortcut.
+  // A surface that just opened an artifact has good reason to offer a Mark-up
+  // button, and the message set is closed, so it needs a verb for that rather
+  // than relying on the user to reach for the header.
   //
-  // Added mirroring `open-agent`, which already lets a surface summon a
+  // It mirrors `open-agent`, which already lets a surface summon a
   // studio-level control. The shell keeps ownership: only the ACTIVE surface is
   // heard, the header button stays the visible truth, and a surface cannot read
   // the state back or hold it off.
   const shell = fs.readFileSync(path.join(REPO, "app", "shell.html"), "utf8");
   const handler = shell.match(/if \(e\.data\.t === "open-markup"\) \{([\s\S]*?)\n    \}/);
   assert.ok(handler, "shell.html no longer handles open-markup");
-  assert.match(handler[1], /e\.source === current\.contentWindow/,
-    "a background surface can turn markup on for whatever is on screen");
-  assert.match(handler[1], /setMarkup\(/,
-    "open-markup does not go through the shared toggle, so a listener will be missed");
+  assert.match(
+    handler[1],
+    /e\.source === current\.contentWindow/,
+    "a background surface can turn markup on for whatever is on screen",
+  );
+  assert.match(
+    handler[1],
+    /setMarkup\(/,
+    "open-markup does not go through the shared toggle, so a listener will be missed",
+  );
 
   // ONE path for the click and the message. Two places flipping this state is two
   // places computing one property, and the second one always forgets a listener.
   const setters = shell.match(/markupOn = /g) || [];
-  assert.equal(setters.length, 2,
-    `markupOn is assigned in ${setters.length} places — it should be its declaration and setMarkup only`);
+  assert.equal(
+    setters.length,
+    2,
+    `markupOn is assigned in ${setters.length} places — it should be its declaration and setMarkup only`,
+  );
 
   const doc = fs.readFileSync(path.join(REPO, "contract", "shell-protocol.md"), "utf8");
-  assert.match(doc, /"t": "open-markup"/,
-    "open-markup is not in the message table — the set is closed and additions are documented with the code");
+  assert.match(
+    doc,
+    /"t": "open-markup"/,
+    "open-markup is not in the message table — the set is closed and additions are documented with the code",
+  );
 });

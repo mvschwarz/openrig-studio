@@ -1,0 +1,9 @@
+node_modules/
+package-lock.json
+**/package-lock.json
+.runtime/
+# Prose is wrapped by hand, and the contract tests read it line by line.
+*.md
+# The HTML pages carry large inline scripts, and several tests read their
+# structure as text. They get formatted when those scripts move into modules.
+*.html

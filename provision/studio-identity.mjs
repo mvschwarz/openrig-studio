@@ -11,8 +11,7 @@
 // studio it just installed, and the verifier then passes against the sibling's
 // surfaces. Wrong, and reported as success.
 //
-// THE PROBE LIVES HERE TOO, and that is the correction from the first review pass.
-// The classification was written in shell, where `curl -f` reports a refused
+// THE PROBE LIVES HERE TOO. The classification used to be written in shell, where `curl -f` reports a refused
 // connection and an HTTP 404 with the same failure — so a foreign listener that
 // answered 404 at `/api/contract` was classified "nothing", launched into, and
 // then verified against. The three-state model was right and the shell could not
@@ -50,7 +49,8 @@ export function canonical(p) {
 }
 
 const sameDir = (a, b) => {
-  const ca = canonical(a), cb = canonical(b);
+  const ca = canonical(a),
+    cb = canonical(b);
   return ca !== null && cb !== null && ca === cb;
 };
 
@@ -59,10 +59,17 @@ export function reuseDecision({ body, expectedDir }) {
   try {
     doc = JSON.parse(body);
   } catch {
-    return { outcome: NOT_MINE, reason: "something is serving this port but /api/contract did not return JSON — not a studio" };
+    return {
+      outcome: NOT_MINE,
+      reason: "something is serving this port but /api/contract did not return JSON — not a studio",
+    };
   }
   if (!doc || typeof doc !== "object") {
-    return { outcome: NOT_MINE, reason: "something is serving this port and /api/contract returned JSON that is not an object — not a studio" };
+    return {
+      outcome: NOT_MINE,
+      reason:
+        "something is serving this port and /api/contract returned JSON that is not an object — not a studio",
+    };
   }
   // ESTABLISH THAT THIS IS A STUDIO BEFORE ASKING WHICH STUDIO IT IS. The first
   // version checked only that `contractVersion` was a string and `manifest` was
@@ -75,26 +82,47 @@ export function reuseDecision({ body, expectedDir }) {
   const version = typeof doc.contractVersion === "string" ? doc.contractVersion : null;
   const major = version ? version.split(".")[0] : null;
   if (major !== "0") {
-    return { outcome: NOT_MINE, reason: `something is serving this port but reports contractVersion ${JSON.stringify(doc.contractVersion)} — not a studio contract this run understands` };
+    return {
+      outcome: NOT_MINE,
+      reason: `something is serving this port but reports contractVersion ${JSON.stringify(doc.contractVersion)} — not a studio contract this run understands`,
+    };
   }
   if (doc.runtime?.name !== "openrig-studio") {
-    return { outcome: NOT_MINE, reason: `something is serving this port and answering /api/contract, but it is not an openrig studio runtime (runtime.name=${JSON.stringify(doc.runtime?.name)})` };
+    return {
+      outcome: NOT_MINE,
+      reason: `something is serving this port and answering /api/contract, but it is not an openrig studio runtime (runtime.name=${JSON.stringify(doc.runtime?.name)})`,
+    };
   }
   if (!Array.isArray(doc.capabilities) || !doc.capabilities.includes("contract.meta")) {
-    return { outcome: NOT_MINE, reason: "something is serving this port that claims to be a studio but does not advertise the contract.meta capability — not a studio contract" };
+    return {
+      outcome: NOT_MINE,
+      reason:
+        "something is serving this port that claims to be a studio but does not advertise the contract.meta capability — not a studio contract",
+    };
   }
   if (!doc.manifest || typeof doc.manifest !== "object") {
-    return { outcome: NOT_MINE, reason: "a studio contract without a manifest report — not a response this decision can be made from" };
+    return {
+      outcome: NOT_MINE,
+      reason:
+        "a studio contract without a manifest report — not a response this decision can be made from",
+    };
   }
 
   const dir = doc.manifest.consumer?.dir;
   if (typeof dir !== "string") {
-    return { outcome: NOT_MINE, reason: "a studio is serving this port, but with no overlay configured (manifest.consumer is null), so it cannot be the studio this run installed" };
+    return {
+      outcome: NOT_MINE,
+      reason:
+        "a studio is serving this port, but with no overlay configured (manifest.consumer is null), so it cannot be the studio this run installed",
+    };
   }
   if (!sameDir(dir, expectedDir)) {
     // Name BOTH. A refusal that says only "wrong studio" sends an operator
     // looking for the wrong thing.
-    return { outcome: NOT_MINE, reason: `a DIFFERENT studio is serving this port: it serves ${dir}, this run installed ${expectedDir}` };
+    return {
+      outcome: NOT_MINE,
+      reason: `a DIFFERENT studio is serving this port: it serves ${dir}, this run installed ${expectedDir}`,
+    };
   }
   return { outcome: REUSE, reason: `studio already serving ${dir} — reusing it` };
 }
@@ -109,7 +137,12 @@ export function reuseDecision({ body, expectedDir }) {
 export async function probePort({ port, expectedDir, host = "127.0.0.1", timeoutMs = 5000 }) {
   const listening = await new Promise((resolve) => {
     const s = net.connect({ port, host });
-    const done = (v) => { try { s.destroy(); } catch {} resolve(v); };
+    const done = (v) => {
+      try {
+        s.destroy();
+      } catch {}
+      resolve(v);
+    };
     s.once("connect", () => done(true));
     s.once("error", () => done(false));
     s.setTimeout(timeoutMs, () => done(false));
@@ -123,10 +156,16 @@ export async function probePort({ port, expectedDir, host = "127.0.0.1", timeout
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
-    return { outcome: NOT_MINE, reason: `something holds this port but /api/contract could not be read (${e.message}) — refusing to treat an occupied port as empty` };
+    return {
+      outcome: NOT_MINE,
+      reason: `something holds this port but /api/contract could not be read (${e.message}) — refusing to treat an occupied port as empty`,
+    };
   }
   if (!res.ok) {
-    return { outcome: NOT_MINE, reason: `something holds this port and answered /api/contract with HTTP ${res.status} — occupied, and not a studio this run may use` };
+    return {
+      outcome: NOT_MINE,
+      reason: `something holds this port and answered /api/contract with HTTP ${res.status} — occupied, and not a studio this run may use`,
+    };
   }
   return reuseDecision({ body: await res.text(), expectedDir });
 }

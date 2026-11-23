@@ -98,6 +98,18 @@
   .tab .dot.down { background: var(--red); }
   #manifest-health { padding: 8px 16px; font-size: 10px; letter-spacing: .06em; color: var(--faint); }
   #manifest-health.bad { color: var(--red); }
+  /* A slot in the rail, above its foot, for a deployment's own control (a server hook's shell transform fills it, or
+     places beside it). Empty, it takes no room. */
+  #rail-private { padding: 8px 8px 10px; }
+  #rail-private:empty { display: none; }
+  body.rail-collapsed #rail-private { padding: 8px 4px 10px; }
+  /* One notice over the whole page when the sign-in in front of this Studio has ended (see the sign-in renewal). */
+  #signInEnded { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, .6); }
+  #signInEnded > div { box-sizing: border-box; width: 100%; max-width: 420px; padding: 22px 24px; border: 1px solid var(--edge2); border-radius: 8px; background: var(--ink); color: var(--bone); font-size: 15px; line-height: 1.45; }
+  #signInEnded h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+  #signInEnded p { margin: 0 0 16px; }
+  #signInEnded button { padding: 8px 14px; font: inherit; color: var(--bone); background: transparent; border: 1px solid var(--edge2); border-radius: 6px; cursor: pointer; }
+  #signInEnded button:hover, #signInEnded button:focus-visible { border-color: var(--bone); }
   #rail-foot { padding: 14px 16px 16px; border-top: 1px solid var(--edge); color: var(--faint);
     font-size: 10px; line-height: 1.6; display: flex; flex-direction: column; gap: 7px; }
   /* currentColor, so the mark is the same ink as the text around it and there is
@@ -110,19 +122,34 @@
   #rail-foot .links a { color: var(--dim); text-decoration: none; }
   #rail-foot .links a:hover { color: var(--bone); text-decoration: underline; }
   #stage { flex: 1; position: relative; background: var(--ink); }
-  #stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--ink); }
-  #stage iframe.hidden { visibility: hidden; pointer-events: none; }
+  /* The stage's own frames only: a chat panel mounted in the stage lays out its frames itself. */
+  #stage > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--ink); }
+  #stage > iframe.hidden { visibility: hidden; pointer-events: none; }
   /* An idle overlay must not eat clicks meant for the surface. A feature that
      wants input sets pointer-events on its own node inside this host. */
   #shell-overlay { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: var(--faint); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; }
+  /* When the app list couldn't be read, or there's nothing on it: a card that says which, in plain words, never an empty rail
+     that looks like an empty workspace. */
+  #empty:has(.why) { padding: 0 16px; }
+  #empty .why { box-sizing: border-box; width: 100%; max-width: 420px; padding: 20px 22px; border: 1px solid var(--edge2); border-radius: 4px; text-transform: none;
+    letter-spacing: normal; font-size: 14px; line-height: 1.5; color: var(--dim); }
+  #empty .why strong { display: block; margin-bottom: 6px; color: var(--bone); font-weight: 600; }
+  #empty .why span { display: block; }
+  #empty .why .help { margin-top: 8px; color: var(--faint); font-size: 13px; }
+  #empty .why .acts { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+  #empty .why button, #empty .why .acts a { padding: 6px 12px; font: inherit; font-size: 13px; color: var(--bone); text-decoration: none;
+    background: transparent; border: 1px solid var(--edge2); border-radius: 4px; cursor: pointer; }
+  #empty .why button:hover, #empty .why .acts a:hover { border-color: var(--bone); }
   /* ---- the agent sidebar ----
      Measurements ported from the shell this was extracted from, where they
      survived a week of daily use. 400px is not arbitrary: a terminal at this
      font size needs it to avoid wrapping an agent's output into noise, and the
      earlier 320px guess is what made the pane feel cramped. */
-  #agents { width: 400px; min-width: 400px; display: none; flex-direction: column;
+  /* Never wider than its column: on a phone a fixed 400px minimum beside the main column pushed the page past the screen.
+     The minimum is the smaller of 400px and the column, so it's unchanged wherever the column is 400px or wider. */
+  #agents { width: 400px; min-width: min(400px, 100%); display: none; flex-direction: column;
     border-left: 1px solid var(--edge); background: var(--panel); backdrop-filter: blur(14px);
     min-height: 0; }
   #agents.open { display: flex; }
@@ -133,7 +160,10 @@
   #agents-head .word:hover { color: var(--dim); }
   #chatRigSel { background: rgba(255,255,255,.04); color: var(--dim); border: 1px solid var(--edge);
     border-radius: 2px; font: 9px var(--sans); letter-spacing: .14em; text-transform: uppercase;
-    padding: 3px 6px; cursor: pointer; appearance: none; }
+    padding: 3px 6px; cursor: pointer; appearance: none;
+    /* A flex item's automatic minimum is its longest option, so a long rig name held the header wider than a narrow
+       column. It may shrink; the open list still shows the full name. */
+    min-width: 0; }
   #chatRigSel:hover { color: var(--bone); border-color: var(--edge2); }
   #seatName { flex: 1; color: var(--faint); font-size: 10px; letter-spacing: .04em;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
@@ -175,6 +205,53 @@
   #agentToggle:hover { background: rgba(255,255,255,.8); border-color: var(--bone); color: #111; }
   /* hideAgents rows suppress the sidebar toggle while active (shell-protocol) */
   body.hide-agents #agentToggle { display: none !important; }
+  /* Nothing to reach: the Studio says no chat panel is served here and no seats are declared, so the button would open
+     an empty roster. */
+  body.no-agent-route #agentToggle { display: none !important; }
+  @media (max-width: 700px) {
+    #topbar { height: auto; min-height: 46px; flex-wrap: wrap; padding: 8px; gap: 6px; }
+    #appHalf { flex: 1 0 100%; gap: 8px; }
+    #topCrumb { display: none; }
+    #topTitle { max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #appActions { margin-left: auto; }
+    #shellHalf { margin-left: auto; }
+    #topbar button { min-height: 32px; padding: 6px; }
+  }
+
+  /* The phone drawer. Under 600px a phone's first look is the page: the rail is a drawer over it, closed until the menu
+     button opens it, and it closes again on choosing a surface, on the scrim or on Escape. Closed, it's out of the tab order
+     too. From 600px up nothing here applies, and the rail behaves as it does on any wider screen. */
+  #navMenu, #navScrim { display: none; }
+  @media (max-width: 599.98px) {
+    #rail { position: fixed; top: 0; bottom: 0; left: 0; z-index: 60; width: min(280px, 86vw) !important; min-width: 0 !important;
+      transform: translateX(-102%); background: var(--ink); border-right: 1px solid var(--edge2);
+      visibility: hidden; transition: transform .18s ease, visibility 0s linear .18s; }
+    body.navDrawer #rail { transform: none; visibility: visible; transition: transform .18s ease, visibility 0s; }
+    body.navDrawer #navScrim { display: block; position: fixed; inset: 0; z-index: 59; background: rgba(0, 0, 0, .55); }
+    #rail #railToggle { display: none; }
+    #navMenu { display: inline-flex; align-items: center; justify-content: center; flex: none; margin-right: 8px; padding: 6px 8px !important; }
+  }
+
+  /* The chat panel's conversation uses the stage; app documents stay mounted under it. */
+  body.workspace-chat #rail { width:192px; min-width:192px; }
+  body.workspace-chat.rail-collapsed #rail { width:52px; min-width:52px; }
+  body.workspace-chat #rail-head { padding:16px 12px; min-height:64px; }
+  body.workspace-chat #rail-head small { display:none; }
+  body.workspace-chat #topbar { height:52px; min-height:52px; padding:4px 16px; }
+  body.chat-workspace-visible #stage > iframe { visibility:hidden; pointer-events:none; }
+  body.chat-workspace-visible #appActions, body.chat-workspace-visible #topCrumb { display:none; }
+  body.chat-workspace-visible #markupToggle { display:none; }
+  body.workspace-chat #stage { min-width:0; min-height:0; }
+  @media(max-height:450px) { body.workspace-chat #topbar { height:44px; min-height:44px; padding:0 12px; } }
+  @media(max-width:760px) { body.workspace-chat #rail { width:212px; min-width:212px; } }
+
+  /* Opt-in full workspace canvas. Other surfaces retain the standard shell. */
+  body.workspace-canvas { padding:0 !important; overflow:hidden; }
+  body.workspace-canvas #rail, body.workspace-canvas #topbar,
+  body.workspace-canvas #chat-panel, body.workspace-canvas #agents,
+  body.workspace-canvas #navShade { display:none !important; }
+  body.workspace-canvas #maincol, body.workspace-canvas #shellframes { margin:0; min-width:0; min-height:0; }
+  body.workspace-canvas #stage { display:block !important; width:100%; height:100%; margin:0; padding:0; }
 </style>
 </head>
 <body>
@@ -196,30 +273,32 @@
     </div>
     <div id="tabs"></div>
     <div id="manifest-health"></div>
+    <div id="rail-private"></div>
     <div id="rail-foot">
       <a class="markLink" href="https://openrig.dev" target="_blank" rel="noopener"
          title="OpenRig — the substrate under every box"><svg class="wordmark" aria-label="OpenRig" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="18 -744 4844 788" fill="currentColor"><g transform="scale(1,-1)"><path d="M306.0 -14.0Q426.0 -14.0 495.0 59.5Q564.0 133.0 564.0 272.0V428.0Q564.0 563.0 495.0 638.5Q426.0 714.0 306.0 714.0Q186.0 714.0 117.0 638.5Q86.79292297363281 605.4473266601562 69.80999755859375 560.9911499023438L198.7979278564453 531.2119750976562Q211.2019805908203 556.6514892578125 233.0 573.0Q261.0 594.0 306.0 594.0Q351.0 594.0 378.5 573.0Q406.0 552.0 419.0 516.0Q432.0 480.0 432.0 436.0V264.0Q432.0 194.0 405.0 150.0Q378.0 106.0 306.0 106.0Q234.0 106.0 207.0 150.0Q180.0 194.0 180.0 264.0V436.0Q180.0 456.5721130371094 182.7324981689453 475.3953552246094L54.454036712646484 505.0107727050781Q48.0 469.2881164550781 48.0 428.0V272.0Q48.0 133.0 117.0 59.5Q186.0 -14.0 306.0 -14.0Z"/><path d="M784.0 0.0V700.0H1058.0Q1130.0 700.0 1177.5 670.5Q1225.0 641.0 1248.5 594.5Q1272.0 548.0 1272.0 497.0V473.0Q1272.0 421.0 1248.5 373.0Q1225.0 325.0 1177.5 294.5Q1130.0 264.0 1058.0 264.0H916.0V0.0H784.0ZM916.0 390.0H1045.0Q1089.0 390.0 1114.5 414.0Q1140.0 438.0 1140.0 476.0V488.0Q1140.0 526.0 1114.5 550.0Q1089.0 574.0 1045.0 574.0H916.0V390.0Z"/><path d="M1506.0 0.0V700.0H1948.0V574.0H1638.0V414.0H1936.0V288.0H1638.0V126.0H1960.0V0.0H1506.0Z"/><path d="M2197.0 0.0V700.0H2455.0L2537.0 66.0H2555.0V700.0H2687.0V0.0H2429.0L2347.0 634.0H2329.0V0.0H2197.0Z"/><path d="M2921.0 0.0V700.0H3189.0Q3261.0 700.0 3310.0 674.0Q3359.0 648.0 3384.0 604.5Q3409.0 561.0 3409.0 507.0V483.0Q3409.0 440.0 3385.5 402.5Q3362.0 365.0 3315.0 345.0V327.0Q3350.0 323.0 3370.5 300.0Q3391.0 277.0 3391.0 242.0V0.0H3259.0V210.0Q3259.0 234.0 3246.5 249.0Q3234.0 264.0 3205.0 264.0H3053.0V0.0H2921.0ZM3053.0 390.0H3179.0Q3227.0 390.0 3252.0 413.0Q3277.0 436.0 3277.0 476.0V488.0Q3277.0 523.0 3252.0 548.5Q3227.0 574.0 3179.0 574.0H3053.0V390.0Z"/><path d="M3632.0 0.0V126.0H3800.0V574.0H3632.0V700.0H4100.0V574.0H3932.0V126.0H4100.0V0.0H3632.0Z"/><path d="M4546.0 -14.0Q4482.0 -14.0 4430.0 17.5Q4378.0 49.0 4347.0 112.0Q4316.0 175.0 4316.0 268.0V432.0Q4316.0 523.0 4349.5 586.0Q4383.0 649.0 4442.0 681.5Q4501.0 714.0 4578.0 714.0Q4658.0 714.0 4715.0 680.0Q4772.0 646.0 4802.0 588.5Q4832.0 531.0 4832.0 460.0V448.0H4700.0V460.0Q4700.0 523.0 4667.5 555.5Q4635.0 588.0 4576.0 588.0Q4521.0 588.0 4484.5 551.0Q4448.0 514.0 4448.0 422.0V274.0Q4448.0 112.0 4580.0 112.0Q4639.0 112.0 4669.5 144.0Q4700.0 176.0 4700.0 228.0H4532.0V354.0H4832.0V0.0H4712.0V78.0H4694.0Q4682.0 39.0 4648.0 12.5Q4614.0 -14.0 4546.0 -14.0Z"/></g></svg></a>
       <span class="tagline">Durable teams of coding agents.</span>
       <span class="links">
-        <a href="https://openrig.dev" target="_blank" rel="noopener">openrig.dev</a> ·
-        <a href="https://rigs.to" target="_blank" rel="noopener">rigs.to</a>
+        <a href="https://openrig.dev" target="_blank" rel="noopener">openrig.dev</a>
       </span>
     </div>
   </nav>
   <div id="maincol">
   <header id="topbar">
     <div id="appHalf">
+      <button type="button" id="navMenu" aria-label="Open menu" aria-expanded="false" aria-controls="rail"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
       <span class="title" id="topTitle">STUDIO</span>
       <span class="crumb" id="topCrumb"></span>
       <span id="appActions"></span>
     </div>
     <div id="shellHalf">
+      <span id="demoMode" class="crumb" hidden>DEMO · EXAMPLE DATA</span>
       <button id="markupToggle" title="annotate this surface">MARKUP</button>
       <button id="agentToggle" title="the seat roster">AGENTS ▸</button>
     </div>
   </header>
   <div id="shellframes">
-  <main id="stage"><div id="empty">no surfaces in the manifest yet</div>
+  <main id="stage"><div id="empty">Loading your apps…</div>
   </main>
   <aside id="agents">
     <div id="agents-head">
@@ -234,6 +313,7 @@
   </div>
   </div>
 </div>
+<div id="navScrim"></div>
 <script>
 (async () => {
   // ============================================================================
@@ -264,6 +344,8 @@
   // ============================================================================
   const surfaceListeners = new Set();
   const markupListeners = new Set();
+  const refused = new Set();          // open-surface refusals already said once (open a surface at a place)
+  const placed = new Map();           // surface id -> the fragment the shell last put its frame at, so Back can take it off again
   // "My layout moved — re-measure, but do NOT reload." A separate channel from
   // surfaceListeners on purpose: that one means the board CHANGED and reloads
   // records, which resets undo history. A surface whose canvas item moved wants
@@ -277,6 +359,10 @@
   // id -> the iframe showing that surface. Pre-existing shell state that lived
   // beside its first use; it belongs here with the rest for the same reason.
   const frames = new Map();
+  // id -> the surface row a frame was loaded from, so a live app change reloads only the frames whose app changed.
+  const loadedSurfaces = new Map();
+  const workspaceLayouts = new Map();
+  const workspaceRoutes = new Map();
   // surface id -> the sub-context that surface last declared, or absent.
   //
   // WHY THIS EXISTS: a surface id is not always fine enough. ARTIFACTS holds many
@@ -292,10 +378,18 @@
   // without the other, and folding them into one field would force a surface with
   // a nested frame to invent document identities it does not have.
   const declaredTargets = new Map();
+  // Scalars after the collections (test/shell-boot.test.mjs reads the block as the run of collections).
+  // The chat panel, once mounted and contextual (see the chat panel below); null until then and without one.
+  let appChat = null;
+  // A reload for a renewed sign-in is already on its way (see the sign-in renewal below).
+  let renewingSignIn = false;
+  // Which open-app turn a project app's sign-in hop belongs to, so a later click cancels an earlier hop.
+  let projectHop = 0;
 
   // --- contract meta first: the shell itself is a contract consumer -------
   let meta = null;
   try { meta = await (await fetch("/api/contract", { cache: "no-store" })).json(); } catch {}
+  document.getElementById("demoMode").hidden = meta?.runtime?.flavor !== "reference-fixture";
   // The rail states which SDK is actually serving it. Pulled from the runtime's
   // own report rather than written into this page, because a version typed into
   // the thing it describes is the one nobody remembers to change. Unreachable
@@ -306,48 +400,237 @@
     if (el && v) el.textContent = `sdk v${v}`;
   }
   const health = document.getElementById("manifest-health");
+  // BEGIN MANIFEST HEALTH
+  // What the rail says about the manifest, at load and on every live check (the runtime is warn-first: it still serves
+  // the valid rows when one app's row is bad).
+  const showManifest = (m) => {
+    if (!m.ok) {
+      health.className = "bad";
+      health.textContent = `manifest: ${(m.errors || []).length} error(s) — see /api/contract`;
+    } else {
+      health.className = "";
+      health.textContent = (m.warnings || []).length ? `manifest ok · ${m.warnings.length} warning(s)` : "manifest ok";
+    }
+  };
+  // END MANIFEST HEALTH
   if (!meta) { health.className = "bad"; health.textContent = "runtime unreachable"; }
-  else if (!meta.manifest.ok) {
-    health.className = "bad";
-    health.textContent = `manifest: ${meta.manifest.errors.length} error(s) — see /api/contract`;
-  } else if (meta.manifest.warnings.length) {
-    health.textContent = `manifest ok · ${meta.manifest.warnings.length} warning(s)`;
-  } else { health.textContent = "manifest ok"; }
+  else showManifest(meta.manifest);
 
   // --- surfaces from the manifest (valid rows only are served) ------------
-  let reg = { surfaces: [] };
-  try { reg = await (await fetch("/surfaces.json", { cache: "no-store" })).json(); } catch {}
+  // The read says what went wrong rather than swallowing it: the list, an empty list, refused (401/403), another HTTP error,
+  // unreadable (not the expected JSON), or no answer at all (this page can't tell where it failed, so it doesn't guess).
+  let reg = { surfaces: [] }, manifestProblem = null;
+  const healthBefore = { className: health.className, text: health.textContent };
+  health.className = ""; health.textContent = "reading the app list…";
+  try {
+    const r = await fetch("/surfaces.json", { cache: "no-store", credentials: "same-origin" });
+    if (!r.ok) manifestProblem = { kind: r.status === 401 || r.status === 403 ? "refused" : "http", status: r.status };
+    else {
+      const j = await r.json();
+      if (!j || typeof j !== "object" || Array.isArray(j) || !Array.isArray(j.surfaces)) manifestProblem = { kind: "unreadable" };
+      else reg = j;
+    }
+  } catch (e) { manifestProblem = { kind: e instanceof SyntaxError ? "unreadable" : "unanswered" }; }
   // defense in depth: the runtime already serves valid rows only; still never
   // render a row that lacks a target (a path-less row would recurse into "/")
   const surfaces = (reg.surfaces || [])
     .filter((s) => s && s.id && (s.url || (typeof s.path === "string" && s.path.startsWith("/"))))
     .map((s) => s.url ? s : ({ ...s, url: location.origin + s.path }));
+  // Rows dropped above are said, so a part of the list never passes for all of it.
+  const unusable = (reg.surfaces || []).length - surfaces.length;
+  {
+    const words = {
+      refused: ["Your apps couldn't load", "Your sign-in wasn't accepted, or it has ended. Sign in again, then try again."],
+      http: ["Your apps couldn't load", `This workspace answered with an error${manifestProblem?.status ? ` (${manifestProblem.status})` : ""}. Try again in a moment.`],
+      unreadable: ["Your apps couldn't load", "Your app list came back in a form this page can't read. Try again in a moment."],
+      unanswered: ["Your apps couldn't load", "Your workspace didn't answer just now. Try again in a moment."],
+    }[manifestProblem?.kind];
+    // A list whose rows were all unusable is not an empty workspace: it failed, and says so.
+    const allUnusable = !manifestProblem && !surfaces.length && unusable > 0;
+    const [title, line] = words || (allUnusable ? ["Your apps couldn't load", "None of the apps on your list could be shown. Try again in a moment."]
+      : surfaces.length ? [] : ["No apps here yet", "No apps are set up in this workspace yet."]);
+    const failed = Boolean(manifestProblem) || allUnusable;
+    if (manifestProblem) console.warn(`shell: app list ${manifestProblem.kind}${manifestProblem.status ? ` (${manifestProblem.status})` : ""}`);
+    // Drawn at once; /api/studio/place only refines it afterwards. A hosted Studio (one someone else set up) adds who to
+    // ask and, when its place names an account page, a way to sign in again; a local one keeps the error code on the rail
+    // for whoever runs it.
+    const draw = (hosted, accountHref) => {
+      if (title) {
+        const card = document.createElement("div"); card.className = "why"; card.setAttribute("role", failed ? "alert" : "status");
+        const t = document.createElement("strong"); t.textContent = title;
+        const l = document.createElement("span"); l.textContent = line;
+        card.append(t, l);
+        if (hosted && manifestProblem?.kind !== "refused") {
+          const h = document.createElement("span"); h.className = "help";
+          h.textContent = failed ? "If it keeps happening, contact the person who set up your workspace." : "To add apps, contact the person who set up your workspace.";
+          card.append(h);
+        }
+        const acts = document.createElement("div"); acts.className = "acts";
+        if (manifestProblem?.kind === "refused" && typeof accountHref === "string" && /^https:\/\//.test(accountHref)) {
+          const a = document.createElement("a"); a.href = accountHref; a.textContent = "Sign in again"; acts.append(a);
+        }
+        if (failed) { const b = document.createElement("button"); b.type = "button"; b.textContent = "Try again"; b.onclick = () => location.reload(); acts.append(b); }
+        if (acts.children.length) card.append(acts);
+        document.getElementById("empty").replaceChildren(card);
+      }
+      if (manifestProblem) {
+        if (hosted) { health.className = ""; health.textContent = ""; }
+        else { health.className = "bad"; health.textContent = `app list: ${manifestProblem.kind}${manifestProblem.status ? ` (${manifestProblem.status})` : ""}`; }
+      } else if (unusable > 0) {
+        health.className = hosted ? "" : "bad";
+        health.textContent = `${unusable} of ${reg.surfaces.length} ${reg.surfaces.length === 1 ? "app" : "apps"} couldn't be shown`;
+      } else { health.className = healthBefore.className; health.textContent = healthBefore.text; }
+    };
+    draw(false, null);
+    if (failed || title || unusable > 0) {
+      fetch("/api/studio/place", { cache: "no-store", credentials: "same-origin" }).then(async (r) => {
+        // A door that refuses the place too is a hosted Studio's (a local one always answers its own browser).
+        if (r.status === 401 || r.status === 403) return draw(true, null);
+        if (!r.ok) return;
+        const place = await r.json().catch(() => null);
+        if (place?.profile === "hosted") draw(true, place.account ?? null);
+      }).catch(() => {});
+    }
+  }
 
   const tabsEl = document.getElementById("tabs");
   const stage = document.getElementById("stage");
   let activeId = null;
   const byId = (id) => surfaces.find((s) => s.id === id);
 
-  function activate(id, fromNav) {
+  // BEGIN WORKSPACE SURFACE PROTOCOL
+  function setWorkspaceLayout(on) {
+    document.body.classList.toggle("workspace-canvas", on);
+    if (on) {
+      document.querySelector("#chat-panel [data-close]")?.click();
+      if (document.getElementById("agents")?.classList.contains("open")) document.getElementById("agentsWord")?.click();
+    }
+  }
+  function notifyWorkspace() {
+    const frame = frames.get(activeId); if (!frame) return;
+    const url = new URL(location.href);
+    const route = url.searchParams.get("s") === activeId && url.searchParams.has("view") ? url.searchParams.get("view") : workspaceRoutes.get(activeId) || "";
+    frame.contentWindow.postMessage({ t: "workspace-context", id: activeId, route,
+      surfaces: surfaces.map(s => ({id:s.id, name:s.name, glyph:s.glyph || ""})),
+      links: [...document.querySelectorAll("#shellHalf a[href]")].map(a => ({label:a.textContent.trim(),href:a.href})) }, location.origin);
+  }
+  addEventListener("message", e => {
+    const current = frames.get(activeId);
+    if (!current || e.source !== current.contentWindow || e.origin !== location.origin || !e.data || typeof e.data !== "object") return;
+    if (e.data.t === "surface-layout" && ["workspace", "default"].includes(e.data.layout)) {
+      workspaceLayouts.set(activeId,e.data.layout); setWorkspaceLayout(e.data.layout === "workspace"); notifyWorkspace();
+    }
+    if (e.data.t === "workspace-context") notifyWorkspace();
+    if (e.data.t === "surface-route" && typeof e.data.value === "string" && e.data.value.length <= 512) {
+      workspaceRoutes.set(activeId,e.data.value);
+      const url = new URL(location.href); url.searchParams.set("s",activeId);
+      if (e.data.value) url.searchParams.set("view",e.data.value); else url.searchParams.delete("view");
+      history[e.data.replace ? "replaceState" : "pushState"]({...history.state,s:activeId,view:e.data.value},"",url);
+      notifyWorkspace();
+    }
+    if (e.data.t === "open-surface-view" && byId(e.data.id) && typeof e.data.value === "string" && e.data.value.length <= 512) {
+      workspaceRoutes.set(e.data.id,e.data.value);
+      activate(e.data.id);
+    }
+    if (e.data.t === "reload-workspace") location.reload();
+  });
+  document.addEventListener("chat:view", e => {
+    if (document.body.classList.contains("workspace-canvas") && e.target?.id === "chat-panel" && e.detail?.open) e.target.querySelector("[data-close]")?.click();
+  });
+  // END WORKSPACE SURFACE PROTOCOL
+
+
+  // OPEN A SURFACE AT A PLACE: a fragment for the surface's own page (#i=<ask>, #open=<path>), asked for by one of this
+  // Studio's app frames or by the address (/?s=<id>&h=<fragment>). Only '#' then a safe set, at most 1024 characters: never a
+  // URL, a query or markup. Anything else is ignored, and the console says so once per kind of refusal.
+  const PLACE = /^#[A-Za-z0-9%._~!*'()=&-]{0,1023}$/;
+  const placeOf = (h) => (typeof h === "string" && PLACE.test(h) ? h : null);
+  const ignore = (why) => { if (!refused.has(why)) { refused.add(why); console.warn("shell: open-surface ignored: " + why); } };
+  const at = (s, place) => (place ? s.url.split("#")[0] + place : s.url);
+
+  // A PROJECT APP ON ITS OWN ORIGIN signs in at top level once per browser session, before it can load in a frame (its sign-in
+  // can't complete inside one). Only the owner-declared shape uses this hop: https (or loopback http), a different origin, a
+  // path /project-apps/<id>/. The app's own listener sends the person back here (its /_openrig/auth-return).
+  function projectAuth(s) {
+    try {
+      const app = new URL(s.url, location.href), key = `openrig-project-auth-once-v1:${app.origin}:${s.id}`;
+      if (app.origin === location.origin || app.protocol !== "https:" && !(app.protocol === "http:" && ["127.0.0.1", "localhost"].includes(app.hostname)) || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(s.id) || !app.pathname.startsWith(`/project-apps/${s.id}/`)) return null;
+      if (sessionStorage.getItem(key) === "1") return null;
+      return { key, url: new URL("/_openrig/auth-return", app.origin) };
+    } catch { return { blocked: true }; }
+  }
+  function prepareProject(s, auth, turn) {
+    const empty = document.getElementById("empty");
+    empty.style.display = "grid"; empty.textContent = `Opening ${s.name}…`;
+    try {
+      if (turn !== projectHop || activeId !== s.id) return;
+      // Leaving this page must not lose what the person was typing to an agent: a chat panel saves its draft first, and one
+      // that can't say it did stops the hop.
+      if (auth.blocked || appChat && typeof appChat.checkpoint !== "function") throw Error("checkpoint unavailable");
+      if (appChat?.checkpoint()) throw Error("draft not saved");
+      sessionStorage.setItem(auth.key, "1");
+      if (sessionStorage.getItem(auth.key) !== "1") throw Error("navigation bound not saved");
+      auth.url.searchParams.set("studio", location.href);
+      // A terminal page asks "Leave site?" when it unloads; removing its frame doesn't, and Terminal loads again on return.
+      for (const [fid, f] of [...frames]) if (fid !== s.id && holdsTerminal(f)) { f.remove(); frames.delete(fid); placed.delete(fid); loadedSurfaces.delete(fid); }
+      location.assign(auth.url.href);
+    } catch {
+      if (turn !== projectHop || activeId !== s.id) return;
+      empty.textContent = "The app couldn't be opened automatically. Your message is still here; copy it before leaving this page.";
+    }
+  }
+
+  function activate(id, fromNav, place = null, restoring = false) {
     const s = byId(id); if (!s) return;
-    if (!fromNav && activeId !== id) { try { history.pushState({ s: id }, "", "?s=" + encodeURIComponent(id)); } catch {} }
-    if (s.popout) { window.open(s.url, "os-" + s.id); return; }
+    if (!fromNav && (activeId !== id || place)) {
+      try { history.pushState({ s: id, h: place }, "", "?s=" + encodeURIComponent(id) + (place ? "&h=" + encodeURIComponent(place) : "")); } catch {}
+    }
+    if (s.popout) { window.open(at(s, place), "os-" + s.id); return; }
+    // The chat panel follows the app: its conversation closes, and it addresses this app from now on.
+    if (appChat) { try { appChat.close?.(); Promise.resolve(appChat.setApp?.(id)).catch(() => {}); } catch {} }
     activeId = id;
+    if (fromNav) workspaceRoutes.set(id,new URL(location.href).searchParams.get("view") || "");
+    else if (workspaceRoutes.get(id)) {
+      const routeUrl=new URL(location.href); routeUrl.searchParams.set("view",workspaceRoutes.get(id));
+      history.replaceState({...history.state,s:id,view:workspaceRoutes.get(id)},"",routeUrl);
+    }
+    setWorkspaceLayout(workspaceLayouts.get(id) === "workspace");
+    const hop = ++projectHop, auth = projectAuth(s);
     document.getElementById("empty").style.display = "none";
     // unmountOnBlur rows release their frame when backgrounded (terminal-
     // style surfaces must not keep hidden attached clients alive)
     for (const [fid, f] of frames) {
-      if (fid !== id && (byId(fid) || {}).unmountOnBlur) { f.remove(); frames.delete(fid); }
+      if (fid !== id && (byId(fid) || {}).unmountOnBlur) { f.remove(); frames.delete(fid); placed.delete(fid); }
     }
-    if (!frames.has(id)) {
+    if (auth) {
+      for (const f of frames.values()) f.classList.add("hidden");
+      prepareProject(s, auth, hop);
+    } else if (!frames.has(id)) {
       const f = document.createElement("iframe");
-      f.src = s.url; f.title = s.name;
-      stage.appendChild(f); frames.set(id, f);
+      f.src = at(s, place); f.title = s.name;
+      stage.appendChild(f); frames.set(id, f); loadedSurfaces.set(id, s);
+      if (place) placed.set(id, place); else placed.delete(id);
+    } else if (place) {
+      // Same page, new fragment: the surface hears hashchange, without a reload. replace(), not src=, so the frame adds no
+      // history entry of its own and Back undoes the whole move in one step (the shell's pushState above is the only entry).
+      const f = frames.get(id);
+      try { f.contentWindow.location.replace(at(s, place)); } catch { f.src = at(s, place); }
+      placed.set(id, place);
+    } else if (restoring && placed.has(id)) {
+      // Back or Forward to an entry with no place, onto a frame the shell had put at one: take the place off again, so the
+      // address and the page agree. Only the shell's own fragment is undone; a fragment the surface has since set itself is
+      // its own state and stays. "#" keeps it a fragment move (no reload), as above.
+      const f = frames.get(id), was = placed.get(id); placed.delete(id);
+      let now = was; try { now = f.contentWindow.location.hash; } catch {}
+      const bare = s.url.includes("#") ? s.url : s.url + "#";
+      if (now === was) { try { f.contentWindow.location.replace(bare); } catch { f.src = bare; } }
     }
-    for (const [fid, f] of frames) f.classList.toggle("hidden", fid !== id);
+    for (const [fid, f] of frames) f.classList.toggle("hidden", !!auth || fid !== id);
     for (const el of tabsEl.children) el.classList.toggle("active", el.dataset.id === id);
     document.body.classList.toggle("hide-agents", !!s.hideAgents);
     document.title = "openrig studio · " + s.name.toLowerCase();
+    for (const [fid,f] of frames) f.contentWindow.postMessage({t:"surface-active",active:fid===id},location.origin);
+    notifyWorkspace();
     // The header names what you are looking at. It is the shell speaking, not the
     // surface — a surface that drew its own title bar would disagree with the rail
     // the moment either changed.
@@ -391,18 +674,155 @@
   }
   pulse(); setInterval(pulse, 15000);
 
+  // BEGIN SIGN-IN RENEWAL
+  // A sign-in in front of this Studio (server hooks, contract/server-hooks.md) can end while the page is open, and the
+  // page never hears of it: every read is refused or redirected to the sign-in, which a page sees only as a failed
+  // fetch, and every app fails in its own words. So one cheap read of this Studio's own, without following a redirect,
+  // is made now and then and when the tab comes back, and the person gets one answer for the whole page:
+  //   - a 403 that says `x-openrig-front-door: renew` (the sign-in can be renewed without asking the person): the page
+  //     reloads, at most once per 30 s; a renewal refused again inside that window shows the notice instead;
+  //   - a redirect, 401 or 403: one notice over the page, "Your sign-in has ended", with "Sign in again" (a reload);
+  //   - an answer again (signed in from another tab, say): the notice goes; the page underneath was never touched.
+  // A Studio with no sign-in in front answers this read, so it never shows anything.
+  const signInHasEnded = (r) => r.type === "opaqueredirect" || r.status === 401 || r.status === 403;
+  // Whether a frame shows a terminal (ttyd), directly or in a same-origin page of its own. A terminal page asks "Leave
+  // site?" when it unloads, which would hold the reload behind a prompt the person didn't ask for.
+  function holdsTerminal(frame, depth = 0) {
+    try {
+      const p = new URL(frame.src || "about:blank", location.href).pathname;
+      if (["/terminal/", "/team/", "/chat/", "/agents/"].some((x) => p.startsWith(x)) || p === "/surfaces/terminal.html") return true;
+      return depth < 3 && [...(frame.contentDocument?.querySelectorAll("iframe") || [])].some((f) => holdsTerminal(f, depth + 1));
+    } catch { return false; }
+  }
+  function releaseTerminals() {
+    for (const [id, f] of [...frames]) if (holdsTerminal(f)) { f.remove(); frames.delete(id); placed.delete(id); }
+    const seatFrame = document.getElementById("chatframe");
+    if (seatFrame?.getAttribute("src")) {
+      const bare = document.createElement("iframe");
+      bare.id = "chatframe"; bare.title = "agent seat";
+      bare.setAttribute("allow", "clipboard-read; clipboard-write");
+      seatFrame.replaceWith(bare);
+    }
+  }
+  function noticeSignInEnded(on) {
+    const shown = document.getElementById("signInEnded");
+    if (!on) { shown?.remove(); return; }
+    if (shown) return;
+    const veil = document.createElement("div"), card = document.createElement("div"), title = document.createElement("h2"), line = document.createElement("p"), again = document.createElement("button");
+    veil.id = "signInEnded"; card.setAttribute("role", "alertdialog"); card.setAttribute("aria-modal", "true"); card.setAttribute("aria-labelledby", "signInEndedTitle");
+    title.id = "signInEndedTitle"; title.textContent = "Your sign-in has ended";
+    line.textContent = "Sign in again to carry on. Your open apps are kept until you do.";
+    again.type = "button"; again.textContent = "Sign in again"; again.onclick = () => location.reload();
+    card.append(title, line, again); veil.append(card); document.body.append(veil); again.focus();
+  }
+  function renewSignIn(r) {
+    if (r.status !== 403 || r.headers.get("x-openrig-front-door")?.trim().toLowerCase() !== "renew") return false;
+    // A reload is already on its way: nothing more. It is cleared by the next good answer, so renewing never stops for good.
+    if (renewingSignIn) return true;
+    // Navigate once; never replay a request. A short guard across reloads in case the renewed sign-in is refused too.
+    const now = Date.now();
+    let last = 0;
+    try {
+      last = Number(sessionStorage.getItem("openrig.renewAt")) || 0;
+      if (now < last || now - last >= 30000) sessionStorage.setItem("openrig.renewAt", String(now));
+    } catch { noticeSignInEnded(true); return true; }
+    if (now >= last && now - last < 30000) noticeSignInEnded(true);
+    else { releaseTerminals(); renewingSignIn = true; location.reload(); }
+    return true;
+  }
+  async function checkSignIn() {
+    let r;
+    try {
+      r = await fetch("/api/studio/place", { method: "HEAD", cache: "no-store", credentials: "same-origin", redirect: "manual", signal: AbortSignal.timeout(4000) });
+    } catch { return; }   // no answer at all says nothing about the sign-in
+    if (renewSignIn(r)) return;
+    if (signInHasEnded(r)) { noticeSignInEnded(true); return; }
+    if (r.ok) { noticeSignInEnded(false); renewingSignIn = false; }
+  }
+  // END SIGN-IN RENEWAL
+  setInterval(checkSignIn, 15000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void checkSignIn(); });
+
+  // BEGIN LIVE APP DISCOVERY
+  // Apps installed, updated or removed while this page is open (the Studio activates them live; contract/manifest.md)
+  // reach the rail within a couple of seconds, without a reload. Only an app whose row changed (its address or its
+  // revision) gets a new document; every other open app keeps its frame, scroll and unsaved input. A read that fails
+  // keeps the last app list, and says so only once it has failed three times running.
+  let discovering = false, discoveryMisses = 0;
+  async function discoverApps() {
+    if (discovering) return;
+    discovering = true;
+    try {
+      const response = await fetch("/api/contract", { cache: "no-store", credentials: "same-origin", redirect: "manual", signal: AbortSignal.timeout(4000) });
+      if (renewSignIn(response)) return;
+      if (signInHasEnded(response)) { noticeSignInEnded(true); return; }
+      if (!response.ok) throw new Error("The workspace app list could not be checked.");
+      const nextMeta = await response.json();
+      if (!nextMeta.manifest || typeof nextMeta.manifest !== "object") throw new Error("The updated app list could not be read. Your open apps were kept.");
+      const registry = await fetch("/surfaces.json", { cache: "no-store", credentials: "same-origin", redirect: "manual", signal: AbortSignal.timeout(4000) });
+      if (renewSignIn(registry)) return;
+      if (signInHasEnded(registry)) { noticeSignInEnded(true); return; }
+      if (!registry.ok) throw new Error("The workspace app list could not be checked.");
+      const next = await registry.json();
+      if (!Array.isArray(next.surfaces)) throw new Error("The updated app list could not be read.");
+      const rows = next.surfaces.filter((s) => s && s.id && (s.url || (typeof s.path === "string" && s.path.startsWith("/"))))
+        .map((s) => s.url ? s : ({ ...s, url: location.origin + s.path }));
+      if (rows.length !== next.surfaces.length) throw new Error("The updated app list is incomplete. Your open apps were kept.");
+      noticeSignInEnded(false); renewingSignIn = false; discoveryMisses = 0;
+      // A new runtime boot can change the contract with no app changed: then every frame is kept.
+      meta = nextMeta;
+      if (JSON.stringify(rows) !== JSON.stringify(surfaces)) {
+        for (const row of rows) {
+          const old = loadedSurfaces.get(row.id), frame = frames.get(row.id);
+          if (old && frame && (old.url !== row.url || old.revision !== row.revision)) {
+            const target = new URL(row.url); target.searchParams.set("studio_revision", row.revision || "changed");
+            frame.src = target.href; frame.title = row.name;
+            loadedSurfaces.set(row.id, row);
+          }
+        }
+        surfaces.splice(0, surfaces.length, ...rows);
+        reg = next; renderTabs(); notifyWorkspace();
+      }
+      // A bad app.json no longer stops discovery: the valid rows still update, and the rail says what the load says.
+      if (activeId && !byId(activeId)) {
+        health.className = "bad";
+        health.textContent = "This app was removed. Its open view was kept; choose another app to continue.";
+      } else showManifest(nextMeta.manifest);
+    } catch (error) {
+      if (++discoveryMisses < 3) return;
+      health.className = "bad";
+      health.textContent = error?.constructor === Error ? error.message : "Your workspace isn't answering right now. Your open apps were kept.";
+    } finally { discovering = false; }
+  }
+  setInterval(discoverApps, 2000);
+  // END LIVE APP DISCOVERY
+
   // deep link
-  const qs = new URLSearchParams(location.search).get("s");
-  if (byId(qs)) activate(qs, true); else if (surfaces[0]) activate(surfaces[0].id, true);
+  const params = new URLSearchParams(location.search), qs = params.get("s"), qh = params.get("h");
+  if (qh !== null && !placeOf(qh)) ignore("the address's h= isn't a safe fragment");
+  if (byId(qs)) activate(qs, true, placeOf(qh));
+  else { if (qs) ignore("the address names no surface on this Studio"); if (surfaces[0]) activate(surfaces[0].id, true); }
   addEventListener("popstate", (e) => {
-    const id = (e.state && e.state.s) || new URLSearchParams(location.search).get("s");
-    if (id && byId(id)) activate(id, true);
+    const p = new URLSearchParams(location.search);
+    const id = (e.state && e.state.s) || p.get("s"), h = e.state ? e.state.h : p.get("h");
+    if (id && byId(id)) activate(id, true, placeOf(h), true);
   });
 
   // --- the shell protocol: the ONLY surface->shell API --------------------
   addEventListener("message", (e) => {
+    // A surface on another origin (a generated app on its own listener, say) can't borrow this
+    // page's controls: they act as the signed-in person on this Studio.
+    if (e.origin !== location.origin) return;
     if (!e.data || typeof e.data !== "object") return;
-    if (e.data.t === "open-surface" && byId(e.data.id)) activate(e.data.id);
+    // Only this Studio's own app frames may switch its surface, with a place or without: a stray frame could otherwise move
+    // the person to another surface.
+    if (e.data.t === "open-surface") {
+      if (![...frames.values()].some((f) => f.contentWindow === e.source)) ignore("only this Studio's own app frames may open a surface");
+      else if (!byId(e.data.id)) ignore("not a surface on this Studio");
+      else if (e.data.hash === undefined) activate(e.data.id);
+      else if (!placeOf(e.data.hash)) ignore("the place isn't a safe fragment ('#' then letters, digits and %._~!*'()=&-, at most 1024)");
+      else activate(e.data.id, false, e.data.hash);
+    }
     if (e.data.t === "open-agent") openAgents(e.data.seat);
     // A surface may ASK for markup, exactly as it may already summon the agent
     // sidebar. Both are studio-level controls the shell owns and the surface has a
@@ -421,8 +841,7 @@
       // CHEAP AND EXPLICIT. DOM motion inside a surface is invisible from out
       // here: an element that MOVES changes neither the frame's size nor its
       // scroll, so nothing fires and anchored marks sit at the old geometry until
-      // something unrelated forces a repaint. Measured by studio-qa: a canvas item
-      // moved (220,170) -> (760,430) and the mark only snapped on a window resize.
+      // something unrelated forces a repaint (a window resize, for example).
       //
       // This does not reload the board and does not touch undo history. Re-posting
       // annotation-target with the SAME frame id stays a no-op deliberately —
@@ -509,6 +928,7 @@
   });
 
   // --- agent sidebar: a real seat's session in a frame -------------------
+  // BEGIN AGENT SIDEBAR
   // The multiplayer surface — a human and the agents that wrote the app, on the
   // same screen — is the point of this SDK, so it lives here in the shell
   // rather than inside any one app's provider.
@@ -521,6 +941,10 @@
   const agentsBody = document.getElementById("agents-body");
   const seats = (reg.chatSeats || []).filter((s) => s && s.seat);
   const termPort = reg.chatLocalPort;
+  // Where the roster came from, when the launcher says (chatSeatsFrom): "rig" (read from the rig), "declared" (this
+  // Studio's own chatSeats) or "none" (no rig and no roster). Absent, the roster was written by hand into the
+  // manifest the runtime serves, which is a declaration too.
+  const seatsFrom = reg.chatSeatsFrom || "declared";
   // The seat name IS the argument — a terminal is addressed by which seat it
   // is attached to, not by a separate id to keep in sync.
   //
@@ -559,6 +983,12 @@
     rigs.sort((a, b) => (a === primary ? -1 : b === primary ? 1 : 0));
   }
   let chatRig = rigOf(seat) || rigs[0];
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  // The roster's own words: how many, and from where.
+  const rosterLine = () =>
+    seatsFrom === "rig"
+      ? `${seats.length} seat(s) from rig ${rigs.join(", ")}`
+      : `${seats.length} seat(s) declared by this Studio`;
 
   function renderTiles() {
     const sel = document.getElementById("chatRigSel");
@@ -574,17 +1004,21 @@
       // out every seat a consumer declared by hand, which would make the honest
       // path the broken-looking one.
       const running = s.status === undefined || s.status === "running";
-      b.className = "seatTile" + (s.seat === seat ? " active" : "") + (running ? "" : " down");
+      // With no terminal endpoint every member is still listed, marked not attachable, rather than hidden.
+      const live = running && attachable;
+      b.className = "seatTile" + (live && s.seat === seat ? " active" : "") + (live ? "" : " down");
       b.dataset.seat = s.seat;
       b.textContent = s.name || s.seat.split("@")[0];
-      if (!running) {
+      if (!live) {
         const st = document.createElement("span");
-        st.className = "st"; st.textContent = s.status;
+        st.className = "st"; st.textContent = running ? "not attachable" : s.status;
         b.appendChild(st);
       }
-      b.title = running ? s.seat : `${s.seat} — ${s.status}, so there is no session to attach to`;
-      b.disabled = !running;
-      if (running) {
+      b.title = !running
+        ? `${s.seat} — ${s.status}, so there is no session to attach to`
+        : live ? s.seat : `${s.seat} — no terminal endpoint here, so it can't be attached`;
+      b.disabled = !live;
+      if (live) {
         b.onclick = () => { seat = s.seat; try { localStorage.setItem("shell.chatSeat", seat); } catch {} ; sync(); };
       }
       tiles.appendChild(b);
@@ -618,15 +1052,17 @@
   function openAgents(want) {
     if (want && seats.some((s) => s.seat === want)) { seat = want; chatRig = rigOf(want) || chatRig; }
     if (!seats.length) {
-      agentsBody.innerHTML = `<div>no seat roster declared</div>`
-        + `<div class="honest">a consumer declares seats as <code>chatSeats</code> in its own surfaces manifest. None is declared here, so there is nothing to attach to.</div>`;
+      agentsBody.innerHTML = seatsFrom === "none"
+        ? `<div>no agents</div><div class="honest">No rig is attached to this Studio and it declares no roster. The Studio's startup log says why there is no rig.</div>`
+        : `<div>no agents</div><div class="honest">This Studio declares an empty roster (<code>chatSeats</code>), so it shows no agents.</div>`;
     } else if (!attachable) {
       // Say what is observable and stop there. From here the missing endpoint
       // is all that is visible; whether the terminal binary is absent or simply
       // unconfigured is known at startup, not in the browser. Naming one of
       // them would send someone to fix the wrong thing.
-      agentsBody.innerHTML = `<div>${seats.length} seat(s) declared, no terminal endpoint</div>`
-        + `<div class="honest">the roster is real, so this is not an empty rig — but no terminal endpoint was advertised, so these seats cannot be attached. The studio's startup log says why: either the terminal binary is not installed on this box, or none was configured.</div>`;
+      agentsBody.innerHTML = `<div>${esc(rosterLine())}, not attachable</div>`
+        + `<div class="honest">No terminal endpoint is served here, so these seats can't be attached. The Studio's startup log says why: ttyd isn't installed on this box, or no terminal was configured.</div>`;
+      renderTiles(); sync();
     } else {
       agentsBody.innerHTML = "";
       renderTiles(); sync();
@@ -635,6 +1071,7 @@
     document.getElementById("agentToggle").style.display = "none";
   }
   document.getElementById("agentToggle").onclick = () => openAgents();
+  // END AGENT SIDEBAR
 
   // --- the two shell frames -------------------------------------------------
   // COLLAPSE IS REMEMBERED. A layout choice that resets on every reload is one
@@ -653,8 +1090,29 @@
     railBtn.setAttribute("aria-label", railBtn.title);
     try { sessionStorage.setItem("shell.rail", collapsed ? "1" : "0"); } catch {}
   };
-  setRail((() => { try { return sessionStorage.getItem("shell.rail") === "1"; } catch { return false; } })());
+  const phoneRail = window.matchMedia?.("(max-width: 700px)");
+  setRail(phoneRail?.matches || (() => { try { return sessionStorage.getItem("shell.rail") === "1"; } catch { return false; } })());
+  phoneRail?.addEventListener("change", e => { if (e.matches) setRail(true); });
   railBtn.onclick = () => setRail(!document.body.classList.contains("rail-collapsed"));
+
+  // The phone drawer (the CSS above says when it applies). Opening moves focus to the open surface's item; closing brings it
+  // back to the menu button when it was inside, so focus is never left on a hidden control. Choosing a surface closes it.
+  const navMenu = document.getElementById("navMenu"), railEl = document.getElementById("rail");
+  const drawer = (open) => {
+    // The drawer is always the full rail; closed, a narrow screen's rail is the toolstrip again.
+    if (open) document.body.classList.remove("rail-collapsed");
+    else if (phoneRail?.matches) document.body.classList.add("rail-collapsed");
+    const inside = railEl.contains(document.activeElement);
+    document.body.classList.toggle("navDrawer", open);
+    navMenu.setAttribute("aria-expanded", String(open));
+    navMenu.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    if (open) (tabsEl.querySelector(".tab.active") || tabsEl.querySelector(".tab:not([disabled])"))?.focus();
+    else if (inside) navMenu.focus();
+  };
+  navMenu.onclick = () => drawer(!document.body.classList.contains("navDrawer"));
+  document.getElementById("navScrim").onclick = () => drawer(false);
+  addEventListener("keydown", (e) => { if (e.key === "Escape" && document.body.classList.contains("navDrawer")) drawer(false); });
+  tabsEl.addEventListener("click", (e) => { if (e.target.closest(".tab")?.dataset.id) drawer(false); });
 
   // MARKUP is the shell asking the SURFACE to annotate. The shell does not draw
   // the annotations — it does not know what they would attach to — so this is
@@ -669,7 +1127,10 @@
   let markupOn = false;
   const tellSurface = (msg) => {
     const f = frames.get(activeId);
-    if (f && f.contentWindow) { try { f.contentWindow.postMessage(msg, "*"); } catch {} }
+    // Only to a surface on this Studio's own origin: another origin gets no control messages.
+    if (f && f.contentWindow) { try {
+      if (new URL(f.src, location.href).origin === location.origin) f.contentWindow.postMessage(msg, location.origin);
+    } catch {} }
   };
   // ONE PATH for the click and the message. Two places flipping this state is two
   // places computing one property, and the second one always forgets a listener.
@@ -881,6 +1342,43 @@
       frame.replaceWith(bare);
     }
   };
+
+  // BEGIN CHAT PANEL
+  // The chat panel comes from a provider that serves /collab-assets/ (an app's provider declares it). The shell imports
+  // it unless the page says nothing here serves it (a meta named openrig-chat-panel with the content none, which a
+  // server hook's shell transform adds when no provider does; never written in this file, so finding the tag in a page
+  // always means a transform put it there): then it isn't asked for, and with no seats either the agents
+  // button is left out, since it would open an empty roster. A panel that's served but fails to load keeps the button
+  // and its roster. A contextual panel becomes this shell's Agent: the button opens it, it follows the active app, and
+  // it can open another app.
+  const CHAT_PANEL = "/collab-assets/chat-panel/panel.js";
+  const chatPanelOff = () => !!document.querySelector('meta[name="openrig-chat-panel"][content="none"]');
+  async function mountChatPanel(load) {
+    if (chatPanelOff()) { if (!seats.length) document.body.classList.add("no-agent-route"); return null; }
+    let mod;
+    try { mod = await load(CHAT_PANEL); } catch { return null; }
+    if (typeof mod?.mount !== "function") return null;
+    const panel = mod.mount({ app: activeId || surfaces[0]?.id, root: stage, initialOpen: false, workspace: true, surfaces });
+    await panel.ready;
+    if (!panel.roster?.()?.contextual) return panel;
+    appChat = panel;
+    document.body.classList.add("workspace-chat");
+    const toggle = document.getElementById("agentToggle");
+    toggle.textContent = "Agent"; toggle.title = "Chat or terminal with this app's agent";
+    toggle.onclick = () => panel.open();
+    stage.addEventListener("chat:surface", (e) => { if (e.target.id === "chat-panel" && byId(e.detail?.id)) activate(e.detail.id); });
+    const paintChatView = (open) => {
+      document.getElementById("topTitle").textContent = open ? "Conversation" : byId(activeId)?.name || "Studio";
+      toggle.classList.toggle("on", open);
+      for (const tab of tabsEl.children) tab.classList.toggle("active", !open && tab.dataset.id === activeId);
+    };
+    stage.addEventListener("chat:view", (e) => { if (e.target.id === "chat-panel") paintChatView(e.detail?.open); });
+    // ready may have restored the conversation before the listener existed; paint that view too.
+    paintChatView(document.body.classList.contains("chat-workspace-visible"));
+    return panel;
+  }
+  // END CHAT PANEL
+  mountChatPanel((u) => import(u)).catch(() => {});
 })();
 </script>
 </body>

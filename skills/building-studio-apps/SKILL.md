@@ -34,11 +34,37 @@ Consequence worth internalising: a heavy app just runs your service, adds a row,
 
 ## The three steps
 
-1. **Install it** however that kind of software normally installs — git clone, npm, docker.
-   The SDK has no opinion and no installer.
+1. **Install it.** A heavy app installs however that kind of software normally installs
+   (git clone, npm, docker). An app with an `app.json` installs with the SDK's installer,
+   `tools/install-app.mjs`, which refuses a manifest that cannot describe a working install
+   and says which fact is missing.
 2. **Register a row** so it appears on the rail. → `app-manifest.md`
 3. **Make it work**, which is a different claim from step 2 and is where the time goes.
    → `providers-and-roots.md`, `failure-modes.md`
+
+## Adding an app to a studio someone is already using
+
+Most requests for a small app land on a studio that `tools/studio-release.mjs` installed (a
+`.studio-release/` folder sits beside `studio.json`). There, `appsRoot` is generated vendor
+code: **never write your app into it.** It would read as vendor drift and the next upgrade
+would drop it. Your own apps live in `extensions/`, which upgrades keep.
+
+```sh
+OPENRIG_STUDIO_DIR=<studio> node <sdk>/tools/install-app.mjs <app-dir> [--provider <provider-dir>] --enable
+OPENRIG_STUDIO_DIR=<studio> node <sdk>/tools/install-app.mjs <app-dir> --force    # a later change to the same app
+node <sdk>/tools/studio-release.mjs inspect --workspace <studio>                  # extensions.mounted / .pending / .activation
+```
+
+The installer validates, copies the app (and its own provider) into `extensions/apps|providers`,
+links it into the current code, and enables it. **It REGISTERS the app; it does not make it
+active.** The running studio loads it on restart, or when a runtime that watches
+`.studio-release/extensions.json` reports `extensions.activation.state: "active"` for the
+current marker. Until then, tell the person it is registered, not ready.
+
+**Done means by effect, on the app AND its provider:** the tab opens and draws, each declared
+`/api/` verb answers through the studio's own origin (not the provider's port), and byte routes
+stream. A sidebar row alone proves registration, nothing more. Report progress and the result on
+the request the person made; this needs no separate task type or mode.
 
 ## The three agent primitives
 

@@ -20,7 +20,9 @@ import { fileURLToPath } from "node:url";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DOC = fs.readFileSync(path.join(REPO, "contract", "app-manifest.md"), "utf8");
-const SCHEMA = JSON.parse(fs.readFileSync(path.join(REPO, "contract", "app-manifest.schema.json"), "utf8"));
+const SCHEMA = JSON.parse(
+  fs.readFileSync(path.join(REPO, "contract", "app-manifest.schema.json"), "utf8"),
+);
 
 const STABILITY = new Set(["stable", "provisional", "runtime-internal"]);
 
@@ -37,7 +39,10 @@ function marked(node, out = []) {
 
 test("every schema property carries a VALID stability mark", () => {
   for (const [name, mark] of marked(SCHEMA)) {
-    assert.ok(STABILITY.has(mark), `${name} has x-stability "${mark}", which is not a class contract-meta defines`);
+    assert.ok(
+      STABILITY.has(mark),
+      `${name} has x-stability "${mark}", which is not a class contract-meta defines`,
+    );
   }
 });
 
@@ -46,15 +51,19 @@ test("every top-level schema property is documented in app-manifest.md", () => {
   // a rule nobody can follow — which is the precise failure this whole document
   // was written after.
   for (const name of Object.keys(SCHEMA.properties)) {
-    assert.ok(DOC.includes(`\`${name}\``) || DOC.includes(`\`${name}.`) || DOC.includes(`"${name}"`),
-      `schema declares "${name}" but app-manifest.md never mentions it`);
+    assert.ok(
+      DOC.includes(`\`${name}\``) || DOC.includes(`\`${name}.`) || DOC.includes(`"${name}"`),
+      `schema declares "${name}" but app-manifest.md never mentions it`,
+    );
   }
 });
 
 test("the doc's required fields and the schema's required fields agree", () => {
   for (const name of SCHEMA.required) {
-    assert.ok(Object.keys(SCHEMA.properties).includes(name),
-      `schema requires "${name}" but does not define it`);
+    assert.ok(
+      Object.keys(SCHEMA.properties).includes(name),
+      `schema requires "${name}" but does not define it`,
+    );
   }
 });
 
@@ -64,8 +73,11 @@ test("the legacy field is marked deprecated in BOTH, or in neither", () => {
   // answer depending on which one they happened to read.
   const schemaDeprecated = SCHEMA.properties.verbs?.deprecated === true;
   const docSaysLegacy = /`verbs`/.test(DOC) && /LEGACY|legacy/.test(DOC);
-  assert.equal(schemaDeprecated, docSaysLegacy,
-    "schema and prose disagree about whether `verbs` is legacy");
+  assert.equal(
+    schemaDeprecated,
+    docSaysLegacy,
+    "schema and prose disagree about whether `verbs` is legacy",
+  );
 });
 
 test("the conformance section names what is NOT implemented", () => {
@@ -73,9 +85,12 @@ test("the conformance section names what is NOT implemented", () => {
   // and a conformance table that quietly loses its "not yet" rows would restore
   // exactly the overstatement the contract was corrected for.
   assert.match(DOC, /## Conformance/, "the conformance section was removed");
-  assert.match(DOC, /not yet/i,
+  assert.match(
+    DOC,
+    /not yet/i,
     "the conformance table no longer admits anything is unimplemented — if that is genuinely true, " +
-    "delete this assertion deliberately rather than letting it pass by accident");
+      "delete this assertion deliberately rather than letting it pass by accident",
+  );
 });
 
 test("positive control: this suite is capable of failing", () => {

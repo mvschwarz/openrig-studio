@@ -33,10 +33,20 @@ const own = (args) => args.map((a) => (typeof a === "function" ? ownCallback(a) 
 
 export function makeResFacade(res) {
   const facade = {
-    writeHead(...args) { res.writeHead(...own(args)); return facade; },
-    setHeader(...args) { res.setHeader(...own(args)); return facade; },
-    write(...args) { return res.write(...own(args)); },
-    end(...args) { res.end(...own(args)); },
+    writeHead(...args) {
+      res.writeHead(...own(args));
+      return facade;
+    },
+    setHeader(...args) {
+      res.setHeader(...own(args));
+      return facade;
+    },
+    write(...args) {
+      return res.write(...own(args));
+    },
+    end(...args) {
+      res.end(...own(args));
+    },
     // Stream a handler-supplied source to the client WITHOUT handing the source
     // the response. The facade iterates the source (which yields chunks TO the
     // facade) and writes each chunk to `res` — `res` never crosses to the

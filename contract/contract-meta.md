@@ -35,7 +35,9 @@ looking at needs `focus.md`.
 | `manifest.md` | The surface manifest: how a surface registers |
 | `shell-protocol.md` | The shell runtime: lifecycle, URL rules, the postMessage API |
 | `runtime-api.md` | The HTTP verb set: routes, shapes, failure semantics |
+| `release.md` | Component artifacts, installation, preservation and upgrade state |
 | `app-manifest.md` | Installing an app: `app.json`, `provider.json`, `studio.json` |
+| `server-hooks.md` | Who may use a Studio: the loopback default and the admission, shell, place and child hooks; project apps on their own listener |
 | `change-signal.md` | Markers, DATA-vs-CODE refresh, and state that survives a reload |
 | `focus.md` | What the user is looking at, and how an agent reads it |
 | `drive.md` | How an agent operates a surface the user already has open |
@@ -181,13 +183,13 @@ Additive fields and new routes are non-breaking. Breaking changes move
 
 ### Changelog
 
-- **2026-08-08 — drive per-surface delivery (BREAKING).** `POST /api/drive` now
+- **Drive per-surface delivery (BREAKING).** `POST /api/drive` now
   requires a `surface` field and refuses an unaddressed op with `400`; `GET
   /api/drive` requires `?surface=<id>`. Previously one global channel delivered
   every op to every polling surface, including `play`/`export`/`delete` side
   effects on backgrounded-but-alive surfaces. Additive in the same revision (not
   breaking): the `surface` and `appliedGen` response fields, and the settle-ack
-  `?applied=` poll parameter. See `drive.md` (redline pending PM review).
+  `?applied=` poll parameter. See `drive.md`.
 
 ## How a surface should decide compatibility
 

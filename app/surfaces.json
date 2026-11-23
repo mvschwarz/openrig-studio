@@ -3,7 +3,7 @@
   "surfaces": [
     {
       "id": "floor",
-      "name": "FLOOR",
+      "name": "Floor",
       "glyph": "●",
       "path": "/surfaces/floor.html",
       "hint": "Live rig-floor seats and queue activity"

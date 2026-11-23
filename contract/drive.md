@@ -18,10 +18,7 @@ application built on this SDK, and it is the reason that application can be
 watched rather than merely instructed. What was missing is the SDK offering it, so
 that two applications do not invent two incompatible versions of the same thing.
 
-> **✅ REVISION 2026-08-08 (per-surface delivery + settle-ack). ENDORSED by
-> pm-studiobox (lane owner) from the actual diff — including the unaddressed-`GET`
-> `400`, and the settle-ack accepted as advisory/exposed `appliedGen`, the
-> divergence from the pre-build position taken as the better mechanism.** Sections
+> **Revision: per-surface delivery and a settle-ack.** Sections
 > marked **(stable — REVISED)** below change a previously-stable contract, and one
 > change is **BREAKING** (an unaddressed `POST`/`GET` is refused). Reason: one
 > global channel delivered every op to every kept-alive surface — including
@@ -173,6 +170,26 @@ surface driven by something other than the verb; `applied` reads the highest
 generation whose `apply` has resolved, `accepted` the highest offered; `stop()`
 ends the polling.
 
+**Awaiting settle: `whenSettled`, the one primitive.** A surface that gates its
+own writes on the settle contract (capture this selection, approve this item,
+write feedback) awaits `whenSettled({ timeoutMs })`, which resolves
+`{ settled: true, applied }` only once every outstanding generation's `apply()`
+has **resolved** — and `{ settled: false, latest, applied }` at the timeout,
+naming the gap. "Settled" is the harder half, and the primitive refuses both
+easier halves: an op **recorded** at the runtime that this surface's poll has
+not yet fetched (the drive + immediate-write window — each round consults the
+runtime, so silence between polls cannot read as settled), and an op
+**accepted** whose application is still in flight or queued. A generation
+baselined away at load counts as the settle floor — deliberately declined is
+not pending, so a page booting under an old op does not wait out every timeout.
+
+Do not hand-roll this comparison from `applied`/`accepted` or a parallel
+counter in the surface. A surface that advanced its own counter at acceptance
+reported `{settled: true}` while its state still showed the previous item —
+the state arrived seconds later, and a caller honoring the contract wrote
+against the wrong item. The watermarks are exposed for observability; *settled*
+is `whenSettled`'s question, answered in exactly one place.
+
 **Narrate the change.** An op may carry a line of text the surface shows where it
 normally talks to the user. A watcher then sees a narrated change rather than
 controls twitching on their screen, which is the difference between a tool that
@@ -196,6 +213,7 @@ feels driven and one that feels haunted.
 | **per-surface delivery: `{ surface, ...intent }` on `POST`, `?surface=` on `GET`; an op reaches only its addressed surface** | **yes** (REVISED), with a control that drives A while B and C are kept alive and asserts `delete`/`export`/`play` never fire on B or C |
 | **an unaddressed `POST` or `GET` refused `400`** (BREAKING) | **yes** (REVISED), with a control |
 | **settle-ack: `POST` returns on RECORD; `appliedGen` advances only when `apply` resolves; the record-to-apply gap is observable** | **yes** (REVISED), with a control asserting `appliedGen < gen` during a blocked application and catch-up after |
+| **surface-side settle: `whenSettled` resolves only on APPLIED — refusing recorded-but-undelivered and accepted-but-unresolved; baselined-away is the floor** | **yes**, with the door-test control (slow apply: an early bounded call refuses, the full await lands on the target item) |
 | the namespace advertised at `GET /api/contract` -> `capabilities` (`drive.read`, `drive.write`) | **yes** |
 | the change-signal `?since=` shape on the read | **yes** |
 | `driveSurface` dropping superseded ops | **yes**, with a control that plants a queue and fails |

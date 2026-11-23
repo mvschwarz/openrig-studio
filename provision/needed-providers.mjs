@@ -6,8 +6,7 @@
 // WHY THIS EXISTS: provisioning installed dependencies for every provider on
 // disk regardless of which apps were enabled, so a provider nobody asked for
 // could stop the whole install. A box asking for four apps should not be
-// stopped by the eleventh provider. Found by cloud-impl on a real VPS, where
-// exactly that happened.
+// stopped by the eleventh provider.
 //
 // WHY IT IS NODE AND NOT SHELL: this walks JSON and emits a set. Structured data
 // does not round-trip through the shell's word list, and the caller reads the
@@ -33,13 +32,19 @@ if (!appsRoot || !apps.length) {
 }
 
 const readJson = (p) => {
-  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
 };
 const dirOf = (pkg) => (typeof pkg === "string" && pkg ? path.basename(pkg) : null);
 
 const providersDir = path.join(appsRoot, "providers");
 const onDisk = fs.existsSync(providersDir)
-  ? fs.readdirSync(providersDir).filter((d) => fs.statSync(path.join(providersDir, d)).isDirectory())
+  ? fs
+      .readdirSync(providersDir)
+      .filter((d) => fs.statSync(path.join(providersDir, d)).isDirectory())
   : [];
 
 // verb -> provider directory, read from each provider's own declaration. The
@@ -62,8 +67,9 @@ for (const app of apps) {
     if (!spec?.required) continue;
     // A verb ending in `/` is a prefix match (app-manifest.md), so an exact
     // lookup alone would miss `/api/export-status/<id>`-shaped declarations.
-    const who = answers.get(verb)
-      ?? [...answers.entries()].find(([v]) => v.endsWith("/") && verb.startsWith(v))?.[1];
+    const who =
+      answers.get(verb) ??
+      [...answers.entries()].find(([v]) => v.endsWith("/") && verb.startsWith(v))?.[1];
     if (who) needed.add(who);
   }
 }

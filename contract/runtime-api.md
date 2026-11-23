@@ -110,27 +110,36 @@ by this contract (declared here, field-by-field), not by any backing system.
   the nearest minute, or `null` when no activity timestamp is known. It
   measures quietness, not uptime: a `working` seat can have a nonzero age.
 - Degraded shape: `{ "ok": false, "degraded": "<why>", "rig": null, "seats": [], "queue": [] }`.
-- `done` (optional, provisional): finished work, so work handed to a seat stays findable after it closes. Absent means the
-  generator doesn't send finished work; `rows: []` means none has finished. `queue` stays open work only.
 
-```json
-"done": {
-  "rows": [
-    { "id": "<item id>", "state": "done", "title": "<one line>",
-      "source": "<session>", "destination": "<session>", "closedAt": "<ISO timestamp>",
-      "decision": { "reason": "<closure reason> | null", "target": "<closure target> | null" },
-      "result": "<the note the item was closed with> | null", "resultRead": true,
-      "resolution": "<string> | null", "artifact": "<evidence reference> | null",
-      "handedOffTo": "<item id> | null", "handedOffFrom": "<item id> | null" }
-  ],
-  "coverage": { "looked": 100, "ours": 12, "shown": 10, "limit": 100 }
-}
-```
+**Optional fields** a state generator may send. The runtime passes each through
+in its declared shape; when a generator doesn't send one, it is absent, never
+an empty stand-in.
 
-  A field the item doesn't carry is `null`, never invented. `resultRead: false` means the result couldn't be read (not that
-  there is none). `coverage` says how much was looked at; `{ "unreadable": "<why>" }` there means finished work couldn't be read.
-  The runtime carries `done` through only in this shape: a `done` that is sent but isn't in it (rows not a list, a row without a
-  string `id`) arrives as `{ "rows": [], "coverage": { "unreadable": "<why>" } }`, never as none, and the open work is kept. Its text is shown as written: this runtime has no private display mode.
+- `seats[].customer: true` marks the box's own person: their entry, not an
+  agent. The Floor doesn't list it among the seats or count it, and keeps it
+  for telling which work is this rig's. Seats whose member is `caller-<id>`
+  (a connected assistant's callers) are treated the same way.
+- `done`: this rig's newest finished work.
+
+  ```json
+  { "rows": [ { "id": "<item id>", "title": "<one line>", "source": "<session>",
+                "destination": "<session>", "closedAt": "<ISO timestamp>",
+                "decision": { "reason": "<closure reason>", "target": "<session or id>" },
+                "resolution": "<the stored outcome>", "result": "<the closing note>",
+                "resultRead": true, "artifact": "<path or URL>" } ],
+    "coverage": { "looked": 50 } }
+  ```
+
+  Every row needs a string `id`; the other fields may be missing, and the
+  Floor says "not recorded" for them. `resultRead: false` says the closing note
+  couldn't be read. `coverage.looked` is how many finished items the generator
+  looked through. A `done` that isn't in this shape is passed on as
+  `{ "rows": [], "coverage": { "unreadable": "<why>" } }`, so it reads as
+  unreadable, never as "nothing finished". With `done`, the Floor shows work
+  ids, finished work and a find-by-id box.
+- `introductions`: rows in the queue item shape (each with a string `id`) that
+  a deployment's own pages may read. The Floor doesn't draw them. Sent in any
+  other shape, they are left out.
 
 ## stream
 
@@ -267,7 +276,7 @@ If your surface needs one of these, it needs a contract version that includes
 it — not a workaround.
 
 **Credential flows are the exception to that sentence: they are not waiting on a
-gate, they are OUT OF SCOPE FOR THIS SDK.** Ruled 2026-08-04. The test is
+gate, they are OUT OF SCOPE FOR THIS SDK.** The test is
 audience: using this SDK already implies you can sign in to your own tools, so a
 subscription-login flow serves a different audience than the one holding this
 contract, and it belongs to the product that has that audience rather than here.

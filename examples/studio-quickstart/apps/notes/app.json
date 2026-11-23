@@ -1,0 +1,19 @@
+{
+  "manifest_version": 1,
+  "id": "notes",
+  "name": "NOTES",
+  "summary": "Read the Markdown notes in one folder. A minimal example app: one page, one provider, one bound folder.",
+  "category": "example",
+  "surface": {
+    "entry": "app/notes.html",
+    "path": "/surfaces/notes.html",
+    "glyph": "✦",
+    "hint": "the notes in this studio's notes folder"
+  },
+  "roots": { "notes": { "required": true } },
+  "calls": {
+    "/api/notes": { "required": true },
+    "/api/notes/item": { "required": true }
+  },
+  "provider": { "package": "@example/studio-notes", "required": true }
+}

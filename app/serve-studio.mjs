@@ -20,7 +20,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { RUNTIME_OWNED_VERBS, SUBSTITUTABLE_VERBS, openVocabMap, lookup, verbMatches, routeRequest } from "./verbs.mjs";
+import { openVocabMap, lookup, routeRequest } from "./verbs.mjs";
 import { makeResFacade } from "./response-facade.mjs";
 import { makeCtx } from "./handler-context.mjs";
 
@@ -32,6 +32,7 @@ const arg = (name, dflt) => {
 };
 const PORT = Number(arg("--port", 8890));
 const FIXTURES = path.resolve(arg("--fixtures", path.join(ROOT, "fixtures")));
+const MODE = arg("--mode", "demo");
 const FILES_ROOT = path.join(FIXTURES, "files-root");
 const MANIFEST_PATH = path.join(HERE, "surfaces.json");
 
@@ -69,8 +70,10 @@ const OVERLAY_MANIFEST = OVERLAY_DIR ? path.join(OVERLAY_DIR, "surfaces.json") :
 // something upstream strips it from client requests and sets it themselves — a
 // proxy doing access control. Unconfigured, this runtime behaves exactly as it
 // documented before: it records what it was told.
-const IDENTITY_HEADER = (arg("--identity-header", process.env.OPENRIG_STUDIO_IDENTITY_HEADER) || "")
-  .toLowerCase().trim() || null;
+const IDENTITY_HEADER =
+  (arg("--identity-header", process.env.OPENRIG_STUDIO_IDENTITY_HEADER) || "")
+    .toLowerCase()
+    .trim() || null;
 
 // WHERE ANNOTATIONS LIVE — in MEMORY, unless an operator names a file.
 //
@@ -141,13 +144,51 @@ const BOOT_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2
 // what "files.read" has always meant — the files namespace advertises read
 // because there are no write verbs — and it lets a runtime offer read-only focus
 // honestly rather than claiming a namespace it half-implements.
-const CAPABILITIES = ["contract.meta", "observe.factory-state", "stream.events", "files.read",
-  "shell.protocol", "focus.read", "focus.write", "drive.read", "drive.write",
-  "annotations.read", "annotations.write", "capture.target"];
+const CAPABILITIES = [
+  "contract.meta",
+  "observe.factory-state",
+  "stream.events",
+  "files.read",
+  "shell.protocol",
+  "focus.read",
+  "focus.write",
+  "drive.read",
+  "drive.write",
+  "annotations.read",
+  "annotations.write",
+  "capture.target",
+];
 
-const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json", ".css": "text/css",
-  ".js": "text/javascript", ".mjs": "text/javascript", ".svg": "image/svg+xml", ".png": "image/png",
-  ".md": "text/plain; charset=utf-8", ".txt": "text/plain; charset=utf-8" };
+const TYPES = {
+  ".html": "text/html; charset=utf-8",
+  ".json": "application/json",
+  ".css": "text/css",
+  ".js": "text/javascript",
+  ".mjs": "text/javascript",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".md": "text/plain; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+};
+// A file served as bytes is whatever someone put in the folder, and it's served from this Studio's own origin, so a page or
+// a drawing in it must never run as this Studio: HTML runs sandboxed (its own script, but no origin, so it can call nothing
+// here and frame nothing of this Studio's), SVG and XML run nothing at all, and XML is a download.
+const RAW_SANDBOX = {
+  ".html": "sandbox allow-scripts",
+  ".htm": "sandbox allow-scripts",
+  ".xhtml": "sandbox allow-scripts",
+  ".svg": "sandbox",
+  ".xml": "sandbox",
+  ".xsl": "sandbox",
+  ".xslt": "sandbox",
+};
+const rawSandbox = (file) => {
+  const ext = path.extname(file).toLowerCase();
+  return {
+    ...(RAW_SANDBOX[ext] ? { "content-security-policy": RAW_SANDBOX[ext] } : {}),
+    ...([".xml", ".xsl", ".xslt"].includes(ext) ? { "content-disposition": "attachment" } : {}),
+  };
+};
 
 // ROUTING LIVES IN ONE PLACE: the API ROUTING SURFACE in the HTTP section below.
 // The dispatch table there is simultaneously the matcher, the enumeration behind
@@ -155,8 +196,10 @@ const TYPES = { ".html": "text/html; charset=utf-8", ".json": "application/json"
 // Its predecessor here was a registration wrapper (`serves()`) every arm had to
 // remember to call; opt-in registration is a convention, not a mechanism, and a
 // raw handler that skipped it served live while the classifier stayed blind.
-const sendJson = (res, code, obj) =>
-  { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
+const sendJson = (res, code, obj) => {
+  res.writeHead(code, { "content-type": "application/json" });
+  res.end(JSON.stringify(obj));
+};
 
 // ---- manifest: read + WARN-FIRST validation --------------------------------
 // Contract rule: a malformed manifest must LOOK wrong — named errors in the
@@ -166,10 +209,23 @@ const sendJson = (res, code, obj) =>
 // care: these are two places computing one property, and the failure when they
 // drift is silent in the misleading direction — the schema accepts a field the
 // runtime then reports as unknown.
-const ROW_OPTIONAL = { glyph: "string", hint: "string", category: "string", samehost: "boolean",
-  port: "number", sub: "string", url: "string", hosts: "array", popout: "boolean",
-  hideAgents: "boolean", unmountOnBlur: "boolean", railMin: "boolean", project: "string",
-  preserve: "array" };
+const ROW_OPTIONAL = {
+  glyph: "string",
+  hint: "string",
+  category: "string",
+  samehost: "boolean",
+  port: "number",
+  sub: "string",
+  url: "string",
+  hosts: "array",
+  revision: "string",
+  popout: "boolean",
+  hideAgents: "boolean",
+  unmountOnBlur: "boolean",
+  railMin: "boolean",
+  project: "string",
+  preserve: "array",
+};
 
 // `label` is "" for a single-manifest runtime, so a zero-config install emits
 // byte-identical error strings to before the seam existed — labelling only
@@ -189,23 +245,45 @@ const ROW_OPTIONAL = { glyph: "string", hint: "string", category: "string", same
 // rule is the same either way — the runtime serves what the SDK declares.
 function validateManifest(raw, label = "", keep = null) {
   const tag = label ? `${label} ` : "";
-  const errors = [], warnings = [], valid = [];
+  const errors = [],
+    warnings = [],
+    valid = [];
   let doc;
-  try { doc = JSON.parse(raw); }
-  catch (e) { return { errors: [`${tag}surfaces.json is not valid JSON: ${e.message}`], warnings, valid, doc: null }; }
+  try {
+    doc = JSON.parse(raw);
+  } catch (e) {
+    return {
+      errors: [`${tag}surfaces.json is not valid JSON: ${e.message}`],
+      warnings,
+      valid,
+      doc: null,
+    };
+  }
   // VALID JSON IS NOT A VALID MANIFEST. `null`, a number, a string, or an array
-  // all parse — and `null.surfaces` THREW at load, killing warn-first startup
-  // (RS-C2, review.r2): the process exited 1 and /api/contract never came up,
-  // exactly the crash the warn-first contract exists to prevent. A manifest that
+  // all parse, and reading `.surfaces` off null throws, which would stop the
+  // process before /api/contract came up: exactly the crash the warn-first
+  // contract exists to prevent. A manifest that
   // is not a plain object is refused the same visible, still-serving way a
   // syntactically invalid one is — a named error, an empty rail, and the runtime
   // stays up. (An array reaches the surfaces[] check below harmlessly; null and
   // primitives are what throw, so the object gate must come first.)
   if (doc === null || typeof doc !== "object" || Array.isArray(doc)) {
-    return { errors: [`${tag}surfaces.json must be a JSON object with a top-level surfaces[] array (got ${doc === null ? "null" : Array.isArray(doc) ? "an array" : typeof doc})`], warnings, valid, doc: null };
+    return {
+      errors: [
+        `${tag}surfaces.json must be a JSON object with a top-level surfaces[] array (got ${doc === null ? "null" : Array.isArray(doc) ? "an array" : typeof doc})`,
+      ],
+      warnings,
+      valid,
+      doc: null,
+    };
   }
   if (!Array.isArray(doc.surfaces)) {
-    return { errors: [`${tag}surfaces.json must carry a top-level surfaces[] array`], warnings, valid, doc };
+    return {
+      errors: [`${tag}surfaces.json must carry a top-level surfaces[] array`],
+      warnings,
+      valid,
+      doc,
+    };
   }
   // chatSeats is OPTIONAL, so its absence is silent — but a roster that is
   // DECLARED and unusable must not be. Falling back to the shipped fixture
@@ -221,18 +299,29 @@ function validateManifest(raw, label = "", keep = null) {
     if (!Array.isArray(doc.chatSeats)) {
       warnings.push(
         `${tag}chatSeats must be an array of {seat, name} rows — got ${doc.chatSeats === null ? "null" : typeof doc.chatSeats}. ` +
-        `IGNORED, so the packaged roster is being served instead. A sidebar showing a fixture seat on a real box ` +
-        `is the same lie as a fixture rig on the floor.`
+          `IGNORED, so the packaged roster is being served instead. A sidebar showing a fixture seat on a real box ` +
+          `is the same lie as a fixture rig on the floor.`,
       );
     } else {
-      const bad = doc.chatSeats.filter((r) => !r || typeof r !== "object" || typeof r.seat !== "string" || !r.seat.trim());
+      const bad = doc.chatSeats.filter(
+        (r) => !r || typeof r !== "object" || typeof r.seat !== "string" || !r.seat.trim(),
+      );
       if (bad.length === doc.chatSeats.length && doc.chatSeats.length) {
-        warnings.push(`${tag}chatSeats has ${bad.length} row(s) and NONE carries a usable "seat" — the roster will render empty.`);
+        warnings.push(
+          `${tag}chatSeats has ${bad.length} row(s) and NONE carries a usable "seat" — the roster will render empty.`,
+        );
       } else if (bad.length) {
-        warnings.push(`${tag}chatSeats: ${bad.length} of ${doc.chatSeats.length} row(s) lack a usable "seat" and are ignored.`);
+        warnings.push(
+          `${tag}chatSeats: ${bad.length} of ${doc.chatSeats.length} row(s) lack a usable "seat" and are ignored.`,
+        );
       }
-      if (doc.chatSeats.length && doc.chatLocalPort === undefined) {
-        warnings.push(`${tag}chatSeats declared without chatLocalPort — seats will be listed but not attachable when served from loopback.`);
+      // Only a roster someone declared. One the launcher read from the rig (chatSeatsFrom "rig") is reported by the
+      // launcher's own boot line, which says why there is no terminal.
+      const declared = doc.chatSeatsFrom === undefined || doc.chatSeatsFrom === "declared";
+      if (declared && doc.chatSeats.length && doc.chatLocalPort === undefined) {
+        warnings.push(
+          `${tag}chatSeats declared without chatLocalPort, so the seats are listed but not attachable.`,
+        );
       }
     }
   }
@@ -243,9 +332,9 @@ function validateManifest(raw, label = "", keep = null) {
       if (row && typeof row === "object" && !keep(row)) {
         warnings.push(
           `${tag}surfaces[${i}]${row.id ? ` (id: ${row.id})` : ""}: NOT declared by this SDK — ` +
-          `IGNORED. An undeclared row in the installed package is contamination (a copied tree, a ` +
-          `stale materialisation, or a dependency writing into node_modules); surfaces you own ` +
-          `belong in your own directory, registered via --surfaces`
+            `IGNORED. An undeclared row in the installed package is contamination (a copied tree, a ` +
+            `stale materialisation, or a dependency writing into node_modules); surfaces you own ` +
+            `belong in your own directory, registered via --surfaces`,
         );
         return;
       }
@@ -257,15 +346,23 @@ function validateManifest(raw, label = "", keep = null) {
   rows.forEach((row, i) => {
     const where = `${tag}surfaces[${i}]${row && row.id ? ` (id: ${row.id})` : ""}`;
     const rowErrors = [];
-    if (!row || typeof row !== "object") { errors.push(`${where}: row must be an object`); return; }
-    if (typeof row.id !== "string" || !row.id) rowErrors.push(`${where}: id is required (non-empty string)`);
+    if (!row || typeof row !== "object") {
+      errors.push(`${where}: row must be an object`);
+      return;
+    }
+    if (typeof row.id !== "string" || !row.id)
+      rowErrors.push(`${where}: id is required (non-empty string)`);
     else if (seen.has(row.id)) rowErrors.push(`${where}: duplicate id — ids must be unique`);
     else seen.add(row.id);
-    if (typeof row.name !== "string" || !row.name) rowErrors.push(`${where}: name is required (non-empty string)`);
+    if (typeof row.name !== "string" || !row.name)
+      rowErrors.push(`${where}: name is required (non-empty string)`);
     // exactly ONE of path | url, and url must be absolute
-    const hasPath = "path" in row, hasUrl = "url" in row;
-    if (hasPath && hasUrl) rowErrors.push(`${where}: carries BOTH path and url — a row targets exactly one`);
-    else if (!hasPath && !hasUrl) rowErrors.push(`${where}: needs exactly one of path (starting with "/") or an absolute url`);
+    const hasPath = "path" in row,
+      hasUrl = "url" in row;
+    if (hasPath && hasUrl)
+      rowErrors.push(`${where}: carries BOTH path and url — a row targets exactly one`);
+    else if (!hasPath && !hasUrl)
+      rowErrors.push(`${where}: needs exactly one of path (starting with "/") or an absolute url`);
     if (hasPath && !(typeof row.path === "string" && row.path.startsWith("/")))
       rowErrors.push(`${where}: path must be a string starting with "/"`);
     if (hasUrl) {
@@ -278,15 +375,28 @@ function validateManifest(raw, label = "", keep = null) {
       //    them;
       // 2. parse: protocol + non-empty hostname (catches "https://" etc.).
       let parsed = null;
-      try { parsed = typeof row.url === "string" ? new URL(row.url) : null; } catch {}
-      const syntacticAuthority = typeof row.url === "string" && /^https?:\/\/[^/?#\s]+/.test(row.url);
-      if (!syntacticAuthority || !parsed || !["http:", "https:"].includes(parsed.protocol) || !parsed.hostname)
-        rowErrors.push(`${where}: url must be an absolute http(s) URL with a non-empty host (e.g. https://host/path)`);
+      try {
+        parsed = typeof row.url === "string" ? new URL(row.url) : null;
+      } catch {}
+      const syntacticAuthority =
+        typeof row.url === "string" && /^https?:\/\/[^/?#\s]+/.test(row.url);
+      if (
+        !syntacticAuthority ||
+        !parsed ||
+        !["http:", "https:"].includes(parsed.protocol) ||
+        !parsed.hostname
+      )
+        rowErrors.push(
+          `${where}: url must be an absolute http(s) URL with a non-empty host (e.g. https://host/path)`,
+        );
     }
     for (const [k, v] of Object.entries(row)) {
       if (["id", "name", "path", "url"].includes(k)) continue; // handled above
       const want = ROW_OPTIONAL[k];
-      if (want === undefined) { warnings.push(`${where}: unknown field "${k}" (ignored; fine for forward-compat)`); continue; }
+      if (want === undefined) {
+        warnings.push(`${where}: unknown field "${k}" (ignored; fine for forward-compat)`);
+        continue;
+      }
       const got = Array.isArray(v) ? "array" : typeof v;
       if (got !== want) rowErrors.push(`${where}: ${k} must be ${want}, got ${got}`);
     }
@@ -315,13 +425,18 @@ function makeSource(manifestPath, label) {
     path: manifestPath,
     label,
     loadedSignature: "unloaded",
-    result: { errors: [`${label ? label + " " : ""}surfaces.json not read yet`], warnings: [], valid: [], doc: null },
+    result: {
+      errors: [`${label ? label + " " : ""}surfaces.json not read yet`],
+      warnings: [],
+      valid: [],
+      doc: null,
+    },
     state: {
       // "init" until the first load resolves. A process that starts healthy
       // must report recoveries: 0 — booting is not recovering, and a counter
       // that counted it would make "never broke" indistinguishable from
       // "recovered", which is the confusion these fields exist to remove.
-      state: "init",          // "init" | "ok" | "invalid" | "unreadable"
+      state: "init", // "init" | "ok" | "invalid" | "unreadable"
       lastLoadedAt: null,
       reloads: 0,
       recoveries: 0,
@@ -358,12 +473,22 @@ function makeSource(manifestPath, label) {
 // That is supply-chain compromise, a higher-bar class already accepted by
 // installing the SDK at all. See contract/manifest.md.
 const SDK_DECLARED_SURFACES = [
-  { id: "floor", name: "FLOOR", glyph: "●", path: "/surfaces/floor.html",
-    hint: "Live rig-floor seats and queue activity" },
+  {
+    id: "floor",
+    name: "Floor",
+    glyph: "●",
+    path: "/surfaces/floor.html",
+    hint: "Live rig-floor seats and queue activity",
+  },
 ];
 
 // Canonical form so field ORDER cannot smuggle a difference past equality.
-const canonical = (row) => JSON.stringify(Object.keys(row).sort().map((k) => [k, row[k]]));
+const canonical = (row) =>
+  JSON.stringify(
+    Object.keys(row)
+      .sort()
+      .map((k) => [k, row[k]]),
+  );
 const DECLARED_CANONICAL = new Set(SDK_DECLARED_SURFACES.map(canonical));
 const isSdkDeclared = (row) => DECLARED_CANONICAL.has(canonical(row));
 
@@ -379,7 +504,12 @@ function loadSource(src) {
   try {
     raw = fs.readFileSync(src.path, "utf8");
   } catch (e) {
-    src.result = { errors: [`cannot read ${src.label ? src.label + " " : ""}surfaces.json: ${e.message}`], warnings: [], valid: [], doc: null };
+    src.result = {
+      errors: [`cannot read ${src.label ? src.label + " " : ""}surfaces.json: ${e.message}`],
+      warnings: [],
+      valid: [],
+      doc: null,
+    };
     src.state.state = "unreadable";
     console.error(`manifest ERROR: ${src.result.errors[0]}`);
     // Gone. If it returns at the same path it will be a NEW inode, so re-arm
@@ -406,7 +536,7 @@ function loadSource(src) {
     src.state.lastRecoveryAt = src.state.lastLoadedAt;
     console.log(
       `manifest RECOVERED: ${src.path} — ${src.result.valid.length} ${src.label || "package"} surface(s) ` +
-      `after "${previous}" (recovery #${src.state.recoveries}, no restart)`
+        `after "${previous}" (recovery #${src.state.recoveries}, no restart)`,
     );
   }
 }
@@ -423,7 +553,7 @@ function loadManifest() {
 function mergedSurfaces() {
   const warnings = [];
   const errors = [];
-  const owner = new Map();   // row.path -> "package" | "consumer"
+  const owner = new Map(); // row.path -> "package" | "consumer"
 
   // ONE RULE: serve exactly what is authoritatively DECLARED — the SDK's own
   // surfaces plus the consumer's overlay-declared ones — and nothing else.
@@ -450,24 +580,26 @@ function mergedSurfaces() {
     // package's page silently: both rail entries would load consumer bytes with
     // no shadow warning, and replacement would become a filename act rather
     // than an id act, which is exactly what the stable rule forbids.
-    const packagePaths = new Map(packageRows.map((r) => [r.path, r.id]).filter(([p]) => typeof p === "string"));
+    const packagePaths = new Map(
+      packageRows.map((r) => [r.path, r.id]).filter(([p]) => typeof p === "string"),
+    );
     for (const row of consumerSource.result.valid) {
       const collidesWith = typeof row.path === "string" ? packagePaths.get(row.path) : undefined;
       if (collidesWith !== undefined && collidesWith !== row.id) {
         errors.push(
           `consumer surfaces.json (id: ${row.id}): path "${row.path}" is already owned by the ` +
-          `package surface "${collidesWith}" — EXCLUDED. Replace a package surface by reusing its ` +
-          `id (which warns), not by reusing its path`
+            `package surface "${collidesWith}" — EXCLUDED. Replace a package surface by reusing its ` +
+            `id (which warns), not by reusing its path`,
         );
         continue;
       }
       if (byId.has(row.id)) {
         warnings.push(
           `consumer surfaces.json: id "${row.id}" SHADOWS the package surface of the same id — ` +
-          `the consumer row is served`
+            `the consumer row is served`,
         );
       }
-      byId.set(row.id, row);   // Map keeps the original position on overwrite
+      byId.set(row.id, row); // Map keeps the original position on overwrite
       if (typeof row.path === "string") owner.set(row.path, "consumer");
     }
   }
@@ -479,14 +611,20 @@ function mergedSurfaces() {
   // Undeclared FILES sitting in the package are warned too — a phantom page can
   // be copied in without a row, and silence would hide it.
   if (enforcing) {
-    const served = new Set([...owner.entries()].filter(([, src]) => src === "package").map(([p]) => path.basename(p)));
+    const served = new Set(
+      [...owner.entries()].filter(([, src]) => src === "package").map(([p]) => path.basename(p)),
+    );
     let present = [];
-    try { present = fs.readdirSync(path.join(HERE, "surfaces")).filter((f) => !f.startsWith(".")); } catch { /* none */ }
+    try {
+      present = fs.readdirSync(path.join(HERE, "surfaces")).filter((f) => !f.startsWith("."));
+    } catch {
+      /* none */
+    }
     for (const file of present) {
       if (!served.has(file)) {
         warnings.push(
           `package app/surfaces/${file}: present but NOT declared by this SDK — not served. ` +
-          `An undeclared file in the installed package is contamination`
+            `An undeclared file in the installed package is contamination`,
         );
       }
     }
@@ -511,12 +649,14 @@ function servedSeats() {
   const overlay = consumerSource?.result?.doc;
   const pkg = packageSource.result.doc;
   const fromConsumer = overlay && typeof overlay === "object" && Array.isArray(overlay.chatSeats);
-  const doc = fromConsumer ? overlay : (pkg && typeof pkg === "object" ? pkg : {});
+  const doc = fromConsumer ? overlay : pkg && typeof pkg === "object" ? pkg : {};
   const rows = Array.isArray(doc.chatSeats) ? doc.chatSeats : [];
   return {
     rows,
     source: fromConsumer ? "consumer" : "package",
     chatLocalPort: doc.chatLocalPort,
+    from:
+      fromConsumer && typeof overlay.chatSeatsFrom === "string" ? overlay.chatSeatsFrom : undefined,
   };
 }
 
@@ -569,8 +709,21 @@ function manifestReport() {
 function factoryState() {
   const f = path.join(FIXTURES, "factory-state.json");
   let d;
-  try { d = JSON.parse(fs.readFileSync(f, "utf8")); }
-  catch (e) { return { ok: false, degraded: `fixture unreadable: ${e.message}`, rig: null, seats: [], queue: [] }; }
+  try {
+    d = JSON.parse(fs.readFileSync(f, "utf8"));
+  } catch (e) {
+    return {
+      ok: false,
+      mode: MODE,
+      degraded:
+        MODE === "demo"
+          ? `Demo data couldn't be read: ${e.message}`
+          : "Workspace state is unavailable. Enable a provider that supplies rig state, or check that provider's connection.",
+      rig: null,
+      seats: [],
+      queue: [],
+    };
+  }
   // A consumer generating this from a REAL source can say why it is empty, and
   // the reasons are not interchangeable: no rig on this box is a different
   // fact from a rig with nothing running, and a surface can offer to start one
@@ -578,19 +731,50 @@ function factoryState() {
   // absence does not arrive looking like an idle rig. Omitted for the shipped
   // fixture, which is neither — it is a demo, and should not claim to be
   // attached to anything.
-  const attachment = typeof d.attached === "boolean"
-    ? { attached: d.attached, reason: d.reason ?? null, detail: d.detail ?? null }
-    : {};
-  // Finished work, when the generator sends it (optional; see the contract). Absent stays absent ("this provider doesn't send
-  // finished work"). Sent but not in the declared shape (rows not a list, a row that isn't an item with a string id) is carried as
-  // unreadable, never as "none finished", and never at the cost of the open work beside it.
-  const okRow = (r) => !!r && typeof r === "object" && !Array.isArray(r) && typeof r.id === "string";
-  const done = d.done === undefined ? {}
-    : d.done && typeof d.done === "object" && Array.isArray(d.done.rows) && d.done.rows.every(okRow)
-      ? { done: { rows: d.done.rows, coverage: d.done.coverage && typeof d.done.coverage === "object" && !Array.isArray(d.done.coverage) ? d.done.coverage : {} } }
-      : { done: { rows: [], coverage: { unreadable: "the finished work this box sent wasn't in the declared shape" } } };
-  return { ok: true, rig: d.rig || "fixture", generatedAt: new Date().toISOString(), ...attachment,
-    seats: Array.isArray(d.seats) ? d.seats : [], queue: Array.isArray(d.queue) ? d.queue : [], ...done };
+  const attachment =
+    typeof d.attached === "boolean"
+      ? { attached: d.attached, reason: d.reason ?? null, detail: d.detail ?? null }
+      : {};
+  // Finished work and introductions, when the generator sends them (both optional; see the contract). Absent stays absent ("this
+  // provider doesn't send finished work"). Finished work sent but not in the declared shape (rows not a list, a row that isn't an
+  // item with a string id) is carried as unreadable, never as "none finished", and never at the cost of the open work beside it.
+  const okRow = (r) =>
+    !!r && typeof r === "object" && !Array.isArray(r) && typeof r.id === "string";
+  const plainObject = (o) => !!o && typeof o === "object" && !Array.isArray(o);
+  const done =
+    d.done === undefined
+      ? {}
+      : plainObject(d.done) && Array.isArray(d.done.rows) && d.done.rows.every(okRow)
+        ? {
+            done: {
+              rows: d.done.rows,
+              coverage: plainObject(d.done.coverage) ? d.done.coverage : {},
+            },
+          }
+        : {
+            done: {
+              rows: [],
+              coverage: {
+                unreadable: "the finished work this box sent wasn't in the declared shape",
+              },
+            },
+          };
+  const introductions =
+    Array.isArray(d.introductions) && d.introductions.every(okRow)
+      ? { introductions: d.introductions }
+      : {};
+  return {
+    ok: true,
+    mode: MODE,
+    ...(MODE === "demo" ? { fixture: "Example data" } : {}),
+    rig: d.rig || null,
+    generatedAt: new Date().toISOString(),
+    ...attachment,
+    seats: Array.isArray(d.seats) ? d.seats : [],
+    queue: Array.isArray(d.queue) ? d.queue : [],
+    ...done,
+    ...introductions,
+  };
 }
 
 // ---- stream: SSE change-signal (signal-only contract) ----------------------
@@ -600,7 +784,11 @@ function factoryState() {
 // to polling. Heartbeat comments keep intermediaries from closing the stream.
 const sseClients = new Set();
 function sseBroadcast() {
-  for (const res of sseClients) { try { res.write(`data: change\n\n`); } catch {} }
+  for (const res of sseClients) {
+    try {
+      res.write(`data: change\n\n`);
+    } catch {}
+  }
 }
 // ---- watching: must survive delete -> recreate -----------------------------
 // Watching surfaces.json BY PATH binds the watch to that file's inode. Delete
@@ -625,27 +813,43 @@ let watchers = [];
 let rearmTimer = null;
 
 function watchForChanges() {
-  for (const w of watchers) { try { w.close(); } catch {} }
+  for (const w of watchers) {
+    try {
+      w.close();
+    } catch {}
+  }
   watchers = [];
 
   const targets = [
     // The manifest's PARENT directory — not the manifest file itself.
-    { dir: MANIFEST_DIR, recursive: false, onEvent: (name) => {
-      if (name === MANIFEST_FILE) loadSource(packageSource);
-    } },
+    {
+      dir: MANIFEST_DIR,
+      recursive: false,
+      onEvent: (name) => {
+        if (name === MANIFEST_FILE) loadSource(packageSource);
+      },
+    },
     { dir: FIXTURES, recursive: true, onEvent: () => {} },
-    { dir: path.join(HERE, "surfaces"), recursive: true, onEvent: (name) => {
-      if (name === MANIFEST_FILE) loadSource(packageSource);
-    } },
+    {
+      dir: path.join(HERE, "surfaces"),
+      recursive: true,
+      onEvent: (name) => {
+        if (name === MANIFEST_FILE) loadSource(packageSource);
+      },
+    },
   ];
 
   // The consumer overlay gets the SAME treatment. Without this, the redeploy-survival defect class returns and the
   // entire defect class returns for consumer surfaces — which are precisely the
   // ones a real deployment redeploys.
   if (consumerSource) {
-    targets.push({ dir: OVERLAY_DIR, recursive: true, onEvent: (name) => {
-      if (name === MANIFEST_FILE) loadSource(consumerSource);
-    } });
+    targets.push({
+      dir: OVERLAY_DIR,
+      recursive: true,
+      onEvent: (name) => {
+        if (name === MANIFEST_FILE) loadSource(consumerSource);
+      },
+    });
   }
 
   for (const target of targets) {
@@ -657,7 +861,9 @@ function watchForChanges() {
       // A dead watcher must not fail silently — that is the whole defect class.
       w.on("error", () => rearmWatches());
       watchers.push(w);
-    } catch { /* a missing watch target is fine; rearm will retry */ }
+    } catch {
+      /* a missing watch target is fine; rearm will retry */
+    }
   }
 }
 
@@ -712,12 +918,12 @@ function integrityCheck() {
     src.state.lastIntegrityReloadAt = new Date().toISOString();
     console.log(
       `manifest REPLACED: ${src.path} — the file at this path is not the one ` +
-      `loaded (was ${wasHealthy ? "serving normally" : `"${src.state.state}"`}); ` +
-      `no watch event fired, caught by the integrity guard ` +
-      `(integrity reload #${src.state.integrityReloads})`
+        `loaded (was ${wasHealthy ? "serving normally" : `"${src.state.state}"`}); ` +
+        `no watch event fired, caught by the integrity guard ` +
+        `(integrity reload #${src.state.integrityReloads})`,
     );
 
-    watchForChanges();   // the directory may be a different inode now
+    watchForChanges(); // the directory may be a different inode now
     loadSource(src);
   }
 }
@@ -748,9 +954,12 @@ function writeFocus(patch, verifiedBy = null) {
   }
   const named = FOCUS_FIELDS.filter((f) => Object.hasOwn(patch, f));
   if (!named.length) {
-    return { ok: false, error: `focus write named no known field — one of: ${FOCUS_FIELDS.join(", ")}` };
+    return {
+      ok: false,
+      error: `focus write named no known field — one of: ${FOCUS_FIELDS.join(", ")}`,
+    };
   }
-  for (const f of named) focusRecord[f] = patch[f];   // explicit null clears; that is a statement
+  for (const f of named) focusRecord[f] = patch[f]; // explicit null clears; that is a statement
   // `at` is server-set: a caller-supplied timestamp cannot be trusted to say when
   // the record last genuinely changed. `by` is caller-declared and this runtime
   // has no identity to override it with — see contract/focus.md.
@@ -765,9 +974,7 @@ function writeFocus(patch, verifiedBy = null) {
   // consumer told attribution is verified would then trust a value nobody checked.
   // Configured means this runtime derives identity; no identity available is
   // UNKNOWN, which is a different answer from "whatever you say".
-  focusRecord.by = IDENTITY_HEADER
-    ? verifiedBy
-    : (typeof patch.by === "string" ? patch.by : null);
+  focusRecord.by = IDENTITY_HEADER ? verifiedBy : typeof patch.by === "string" ? patch.by : null;
   // ANY field change moves the marker, including a view change with an unchanged
   // selection — the case the surveyed implementation misses entirely, because it
   // dedupes on selection alone and a user who changed page has plainly changed
@@ -802,8 +1009,13 @@ function writeFocus(patch, verifiedBy = null) {
 // file rather than from a constant kept in step by hand.
 const SDK_VERSION = (() => {
   try {
-    return JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version || null;
-  } catch { return null; }
+    return (
+      JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version ||
+      null
+    );
+  } catch {
+    return null;
+  }
 })();
 
 const annotations = new Map();
@@ -820,7 +1032,8 @@ function loadAnnotations() {
     // A missing file is the ordinary first-run case, not a fault. A CORRUPT one
     // is reported rather than silently starting empty, because an empty board and
     // a failed load must not share an appearance.
-    if (e.code !== "ENOENT") console.error("annotations: could not read " + ANNOTATIONS_FILE + " — " + e.message);
+    if (e.code !== "ENOENT")
+      console.error("annotations: could not read " + ANNOTATIONS_FILE + " — " + e.message);
   }
 }
 
@@ -831,9 +1044,8 @@ function persistAnnotations() {
   fs.writeFileSync(ANNOTATIONS_FILE, JSON.stringify({ scopes }, null, 2));
 }
 
-// PER-SURFACE DELIVERY (review.r2 CRITICAL, PM ruling): one global op slot fanned
-// every op out to every kept-alive surface — including play/export/delete side
-// effects — because "which surface is open" was not expressible. Now each surface
+// PER-SURFACE DELIVERY: a single global op slot would fan every op out to every
+// kept-alive surface, including play/export/delete side effects. So each surface
 // has its OWN slot, keyed by the surface id, and a surface only ever reads its own
 // slot: a mis-addressed op lands in a slot the wrong surface never polls, so it is
 // STRUCTURALLY undeliverable there — not delivered-then-filtered (which would make
@@ -843,14 +1055,17 @@ function persistAnnotations() {
 // the latest op addressed to IT plus that surface's applied progress.
 const driveSlots = new Map(); // surfaceId -> { op, appliedGen, reads }
 let driveSeq = 0;
-let driveReads = 0;           // total polls across all surfaces (contract report)
+let driveReads = 0; // total polls across all surfaces (contract report)
 const driveSlot = (surface) => {
   let slot = driveSlots.get(surface);
   // `recorded` is the set of generations actually recorded FOR THIS surface,
   // above its applied watermark — an ack must be a MEMBER of it, not merely
   // monotonic and below the latest gen. `gen` is global, so A=1, B=2, A=3 leaves
   // A's recorded set {1,3}: acking 2 (B's gen) is a foreign gen and refused.
-  if (!slot) { slot = { op: null, appliedGen: 0, reads: 0, recorded: new Set() }; driveSlots.set(surface, slot); }
+  if (!slot) {
+    slot = { op: null, appliedGen: 0, reads: 0, recorded: new Set() };
+    driveSlots.set(surface, slot);
+  }
   return slot;
 };
 // Per-surface marker: a surface watches its OWN slot's latest generation.
@@ -862,12 +1077,15 @@ const driveMarker = (slot) => `${BOOT_ID}.${slot.op ? slot.op.gen : 0}`;
 // is a separate question answered by `appliedGen` on GET, which advances only when
 // the surface acks an apply that RESOLVED (the harder half — applied, not seen).
 function writeDrive(surface, op) {
-  // ADDRESSING IS MANDATORY (BREAKING, PM ruling): an unaddressed op is refused
-  // rather than fanned out. A warned unaddressed default still fans out, so the
-  // default that caused the defect is removed, not softened.
+  // ADDRESSING IS MANDATORY: an unaddressed op is refused rather than fanned out.
+  // A default target (even one that warns) would still fan out, so there is none.
   if (typeof surface !== "string" || !surface.trim()) {
-    return { ok: false, error: "a drive op must name its target surface — send { surface, ...intent }; " +
-      "an unaddressed op would reach every kept-alive surface, which is the fan-out this refuses" };
+    return {
+      ok: false,
+      error:
+        "a drive op must name its target surface — send { surface, ...intent }; " +
+        "an unaddressed op would reach every kept-alive surface, which is the fan-out this refuses",
+    };
   }
   if (!op || typeof op !== "object" || Array.isArray(op)) {
     return { ok: false, error: "a drive op must be a JSON object carrying intent for the surface" };
@@ -879,16 +1097,28 @@ function writeDrive(surface, op) {
   // ACCEPTED IS NOT DELIVERED, AND THE CALLER FINDS OUT HERE. `listening` is
   // false when THIS surface has never polled: the op is recorded and that surface
   // will not act on it. Reported in the response the caller is already reading.
-  return { ok: true, recorded: true, surface, marker: driveMarker(slot), op: slot.op,
-    gen: slot.op.gen, appliedGen: slot.appliedGen, listening: slot.reads > 0 };
+  return {
+    ok: true,
+    recorded: true,
+    surface,
+    marker: driveMarker(slot),
+    op: slot.op,
+    gen: slot.op.gen,
+    appliedGen: slot.appliedGen,
+    listening: slot.reads > 0,
+  };
 }
 
-const readBody = (req) => new Promise((resolve) => {
-  let raw = "";
-  req.on("data", (c) => { raw += c; if (raw.length > 256 * 1024) req.destroy(); });
-  req.on("end", () => resolve(raw));
-  req.on("error", () => resolve(""));
-});
+const readBody = (req) =>
+  new Promise((resolve) => {
+    let raw = "";
+    req.on("data", (c) => {
+      raw += c;
+      if (raw.length > 256 * 1024) req.destroy();
+    });
+    req.on("end", () => resolve(raw));
+    req.on("error", () => resolve(""));
+  });
 
 // ---- files: read-only, root-pinned ----------------------------------------
 // Containment is enforced on the REAL path (symlinks fully resolved), not the
@@ -896,7 +1126,12 @@ const readBody = (req) => new Promise((resolve) => {
 // (A lexical startsWith check follows a symlink straight out of the root.)
 const insideRoot = (p) => {
   let real, rootReal;
-  try { real = fs.realpathSync(p); rootReal = fs.realpathSync(FILES_ROOT); } catch { return null; }
+  try {
+    real = fs.realpathSync(p);
+    rootReal = fs.realpathSync(FILES_ROOT);
+  } catch {
+    return null;
+  }
   return real === rootReal || real.startsWith(rootReal + path.sep) ? real : null;
 };
 // Containment for an ARBITRARY bound root. Same rule as insideRoot above and
@@ -910,7 +1145,11 @@ function resolveInRoot(kind, rel) {
   // OWN-PROPERTY ONLY, belt and braces with the null prototype above: either
   // alone fixes it, and the pair says the intent rather than relying on one.
   const roots = lookup(BOUND_ROOTS, kind) ?? null;
-  if (!Array.isArray(roots) || !roots.length) return { ok: false, error: `no root bound for kind '${kind}' — bind it in studio.json roots{}` };
+  if (!Array.isArray(roots) || !roots.length)
+    return {
+      ok: false,
+      error: `no root bound for kind '${kind}' — bind it in studio.json roots{}`,
+    };
   if (typeof rel !== "string" || !rel || path.isAbsolute(rel)) {
     return { ok: false, error: `path must be a non-empty RELATIVE path inside the '${kind}' root` };
   }
@@ -929,7 +1168,11 @@ function resolveInRoot(kind, rel) {
   const candidates = [];
   for (const base of roots) {
     let baseReal;
-    try { baseReal = fs.realpathSync(base); } catch { continue; }
+    try {
+      baseReal = fs.realpathSync(base);
+    } catch {
+      continue;
+    }
     const target = path.resolve(baseReal, rel);
     // Deepest EXISTING ancestor: the target legitimately may not exist yet (a
     // slice's feedback/ before anything was captured) and realpath throws on a
@@ -947,19 +1190,36 @@ function resolveInRoot(kind, rel) {
     // (dangling link, link loop) is unverifiable at declaration, and the
     // contract assigns containment to declaration — refuse what cannot be
     // verified there.
-    let probe = target, real = null, unverifiable = null;
+    let probe = target,
+      real = null,
+      unverifiable = null;
     for (;;) {
-      try { real = fs.realpathSync(probe); break; } catch {}
+      try {
+        real = fs.realpathSync(probe);
+        break;
+      } catch {}
       let present = false;
-      try { fs.lstatSync(probe); present = true; } catch {}
-      if (present) { unverifiable = probe; break; }
+      try {
+        fs.lstatSync(probe);
+        present = true;
+      } catch {}
+      if (present) {
+        unverifiable = probe;
+        break;
+      }
       const up = path.dirname(probe);
       if (up === probe) break;
       probe = up;
     }
     if (unverifiable) {
-      candidates.push({ base: baseReal, path: target, exists: false, isDir: false,
-        performable: false, blockedBy: unverifiable });
+      candidates.push({
+        base: baseReal,
+        path: target,
+        exists: false,
+        isDir: false,
+        performable: false,
+        blockedBy: unverifiable,
+      });
       continue;
     }
     if (!real) continue;
@@ -976,13 +1236,24 @@ function resolveInRoot(kind, rel) {
     //     the consumer failed ENOTDIR; the path can never become a directory).
     // Both are refusals AT DECLARATION so a consumer cannot inherit either.
     let stat = null;
-    try { stat = fs.statSync(resolved); } catch {}
-    const exists = !!stat, isDir = exists && stat.isDirectory();
+    try {
+      stat = fs.statSync(resolved);
+    } catch {}
+    const exists = !!stat,
+      isDir = exists && stat.isDirectory();
     let ancIsDir = false;
-    try { ancIsDir = fs.statSync(real).isDirectory(); } catch {}
+    try {
+      ancIsDir = fs.statSync(real).isDirectory();
+    } catch {}
     const performable = exists ? isDir : ancIsDir;
-    candidates.push({ base: baseReal, path: resolved, exists, isDir, performable,
-      blockedBy: performable ? null : (exists ? resolved : real) });
+    candidates.push({
+      base: baseReal,
+      path: resolved,
+      exists,
+      isDir,
+      performable,
+      blockedBy: performable ? null : exists ? resolved : real,
+    });
   }
   if (!candidates.length) {
     return { ok: false, error: `'${rel}' resolves outside every location bound to '${kind}'` };
@@ -994,9 +1265,13 @@ function resolveInRoot(kind, rel) {
   // accepting the unperformable one hands the consumer a guaranteed failure.
   const blocked = candidates.filter((c) => !c.performable);
   if (blocked.length && !candidates.some((c) => c.performable)) {
-    return { ok: false, error: `'${rel}' cannot be a capture target under '${kind}': ` +
-      `'${blocked[0].blockedBy}' is not a directory or cannot be resolved — a capture target ` +
-      `is a directory a consumer can verifiably write into, decided at declaration` };
+    return {
+      ok: false,
+      error:
+        `'${rel}' cannot be a capture target under '${kind}': ` +
+        `'${blocked[0].blockedBy}' is not a directory or cannot be resolved — a capture target ` +
+        `is a directory a consumer can verifiably write into, decided at declaration`,
+    };
   }
   // DEDUPE BY RESOLVED PATH before counting ambiguity. Two bindings that resolve to
   // the SAME real location are one location: `[first, first]`, or two paths through
@@ -1013,8 +1288,12 @@ function resolveInRoot(kind, rel) {
   // under two bindings there is no honest way to choose, and choosing silently is
   // the defect this whole function was rewritten for.
   if (existing.length > 1) {
-    return { ok: false, error: `'${rel}' exists under ${existing.length} locations bound to '${kind}' ` +
-      `(${existing.map((c) => c.base).join(", ")}) — declare a kind that binds one, or remove the ambiguity` };
+    return {
+      ok: false,
+      error:
+        `'${rel}' exists under ${existing.length} locations bound to '${kind}' ` +
+        `(${existing.map((c) => c.base).join(", ")}) — declare a kind that binds one, or remove the ambiguity`,
+    };
   }
   // Exactly one existing wins. None existing is the create-it-later case, and the
   // first PERFORMABLE binding is the deliberate choice there — stated rather than
@@ -1027,42 +1306,66 @@ function resolveInRoot(kind, rel) {
 // about itself, which is why the verb is reserved rather than substitutable.
 let captureTarget = null;
 
-const FILE_KINDS = { image: /\.(png|jpe?g|gif|webp|svg)$/i, video: /\.(mp4|mov|webm)$/i,
-  audio: /\.(mp3|wav|m4a|flac)$/i, markdown: /\.(md|markdown)$/i, html: /\.html?$/i,
-  text: /\.(txt|json|jsonl|yaml|yml|mjs|js|ts|css|py|sh|toml|csv)$/i };
-const fileKind = (name) => Object.entries(FILE_KINDS).find(([, re]) => re.test(name))?.[0] || "other";
+const FILE_KINDS = {
+  image: /\.(png|jpe?g|gif|webp|svg)$/i,
+  video: /\.(mp4|mov|webm)$/i,
+  audio: /\.(mp3|wav|m4a|flac)$/i,
+  markdown: /\.(md|markdown)$/i,
+  html: /\.html?$/i,
+  text: /\.(txt|json|jsonl|yaml|yml|mjs|js|ts|css|py|sh|toml|csv)$/i,
+};
+const fileKind = (name) =>
+  Object.entries(FILE_KINDS).find(([, re]) => re.test(name))?.[0] || "other";
 
 function filesTree(dir) {
   const r = dir ? insideRoot(dir) : insideRoot(FILES_ROOT);
   if (!r || !fs.existsSync(r)) return null;
-  const dirs = [], files = [];
+  const dirs = [],
+    files = [];
   for (const name of fs.readdirSync(r).sort()) {
     if (name.startsWith(".")) continue;
     const full = path.join(r, name);
     const real = insideRoot(full); // symlink resolving outside the root: omit
     if (!real) continue;
-    let st; try { st = fs.statSync(full); } catch { continue; }
+    let st;
+    try {
+      st = fs.statSync(full);
+    } catch {
+      continue;
+    }
     if (st.isDirectory()) dirs.push({ name, path: full });
     else files.push({ name, path: full, size: st.size, mtime: st.mtimeMs, kind: fileKind(name) });
   }
   return { path: r, dirs, files };
 }
 function filesSearch(q) {
-  const needle = q.toLowerCase(), hits = [];
+  const needle = q.toLowerCase(),
+    hits = [];
   const seen = new Set(); // real paths already walked — symlink-cycle safety
   const walk = (dir, depth) => {
     if (hits.length >= 60 || depth > 6) return;
     const realDir = insideRoot(dir);
     if (!realDir || seen.has(realDir)) return;
     seen.add(realDir);
-    let names; try { names = fs.readdirSync(realDir); } catch { return; }
+    let names;
+    try {
+      names = fs.readdirSync(realDir);
+    } catch {
+      return;
+    }
     for (const name of names) {
       if (name.startsWith(".")) continue;
       const full = path.join(realDir, name);
       if (!insideRoot(full)) continue; // escaping symlink: omit
-      let st; try { st = fs.statSync(full); } catch { continue; }
+      let st;
+      try {
+        st = fs.statSync(full);
+      } catch {
+        continue;
+      }
       if (st.isDirectory()) walk(full, depth + 1);
-      else if (name.toLowerCase().includes(needle)) hits.push({ name, path: full, kind: fileKind(name) });
+      else if (name.toLowerCase().includes(needle))
+        hits.push({ name, path: full, kind: fileKind(name) });
     }
   };
   walk(FILES_ROOT, 0);
@@ -1074,11 +1377,10 @@ function filesSearch(q) {
 // two markers, enforced by routingSurfaceViolations() in app/verbs.mjs and the
 // reserved-verbs tests. A mention outside the fence fails the suite.
 //
-// THE FENCE CONTAINS DATA, NOT DISPATCH — and since round 5, THIS FILE DOES
-// NOT ROUTE AT ALL. Every earlier fix defined a trusted region (a spelling
-// list, a fenced file region, a dispatcher body) and the next raw arm simply
-// moved inside the newest region: a trusted region is always one special-case
-// away from wrong. The fence now holds two constants and the table — nothing
+// THE FENCE CONTAINS DATA, NOT DISPATCH — THIS FILE DOES NOT ROUTE AT ALL. Any
+// trusted region (a spelling list, a fenced file region, a dispatcher body) is
+// one special case away from wrong, because the next raw arm can move inside
+// it. So the fence holds two constants and the table — nothing
 // executable with unbounded reach. Code inside a handler runs only AFTER its
 // row matched, bounded by the row that registered it, and handlers receive
 // { searchParams, verb, rest } — never a pathname.
@@ -1086,47 +1388,72 @@ function filesSearch(q) {
 // ROUTING lives in matchApi (app/verbs.mjs), the one place a pathname meets
 // this table. handleRequest hands over the raw URL and receives a table
 // index; the pathname is OUT OF SCOPE downstream by construction, so "a
-// route cannot serve without a row" is a fact about the data flow. See
-// docs/design/routing-data-boundary.md for the load-bearing invariant.
+// route cannot serve without a row" is a fact about the data flow. The
+// guards in test/reserved-verbs.test.mjs fail if a change puts a pathname back downstream.
 //
 // ONE STRUCTURE, TWO READERS: this table is what routing consults at request
 // time AND what `runtime.routes` and classification enumerate, so enumeration
-// cannot be opt-in. The registration wrapper it replaced (`serves()`) was a
-// convention: a raw handler that never called it served live while the
-// classifier stayed blind — sdk-qa proved it in three spellings, then proved
-// the dispatcher-body variant in a fourth.
+// cannot be opt-in. A registration call beside the handler would be only a
+// convention: a raw handler that skipped it would serve live while the
+// classifier stayed blind.
 //
 // ADD A ROUTE BY ADDING A ROW, then classify the verb in app/verbs.mjs.
 // A verb ending in `/` is a PREFIX, per the shared grammar (verbMatches).
 const CONTRACT_VERB = "/api/contract";
 const API_ROUTES = [
-  { verb: "/api/focus", handler: async (ctx, res) => {
+  {
+    verb: "/api/focus",
+    handler: async (ctx, res) => {
       if (ctx.method === "POST") {
         const raw = await ctx.readBody();
         let patch;
-        try { patch = JSON.parse(raw || "null"); }
-        catch (e) { return sendJson(res, 400, { ok: false, error: `focus write is not valid JSON: ${e.message}` }); }
+        try {
+          patch = JSON.parse(raw || "null");
+        } catch (e) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: `focus write is not valid JSON: ${e.message}`,
+          });
+        }
         // Read at call time from THIS request. A header on one request says nothing
         // about the next one.
-        const verified = IDENTITY_HEADER ? (ctx.headers[IDENTITY_HEADER] || null) : null;
-        const result = writeFocus(patch, typeof verified === "string" && verified ? verified : null);
+        const verified = IDENTITY_HEADER ? ctx.headers[IDENTITY_HEADER] || null : null;
+        const result = writeFocus(
+          patch,
+          typeof verified === "string" && verified ? verified : null,
+        );
         return sendJson(res, result.ok ? 200 : 400, result);
       }
       // The read the record never had. `?since=` is the change-signal contract,
       // not a second polling mechanism — see contract/change-signal.md.
       const since = ctx.searchParams.get("since");
       const marker = focusMarker();
-      return sendJson(res, 200, { ok: true, changed: since === null || since !== marker, marker, focus: focusRecord });
-  } },
-  { verb: "/api/drive", handler: async (ctx, res) => {
+      return sendJson(res, 200, {
+        ok: true,
+        changed: since === null || since !== marker,
+        marker,
+        focus: focusRecord,
+      });
+    },
+  },
+  {
+    verb: "/api/drive",
+    handler: async (ctx, res) => {
       if (ctx.method === "POST") {
         const raw = await ctx.readBody();
         let body;
-        try { body = JSON.parse(raw || "null"); }
-        catch (e) { return sendJson(res, 400, { ok: false, error: `drive op is not valid JSON: ${e.message}` }); }
+        try {
+          body = JSON.parse(raw || "null");
+        } catch (e) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: `drive op is not valid JSON: ${e.message}`,
+          });
+        }
         // `surface` is the ADDRESS envelope, reserved like `gen`/`at`; the rest is
         // opaque intent for that surface.
-        const { surface, ...op } = (body && typeof body === "object" && !Array.isArray(body)) ? body : { surface: null };
+        const { surface, ...op } =
+          body && typeof body === "object" && !Array.isArray(body) ? body : { surface: null };
         const result = writeDrive(surface, op);
         return sendJson(res, result.ok ? 200 : 400, result);
       }
@@ -1137,17 +1464,19 @@ const API_ROUTES = [
       // before the next op. POST returns on RECORD; this is how apply is observed.
       const surface = ctx.searchParams.get("surface");
       if (typeof surface !== "string" || !surface.trim()) {
-        return sendJson(res, 400, { ok: false, error: "GET /api/drive must name ?surface=<id> — ops are per-surface" });
+        return sendJson(res, 400, {
+          ok: false,
+          error: "GET /api/drive must name ?surface=<id> — ops are per-surface",
+        });
       }
       const slot = driveSlot(surface);
       slot.reads += 1;
       driveReads += 1;
       // AN ACK MUST BE A GENERATION ACTUALLY RECORDED FOR THIS SURFACE — MEMBERSHIP,
-      // not merely monotonic and below the latest gen (review.r2 MF2, re-round).
-      // `gen` is global, so bounding by the surface's own latest gen still admits
-      // a FOREIGN gen: A=1, B=2, A=3 leaves A's recorded set {1,3}, and 2 <= 3 —
-      // acking 2 on A once passed. Now the ack must be IN A's recorded set and
-      // forward of the watermark; a future gen (never recorded) and a foreign gen
+      // not merely monotonic and below the latest gen. `gen` is global, so
+      // bounding by the surface's own latest gen would still admit a FOREIGN gen:
+      // A=1, B=2, A=3 leaves A's recorded set {1,3}, and 2 <= 3. So the ack must be
+      // IN A's recorded set and forward of the watermark; a future gen (never recorded) and a foreign gen
       // (recorded for another surface) are both refused. Once acked, generations
       // at or below the watermark are pruned — monotonicity keeps them un-ackable.
       const applied = Number(ctx.searchParams.get("applied"));
@@ -1157,52 +1486,108 @@ const API_ROUTES = [
       }
       const since = ctx.searchParams.get("since");
       const marker = driveMarker(slot);
-      return sendJson(res, 200, { ok: true, surface, changed: since === null || since !== marker,
-        marker, op: slot.op, appliedGen: slot.appliedGen });
-  } },
-  { verb: "/api/capture-target", handler: async (ctx, res) => {
+      return sendJson(res, 200, {
+        ok: true,
+        surface,
+        changed: since === null || since !== marker,
+        marker,
+        op: slot.op,
+        appliedGen: slot.appliedGen,
+      });
+    },
+  },
+  {
+    verb: "/api/capture-target",
+    handler: async (ctx, res) => {
       if (ctx.method === "POST") {
         const raw = await ctx.readBody();
         let body;
-        try { body = JSON.parse(raw || "null"); }
-        catch (e) { return sendJson(res, 400, { ok: false, error: `capture-target is not valid JSON: ${e.message}` }); }
+        try {
+          body = JSON.parse(raw || "null");
+        } catch (e) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: `capture-target is not valid JSON: ${e.message}`,
+          });
+        }
         // null withdraws it. A surface that navigates away from a capturable
         // screen should be able to say so.
-        if (body === null || body?.root === null) { captureTarget = null; return sendJson(res, 200, { ok: true, target: null }); }
+        if (body === null || body?.root === null) {
+          captureTarget = null;
+          return sendJson(res, 200, { ok: true, target: null });
+        }
         if (typeof body?.root !== "string" || !body.root) {
-          return sendJson(res, 400, { ok: false, error: "capture-target names no root KIND — send { root, path }" });
+          return sendJson(res, 400, {
+            ok: false,
+            error: "capture-target names no root KIND — send { root, path }",
+          });
         }
         // REFUSED AT DECLARATION, not at write time. A target that cannot be
         // expressed unsafely cannot be inherited unsafely by whatever captures.
         const r2 = resolveInRoot(body.root, body.path);
         if (!r2.ok) return sendJson(res, 400, { ok: false, error: r2.error });
-        captureTarget = { root: r2.root, path: r2.path, declaredPath: body.path, at: new Date().toISOString() };
+        captureTarget = {
+          root: r2.root,
+          path: r2.path,
+          declaredPath: body.path,
+          at: new Date().toISOString(),
+        };
         return sendJson(res, 200, { ok: true, target: captureTarget });
       }
       return sendJson(res, 200, { ok: true, target: captureTarget });
-  } },
-  { verb: "/api/annotations", handler: async (ctx, res) => {
+    },
+  },
+  {
+    verb: "/api/annotations",
+    handler: async (ctx, res) => {
       if (ctx.method === "POST") {
         const raw = await ctx.readBody();
         let body;
-        try { body = JSON.parse(raw || "null"); }
-        catch (e) { return sendJson(res, 400, { ok: false, error: `annotations write is not valid JSON: ${e.message}` }); }
+        try {
+          body = JSON.parse(raw || "null");
+        } catch (e) {
+          return sendJson(res, 400, {
+            ok: false,
+            error: `annotations write is not valid JSON: ${e.message}`,
+          });
+        }
         const scope = typeof body?.scope === "string" && body.scope ? body.scope : null;
-        if (!scope) return sendJson(res, 400, { ok: false, error: "annotations write names no scope — send { scope, records }" });
-        if (!Array.isArray(body?.records)) return sendJson(res, 400, { ok: false, error: "annotations write has no records array — send { scope, records }" });
+        if (!scope)
+          return sendJson(res, 400, {
+            ok: false,
+            error: "annotations write names no scope — send { scope, records }",
+          });
+        if (!Array.isArray(body?.records))
+          return sendJson(res, 400, {
+            ok: false,
+            error: "annotations write has no records array — send { scope, records }",
+          });
         annotations.set(scope, body.records);
         annotationWrites += 1;
-        try { persistAnnotations(); }
-        catch (e) { return sendJson(res, 500, { ok: false, error: `annotations could not be persisted: ${e.message}` }); }
+        try {
+          persistAnnotations();
+        } catch (e) {
+          return sendJson(res, 500, {
+            ok: false,
+            error: `annotations could not be persisted: ${e.message}`,
+          });
+        }
         return sendJson(res, 200, { ok: true, scope, records: body.records });
       }
       // Read is scoped. Without a scope this answers an EMPTY set rather than
       // every scope on the box: a caller that forgot the parameter would otherwise
       // receive another surface's marks and render them over this one.
       const scope = ctx.searchParams.get("scope");
-      return sendJson(res, 200, { ok: true, scope: scope || null, records: scope ? (annotations.get(scope) || []) : [] });
-  } },
-  { verb: CONTRACT_VERB, handler: (ctx, res) => {
+      return sendJson(res, 200, {
+        ok: true,
+        scope: scope || null,
+        records: scope ? annotations.get(scope) || [] : [],
+      });
+    },
+  },
+  {
+    verb: CONTRACT_VERB,
+    handler: (ctx, res) => {
       return sendJson(res, 200, {
         contractVersion: CONTRACT_VERSION,
         // VERSION IS READ, NEVER TYPED. A runtime that states its own version from a
@@ -1211,25 +1596,37 @@ const API_ROUTES = [
         // consumers can act on it, which makes a stale value worse than none. Read
         // from the package this file is part of; null if that cannot be read, because
         // "I do not know" is an answer and a guess is not.
-        runtime: { name: "openrig-studio", version: SDK_VERSION, flavor: "reference-fixture", boot: BOOT_ID,
+        runtime: {
+          name: "openrig-studio",
+          version: SDK_VERSION,
+          flavor: MODE === "demo" ? "reference-fixture" : "workspace",
+          boot: BOOT_ID,
           // THE SERVING TABLE ITSELF, enumerated. Not observed, not registered,
           // not approximated: the same rows dispatch walks on every request. A
           // test compares this against the classification, so a route that
           // exists but is unclassified is caught by the runtime's own account —
           // and a route cannot exist without a row, because dispatch only
           // consults rows.
-          routes: API_ROUTES.map((r) => r.verb).sort() },
+          routes: API_ROUTES.map((r) => r.verb).sort(),
+        },
         capabilities: CAPABILITIES,
         // Inspectable without posting: an agent can ask whether anything is
         // listening before it drives, rather than learning from a no-op.
-        drive: { listening: driveReads > 0, reads: driveReads, ops: driveSeq, surfaces: driveSlots.size },
+        drive: {
+          listening: driveReads > 0,
+          reads: driveReads,
+          ops: driveSeq,
+          surfaces: driveSlots.size,
+        },
         // WHICH KIND OF `by` THIS RUNTIME PRODUCES. focus.md tells a consumer not
         // to build a trust decision on `by` without knowing which kind of runtime
         // made it — and until now there was no way to ask. The header NAME is
         // reported, not any value: a consumer needs to know attribution is
         // verified, not who by.
-        focus: { attribution: IDENTITY_HEADER ? "verified" : "caller-declared",
-                 identityHeader: IDENTITY_HEADER },
+        focus: {
+          attribution: IDENTITY_HEADER ? "verified" : "caller-declared",
+          identityHeader: IDENTITY_HEADER,
+        },
         // MEASURED, not declared. "session only" and "persisted" are two different
         // promises to whoever just drew a mark, and a consumer should be able to
         // tell which one it got without drawing one and restarting to find out.
@@ -1238,62 +1635,118 @@ const API_ROUTES = [
         // declaring — and an operator can see why a declaration was refused.
         // NOTHING CONSUMES `target` YET: the capture action is not in this
         // runtime. Reported so the seam is observable rather than inert.
-        capture: { target: captureTarget, roots: Object.keys(BOUND_ROOTS).sort(),
-                   consumedBy: null },
-        annotations: { persistence: ANNOTATIONS_FILE ? "file" : "memory",
-                       scopes: annotations.size, writes: annotationWrites },
+        capture: {
+          target: captureTarget,
+          roots: Object.keys(BOUND_ROOTS).sort(),
+          consumedBy: null,
+        },
+        annotations: {
+          persistence: ANNOTATIONS_FILE ? "file" : "memory",
+          scopes: annotations.size,
+          writes: annotationWrites,
+        },
         manifest: manifestReport(),
       });
-  } },
+    },
+  },
   { verb: "/api/factory/state", handler: (ctx, res) => sendJson(res, 200, factoryState()) },
-  { verb: "/api/events", handler: (ctx, res) => {
-      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+  {
+    verb: "/api/events",
+    handler: (ctx, res) => {
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-store",
+        connection: "keep-alive",
+      });
       res.write(`: connected\n\n`);
       sseClients.add(res);
       ctx.onClose(() => sseClients.delete(res));
       return;
-  } },
-  { verb: "/api/files/tree", handler: (ctx, res) => {
+    },
+  },
+  {
+    verb: "/api/files/tree",
+    handler: (ctx, res) => {
       const t = filesTree(ctx.searchParams.get("dir"));
-      return t ? sendJson(res, 200, { ok: true, ...t })
-        : sendJson(res, 400, { ok: false, error: "path outside the files root — files verbs are pinned to the runtime's files-root" });
-  } },
-  { verb: "/api/files/read", handler: (ctx, res) => {
+      return t
+        ? sendJson(res, 200, { ok: true, ...t })
+        : sendJson(res, 400, {
+            ok: false,
+            error:
+              "path outside the files root — files verbs are pinned to the runtime's files-root",
+          });
+    },
+  },
+  {
+    verb: "/api/files/read",
+    handler: (ctx, res) => {
       const r = insideRoot(ctx.searchParams.get("path") || "");
       if (!r || !fs.existsSync(r) || fs.statSync(r).isDirectory())
         return sendJson(res, 404, { ok: false, error: "not found or outside the files root" });
       const kind = fileKind(r);
-      if (["markdown", "text", "html"].includes(kind) || (kind === "other" && fs.statSync(r).size < 512 * 1024))
-        return sendJson(res, 200, { ok: true, kind: kind === "other" ? "text" : kind,
-          content: fs.readFileSync(r, "utf8"), mtime: fs.statSync(r).mtimeMs });
-      return sendJson(res, 200, { ok: true, kind, raw: "/api/files/raw?path=" + encodeURIComponent(r), mtime: fs.statSync(r).mtimeMs });
-  } },
-  { verb: "/api/files/raw", handler: (ctx, res) => {
+      if (
+        ["markdown", "text", "html"].includes(kind) ||
+        (kind === "other" && fs.statSync(r).size < 512 * 1024)
+      )
+        return sendJson(res, 200, {
+          ok: true,
+          kind: kind === "other" ? "text" : kind,
+          content: fs.readFileSync(r, "utf8"),
+          mtime: fs.statSync(r).mtimeMs,
+        });
+      return sendJson(res, 200, {
+        ok: true,
+        kind,
+        raw: "/api/files/raw?path=" + encodeURIComponent(r),
+        mtime: fs.statSync(r).mtimeMs,
+      });
+    },
+  },
+  {
+    verb: "/api/files/raw",
+    handler: (ctx, res) => {
       // Errors are 4xx JSON { ok:false, error } per runtime-api; only a REGULAR
-      // FILE is served as bytes (review.r2 IMPORTANT). Two defects fixed here: a
-      // bare empty 404 violated the error shape directly, and a DIRECTORY passed
-      // existsSync, got 200 headers written, then failed mid-stream — a success
-      // response committed before the read could fail. The decision is made
-      // BEFORE any status is written.
+      // FILE is served as bytes. A directory passes existsSync, so checking only
+      // existence would write 200 headers and then fail mid-stream. The decision
+      // is made BEFORE any status is written.
       const r = insideRoot(ctx.searchParams.get("path") || "");
       let st = null;
-      if (r) { try { st = fs.statSync(r); } catch {} }
-      if (!r || !st || !st.isFile()) {
-        return sendJson(res, 404, { ok: false,
-          error: "raw file not found, not a regular file, or outside the files root" });
+      if (r) {
+        try {
+          st = fs.statSync(r);
+        } catch {}
       }
-      res.writeHead(200, { "content-type": TYPES[path.extname(r).toLowerCase()] || "application/octet-stream",
-        "content-length": st.size, "cache-control": "no-store" });
+      if (!r || !st || !st.isFile()) {
+        return sendJson(res, 404, {
+          ok: false,
+          error: "raw file not found, not a regular file, or outside the files root",
+        });
+      }
+      res.writeHead(200, {
+        "content-type": TYPES[path.extname(r).toLowerCase()] || "application/octet-stream",
+        "content-length": st.size,
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        ...rawSandbox(r),
+      });
       return res.pipeFrom(fs.createReadStream(r));
-  } },
-  { verb: "/api/files/search", handler: (ctx, res) => {
+    },
+  },
+  {
+    verb: "/api/files/search",
+    handler: (ctx, res) => {
       const q = (ctx.searchParams.get("q") || "").trim();
       return sendJson(res, 200, { ok: true, hits: q.length < 2 ? [] : filesSearch(q) });
-  } },
+    },
+  },
 ];
 // <<< API ROUTING SURFACE
 
 const handleRequest = async (req, res) => {
+  // A live activation may have just swapped the composition this runtime reads its manifest through (the Studio's
+  // tools/runtime-extensions.mjs). The same integrity check the timer runs, made first, so no request is answered from
+  // the composition that was replaced.
+  integrityCheck();
   // THE RAW REQUEST IS CONFINED TO THIS ADAPTER. `req` — and therefore its
   // `url` in ANY spelling (`req.url`, `req["url"]`, destructuring, aliasing) — is
   // referenced only to route and to build the handler context, and is NEVER
@@ -1302,10 +1755,9 @@ const handleRequest = async (req, res) => {
   // accessors but NO url and NO req, so a path special-case downstream has
   // nothing to branch on — a data-flow boundary, not a spelling. The
   // req-confinement guard in reserved-verbs.test.mjs asserts `req` appears
-  // nowhere but here (an earlier version counted the literal `req.url`, and a
-  // property-access spelling walked straight past it — RS-C1 / MF1). The api
-  // branch holds no pathname (round 5); the resolver returns data, not authority
-  // (round 6). See docs/design/routing-data-boundary.md before simplifying it.
+  // nowhere but here (counting the literal `req.url` would miss a property-access
+  // spelling). The api branch holds no pathname, and the resolver returns data,
+  // not authority. Read the guards in test/reserved-verbs.test.mjs before simplifying it.
   const decision = routeRequest(req.url, `http://127.0.0.1:${PORT}`, API_ROUTES);
   if (decision.api) {
     const m = decision.api;
@@ -1317,10 +1769,14 @@ const handleRequest = async (req, res) => {
       if (row) {
         // `ctx` is the request-side surface (app/handler-context.mjs): only data
         // and callbacks the runtime owns, never the native request or an emitter.
-        const ctx = makeCtx(req, { searchParams: m.searchParams, verb: row.verb, rest: m.rest }, readBody);
-        // A RESPONSE FACADE, not the raw `res` (MF1). Node's ServerResponse
+        const ctx = makeCtx(
+          req,
+          { searchParams: m.searchParams, verb: row.verb, rest: m.rest },
+          readBody,
+        );
+        // A RESPONSE FACADE, not the raw `res`. Node's ServerResponse
         // back-references the request (`res.req`, the socket), so handing
-        // handlers `res` let an ordinary handler read the url. The facade gives
+        // handlers `res` would let an ordinary handler read the url. The facade gives
         // ONLY the response methods handlers use and hands no native object —
         // response or request — into handler-controlled code in ANY direction
         // (see app/response-facade.mjs). sendJson(facade, …) works (writeHead +
@@ -1328,17 +1784,27 @@ const handleRequest = async (req, res) => {
         // source rather than handing the source `res`.
         await row.handler(ctx, makeResFacade(res));
       } else sendJson(res, 404, m.notFound);
-    } catch (e) { return sendJson(res, 500, { ok: false, error: String(e.message || e) }); }
+    } catch (e) {
+      return sendJson(res, 500, { ok: false, error: String(e.message || e) });
+    }
     return;
   }
   const u = decision.static.url;
+  // Every page this runtime serves (the shell, each app's surface, a consumer's pages) acts as the owner when it's used,
+  // so only this Studio's own pages may frame one: another site can't put it in a frame of its own and trick clicks into
+  // it. Set once here, for every static answer.
+  res.setHeader("content-security-policy", "frame-ancestors 'self'");
+  res.setHeader("x-frame-options", "SAMEORIGIN");
 
   // the manifest is served as its VALIDATED projection, not the raw file —
   // this is where "invalid rows are excluded from the served rail" is true.
   // The raw file stays on disk for editing; consumers see valid rows only,
   // and the validation report lives at /api/contract.
   if (u.pathname === "/surfaces.json") {
-    const doc = packageSource.result.doc && typeof packageSource.result.doc === "object" ? packageSource.result.doc : {};
+    const doc =
+      packageSource.result.doc && typeof packageSource.result.doc === "object"
+        ? packageSource.result.doc
+        : {};
     // A consumer may contribute the SEAT ROSTER the same way it contributes
     // surfaces. Previously only `surfaces` was overridden, so the package
     // document's own roster reached every install and a consumer's declared
@@ -1353,17 +1819,30 @@ const handleRequest = async (req, res) => {
     // something the runtime is not doing is the failure mode this codebase
     // keeps paying for, and two copies of one rule is how you get there.
     const live = servedSeats();
-    const seats = live.source === "consumer" ? { chatSeats: live.rows } : {};
-    const chatPort = live.source === "consumer" && live.chatLocalPort !== undefined
-      ? { chatLocalPort: live.chatLocalPort } : {};
+    const seats =
+      live.source === "consumer"
+        ? { chatSeats: live.rows, ...(live.from ? { chatSeatsFrom: live.from } : {}) }
+        : {};
+    const chatPort =
+      live.source === "consumer" && live.chatLocalPort !== undefined
+        ? { chatLocalPort: live.chatLocalPort }
+        : {};
     // A box may introduce itself to whoever opens it. Consumer-declared, never
     // shipped: this runtime goes to every box and knows none of their seat
     // names, so a welcome written into a surface would be the bespoke lineage
     // that keeps having to be removed from apps. Carried, not interpreted.
     const consumerDoc = consumerSource?.result?.doc;
-    const welcome = consumerDoc && typeof consumerDoc.welcome === "object" && consumerDoc.welcome
-      ? { welcome: consumerDoc.welcome } : {};
-    return sendJson(res, 200, { ...doc, ...seats, ...chatPort, ...welcome, surfaces: mergedSurfaces().rows });
+    const welcome =
+      consumerDoc && typeof consumerDoc.welcome === "object" && consumerDoc.welcome
+        ? { welcome: consumerDoc.welcome }
+        : {};
+    return sendJson(res, 200, {
+      ...doc,
+      ...seats,
+      ...chatPort,
+      ...welcome,
+      surfaces: mergedSurfaces().rows,
+    });
   }
 
   // static: shell.html at /, surfaces + assets from the app dir — and, when a
@@ -1380,7 +1859,12 @@ const handleRequest = async (req, res) => {
   const within = (root, sub) => {
     const candidate = path.join(root, path.normalize(sub));
     let real, realRoot;
-    try { real = fs.realpathSync(candidate); realRoot = fs.realpathSync(root); } catch { return null; }
+    try {
+      real = fs.realpathSync(candidate);
+      realRoot = fs.realpathSync(root);
+    } catch {
+      return null;
+    }
     if (real !== realRoot && !real.startsWith(realRoot + path.sep)) return null;
     if (fs.statSync(real).isDirectory()) return null;
     return real;
@@ -1400,17 +1884,20 @@ const handleRequest = async (req, res) => {
   if (ownedBy === "consumer") {
     const file = within(OVERLAY_DIR, rel.slice("surfaces/".length));
     if (!file) {
-      // NO cross-owner fallback. A registered consumer row whose page is
+      // NO fallback to the package's page. A registered consumer row whose page is
       // missing must fail as itself — quietly serving the package's bytes
       // under the consumer's row would be a lie about what is being served.
       res.writeHead(404, { "content-type": "text/plain" });
       return res.end(
         `not found: ${u.pathname}\n` +
-        `a consumer surface is registered for this path but its page is missing from ${OVERLAY_DIR}\n` +
-        `(the package's page is NOT substituted — registration and file must agree)`
+          `a consumer surface is registered for this path but its page is missing from ${OVERLAY_DIR}\n` +
+          `(the package's page is NOT substituted — registration and file must agree)`,
       );
     }
-    res.writeHead(200, { "content-type": TYPES[path.extname(file)] || "application/octet-stream", "cache-control": "no-store" });
+    res.writeHead(200, {
+      "content-type": TYPES[path.extname(file)] || "application/octet-stream",
+      "cache-control": "no-store",
+    });
     return res.end(fs.readFileSync(file));
   }
 
@@ -1426,10 +1913,10 @@ const handleRequest = async (req, res) => {
     res.writeHead(404, { "content-type": "text/plain" });
     return res.end(
       `not found: ${u.pathname}\n` +
-      `no declared surface claims this path — the runtime serves only the SDK's own declared ` +
-      `surfaces plus your overlay-declared ones\n` +
-      `(if this file is in the installed package, it is undeclared content; see manifest.warnings ` +
-      `at ${CONTRACT_VERB})`
+        `no declared surface claims this path — the runtime serves only the SDK's own declared ` +
+        `surfaces plus your overlay-declared ones\n` +
+        `(if this file is in the installed package, it is undeclared content; see manifest.warnings ` +
+        `at ${CONTRACT_VERB})`,
     );
   }
 
@@ -1438,9 +1925,14 @@ const handleRequest = async (req, res) => {
   const file = within(HERE, rel);
   if (!file) {
     res.writeHead(404, { "content-type": "text/plain" });
-    return res.end(`not found: ${u.pathname}\n(surfaces live under /surfaces/, contract meta at ${CONTRACT_VERB})`);
+    return res.end(
+      `not found: ${u.pathname}\n(surfaces live under /surfaces/, contract meta at ${CONTRACT_VERB})`,
+    );
   }
-  res.writeHead(200, { "content-type": TYPES[path.extname(file)] || "application/octet-stream", "cache-control": "no-store" });
+  res.writeHead(200, {
+    "content-type": TYPES[path.extname(file)] || "application/octet-stream",
+    "cache-control": "no-store",
+  });
   res.end(fs.readFileSync(file));
 };
 
@@ -1468,7 +1960,13 @@ const handleRequest = async (req, res) => {
 watchForChanges();
 loadManifest();
 setInterval(integrityCheck, 1000).unref?.();
-setInterval(() => { for (const res of sseClients) { try { res.write(`: heartbeat\n\n`); } catch {} } }, 25000).unref();
+setInterval(() => {
+  for (const res of sseClients) {
+    try {
+      res.write(`: heartbeat\n\n`);
+    } catch {}
+  }
+}, 25000).unref();
 // Marks written by a previous run of this file-backed runtime. Omitting this call
 // is not a visible failure: writing works, the board looks healthy, and the loss
 // only appears on the next restart. A test restarts the runtime rather than
@@ -1480,10 +1978,19 @@ loadAnnotations();
 // No boot-time walk registers routes any more: `runtime.routes` enumerates the
 // dispatch table directly, so the set is complete the moment the module loads.
 
-http.createServer(handleRequest).listen(PORT, "127.0.0.1", () => {
-  console.log(`openrig studio runtime: http://127.0.0.1:${PORT}/  (contract v${CONTRACT_VERSION})`);
+// --port 0 lets the OS choose; the line below reports the port actually bound.
+const server = http.createServer(handleRequest).listen(PORT, "127.0.0.1", () => {
+  console.log(
+    `openrig studio runtime: http://127.0.0.1:${server.address().port}/  (contract v${CONTRACT_VERSION})`,
+  );
   console.log(`fixtures: ${FIXTURES}`);
   const report = manifestReport();
-  if (OVERLAY_DIR) console.log(`consumer surfaces: ${OVERLAY_DIR} (repo-owned; nothing is written into the package)`);
-  if (report.errors.length) console.error(`manifest has ${report.errors.length} error(s) — serving ${report.surfaces} valid surface(s); see ${CONTRACT_VERB}`);
+  if (OVERLAY_DIR)
+    console.log(
+      `consumer surfaces: ${OVERLAY_DIR} (repo-owned; nothing is written into the package)`,
+    );
+  if (report.errors.length)
+    console.error(
+      `manifest has ${report.errors.length} error(s) — serving ${report.surfaces} valid surface(s); see ${CONTRACT_VERB}`,
+    );
 });

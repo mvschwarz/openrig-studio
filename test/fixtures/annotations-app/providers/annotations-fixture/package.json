@@ -1,0 +1,8 @@
+{
+  "name": "@example/annotations-fixture",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Test fixture: an app that consumes the SDK's annotation seams (stored HTML artifacts, canvases and annotations). Not published.",
+  "private": true
+}

@@ -30,15 +30,47 @@ This is the path for surfaces owned by the SDK itself.
   "hint": "one line about what this surface is" }
 ```
 
-3. Reload the shell. Your surface appears on the rail. That is the entire
-   registration surface — there is no build step and no other file to touch.
+3. Your surface appears on the rail at the shell's next registry check, within
+   a couple of seconds. That is the entire registration surface — there is no
+   build step and no other file to touch.
 
 **Rediscovery semantics (v0.1):** the **runtime** re-validates the manifest
-live whenever the file changes — `GET /api/contract` reflects an edit within
-about a second, no restart needed. The **shell**, however, reads the manifest
-once at load: an already-open shell tab does **not** rediscover new or changed
-rows — reload the shell tab to see rail changes. Live rail rediscovery is a
-candidate contract addition, not an unstated current behavior.
+whenever the file changes, and again at the start of every request, so
+`GET /api/contract` and `/surfaces.json` reflect an edit at once, no restart
+needed. The **shell** reads the contract and the surface registry every two
+seconds: added, renamed and removed rows reach the rail without reloading the
+page. An open app's frame keeps its document, scroll and unsaved input unless
+its own row changed; a new runtime boot alone changes no frame. A read that
+fails keeps the last app list, and the shell says the update couldn't be
+checked once it has failed three times running. A removed app that is open
+keeps its document until another app is chosen.
+
+An optional opaque `revision` string identifies an app's code. A changed
+`revision` or target (`path`/`url`) reloads only that app's frame. The launcher
+(`tools/studio.mjs`) derives the revision from the registered app's contents and
+the providers it calls; a consumer manifest kept by hand may set its own. Without
+a changed revision or target, changing a page's bytes alone does not reload an
+open frame. An app that changes keeps its own durable state, or declares what to
+preserve.
+
+**Live activation.** The launcher watches the registration record,
+`.studio-release/extensions.json` (written by `tools/install-app.mjs` and the
+release tools after an install, update, removal, upgrade or rollback; see
+release.md). For each new marker it composes the apps again into a staging
+folder, starts each new or changed extension provider on a fresh port (through
+the same launcher as every other child: supervised, with the per-boot child key
+and any server hooks' child settings) and waits until it listens, then swaps the
+pages, vendor files, routes and manifest in one step and retires the providers
+it replaced. Base providers that the record doesn't name are never restarted.
+The outcome for that marker is written to `.runtime/extensions-status.json`
+(`state` `active` or `failed`). That records registration activation, not that a
+process is still alive. As at boot, an enabled app that can't be composed (no
+`app.json`, no surface entry) is left out and listed in the status's `missing`,
+and the rest activates; what the boot refuses to start on, activation refuses.
+A failure keeps every running app as it was; the next
+marker is tried afresh. A change to the shipped SDK or Apps themselves (a new
+`.studio-release/installed.json` artifact) still needs the normal Studio
+restart, and is reported as `failed` with that reason.
 
 Field semantics and stability marks: `surface-row.schema.json` (each property
 carries a `description` and an `x-stability` mark). Required: `id` (unique),
@@ -181,10 +213,17 @@ appear on the rail, the reason is spelled out there.
 - `chatSeats[]` — the agent-sidebar roster (`{seat, name}` rows). The shell
   renders it; surfaces may summon it (see `shell-protocol.md`). Surfaces do
   **not** write it, and it is not part of the surface-row schema.
-- `chatLocalPort` — the port a seat terminal is served on when the shell is
-  reached over loopback. Without it a declared roster is **listed but not
-  attachable**, which is a configuration gap rather than an empty rig, and the
-  runtime warns saying so.
+- `chatLocalPort` — present when the Studio serves seat terminals: the shell
+  then opens a seat at this origin's `/chat/?arg=<seat>`. The terminal itself
+  listens on a private Unix socket, never on this port (see
+  `server-hooks.md`, "The seat terminals at `/chat`"). Without it a declared
+  roster is **listed but not attachable**: the shell still lists every member,
+  marked not attachable. The runtime warns about a roster someone declared;
+  the launcher's boot line says why a rig's roster has no terminal.
+- `chatSeatsFrom` — written by the launcher (`tools/studio.mjs`): `"rig"` when
+  the roster was read from the Studio's rig, `"declared"` when it is the
+  Studio's own `chatSeats`, `"none"` when there is neither. The shell words
+  the agents panel by it. Absent, the roster is treated as declared.
 
 ### Seats REPLACE; surfaces MERGE (stable)
 
@@ -205,7 +244,7 @@ Consequences worth knowing:
 - Declaring `chatSeats` at all takes ownership of the whole roster. There is no
   way to add one seat to the package's list, and that is intentional.
 - A **declared but unusable** roster is warned, per case: not an array at all;
-  rows carrying no usable `seat`; or a roster with no `chatLocalPort`. Absence
+  rows carrying no usable `seat`; or a declared roster with no `chatLocalPort`. Absence
   is silent because the key is optional — a declaration that does nothing is
   not.
 - `GET /api/contract` → `manifest.seats` reports `{ count, source, attachable }`.
@@ -215,6 +254,6 @@ Consequences worth knowing:
 
 ## The example fixture posture
 
-The reference runtime ships with one surface, FLOOR, which renders the fixture rig state. Your first surface's row goes beside it. The fixture data behind the runtime's API verbs
+The reference runtime ships with one surface, Floor, which renders the fixture rig state. Your first surface's row goes beside it. The fixture data behind the runtime's API verbs
 (`fixtures/`) is already populated, so a new surface has real data to render
 on its first load.

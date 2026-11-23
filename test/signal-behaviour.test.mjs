@@ -9,7 +9,14 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { watchSignal, preserveAcross, deferWhileDirty, declaredKinds, preserveDeclared, standardAdapter } from "../app/signal.js";
+import {
+  watchSignal,
+  preserveAcross,
+  deferWhileDirty,
+  declaredKinds,
+  preserveDeclared,
+  standardAdapter,
+} from "../app/signal.js";
 
 // A scripted transport. Each entry is one response, consumed in order.
 function transport(script) {
@@ -44,9 +51,12 @@ test("a change is detected via the SERVER marker, not a client-computed signatur
   const first = { changed: false, marker: "m1", ...PAYLOAD };
   const second = { changed: true, marker: "m2", ...PAYLOAD };
   const payloadOf = ({ changed, marker, ...rest }) => JSON.stringify(rest);
-  assert.equal(payloadOf(first), payloadOf(second),
+  assert.equal(
+    payloadOf(first),
+    payloadOf(second),
     "the two scripted responses differ outside the marker, so this case no longer proves a " +
-    "signature would miss the change — it would notice the payload difference");
+      "signature would miss the change — it would notice the payload difference",
+  );
 
   const t = transport([
     { body: { runtime: { boot: "b1" } } },
@@ -56,8 +66,14 @@ test("a change is detected via the SERVER marker, not a client-computed signatur
     // same value and report nothing; the marker moved, so this is a change.
     { body: second },
   ]);
-  const w = watchSignal({ verbs: ["/api/x"], interval: 5, fetchImpl: t.fetchImpl, onData: (d) => seen.push(d.marker) });
-  await settle(); await settle();
+  const w = watchSignal({
+    verbs: ["/api/x"],
+    interval: 5,
+    fetchImpl: t.fetchImpl,
+    onData: (d) => seen.push(d.marker),
+  });
+  await settle();
+  await settle();
   w.stop();
   assert.deepEqual(seen, ["m2"], `expected exactly the marker move: ${JSON.stringify(seen)}`);
 });
@@ -70,7 +86,8 @@ test("the cursor is sent back as ?since= so the server can answer 'nothing chang
     { body: { changed: false, marker: "m1" } },
   ]);
   const w = watchSignal({ verbs: ["/api/x"], interval: 5, fetchImpl: t.fetchImpl });
-  await settle(); await settle();
+  await settle();
+  await settle();
   w.stop();
   const second = t.calls.filter((u) => u.startsWith("/api/x"))[1];
   assert.match(second, /since=m1/, `the cursor was not sent back: ${second}`);
@@ -82,17 +99,27 @@ test("process identity is latched on the FIRST observation even when that poll F
   // succeeds it is already the new process and becomes the baseline.
   const codes = [];
   const t = transport([
-    { throw: "provider not up yet" },              // first observation: FAILS
+    { throw: "provider not up yet" }, // first observation: FAILS
     { body: { changed: false, marker: "m1" } },
-    { body: { runtime: { boot: "b2" } } },         // now reachable, different id
+    { body: { runtime: { boot: "b2" } } }, // now reachable, different id
     { body: { changed: false, marker: "m1" } },
   ]);
-  const w = watchSignal({ verbs: ["/api/x"], interval: 5, fetchImpl: t.fetchImpl, onCode: (c) => codes.push(c) });
-  await settle(); await settle();
+  const w = watchSignal({
+    verbs: ["/api/x"],
+    interval: 5,
+    fetchImpl: t.fetchImpl,
+    onCode: (c) => codes.push(c),
+  });
+  await settle();
+  await settle();
   w.stop();
   // Latched undefined on the failed first read, so the later real id is a CHANGE
   // rather than the baseline.
-  assert.equal(codes.length, 1, `expected the straddling restart to be seen: ${JSON.stringify(codes)}`);
+  assert.equal(
+    codes.length,
+    1,
+    `expected the straddling restart to be seen: ${JSON.stringify(codes)}`,
+  );
 });
 
 test("an UNCHANGED process identity never triggers a reload, however much data moves", async () => {
@@ -105,8 +132,14 @@ test("an UNCHANGED process identity never triggers a reload, however much data m
     { body: { runtime: { boot: "b1" } } },
     { body: { changed: true, marker: "m2" } },
   ]);
-  const w = watchSignal({ verbs: ["/api/x"], interval: 5, fetchImpl: t.fetchImpl, onCode: (c) => codes.push(c) });
-  await settle(); await settle();
+  const w = watchSignal({
+    verbs: ["/api/x"],
+    interval: 5,
+    fetchImpl: t.fetchImpl,
+    onCode: (c) => codes.push(c),
+  });
+  await settle();
+  await settle();
   w.stop();
   assert.deepEqual(codes, [], "a data change triggered a page reload");
 });
@@ -121,18 +154,29 @@ test("a failed poll is REPORTED, and recovery is reported too", async () => {
     { body: { runtime: { boot: "b1" } } },
     { body: { changed: false, marker: "m1" } },
   ]);
-  const w = watchSignal({ verbs: ["/api/x"], interval: 5, fetchImpl: t.fetchImpl, onDegraded: (d) => states.push(d.degraded) });
-  await settle(); await settle();
+  const w = watchSignal({
+    verbs: ["/api/x"],
+    interval: 5,
+    fetchImpl: t.fetchImpl,
+    onDegraded: (d) => states.push(d.degraded),
+  });
+  await settle();
+  await settle();
   w.stop();
-  assert.deepEqual(states, [true, false], `expected degraded then recovered: ${JSON.stringify(states)}`);
+  assert.deepEqual(
+    states,
+    [true, false],
+    `expected degraded then recovered: ${JSON.stringify(states)}`,
+  );
 });
 
 test("a CONFORMING degraded read (HTTP 200, ok:false) is reported degraded, not delivered as data", async () => {
-  // review.r2 IMPORTANT: the contract's honest-degradation shape is HTTP 200 with
-  // { ok:false, degraded } (runtime-api.md). watchSignal checked only HTTP status,
-  // so a degraded envelope did not throw and sailed past as a healthy poll —
-  // onDegraded never fired and onData delivered the degraded body as fresh data.
-  const states = [], data = [];
+  // The contract's honest-degradation shape is HTTP 200 with
+  // { ok:false, degraded } (runtime-api.md). If watchSignal checked only HTTP
+  // status, a degraded envelope would sail past as a healthy poll: onDegraded
+  // would never fire and onData would deliver the degraded body as fresh data.
+  const states = [],
+    data = [];
   const t = transport([
     { body: { runtime: { boot: "b1" } } },
     // HTTP 200 but ok:false with a degraded reason, AND a moved marker — the
@@ -141,12 +185,25 @@ test("a CONFORMING degraded read (HTTP 200, ok:false) is reported degraded, not 
     { body: { runtime: { boot: "b1" } } },
     { body: { ok: true, changed: true, marker: "m2" } }, // recovery, real data
   ]);
-  const w = watchSignal({ verbs: ["/api/x"], interval: 5, fetchImpl: t.fetchImpl,
-    onDegraded: (d) => states.push(d.degraded), onData: (d) => data.push(d.marker) });
-  await settle(); await settle();
+  const w = watchSignal({
+    verbs: ["/api/x"],
+    interval: 5,
+    fetchImpl: t.fetchImpl,
+    onDegraded: (d) => states.push(d.degraded),
+    onData: (d) => data.push(d.marker),
+  });
+  await settle();
+  await settle();
   w.stop();
-  assert.deepEqual(states, [true, false], `a conforming degraded read was not reported/recovered: ${JSON.stringify(states)}`);
-  assert.ok(!data.includes("m1"), "the degraded body was delivered as fresh data — ok:false was ignored");
+  assert.deepEqual(
+    states,
+    [true, false],
+    `a conforming degraded read was not reported/recovered: ${JSON.stringify(states)}`,
+  );
+  assert.ok(
+    !data.includes("m1"),
+    "the degraded body was delivered as fresh data — ok:false was ignored",
+  );
   assert.ok(data.includes("m2"), "the recovered real data was not delivered");
 });
 
@@ -159,7 +216,11 @@ function withSessionStorage(fn) {
     setItem: (k, v) => store.set(k, String(v)),
     removeItem: (k) => store.delete(k),
   };
-  try { return fn(store); } finally { delete globalThis.sessionStorage; }
+  try {
+    return fn(store);
+  } finally {
+    delete globalThis.sessionStorage;
+  }
 }
 
 test("declared state survives a reload, and WITHOUT the helper the same state is lost", () => {
@@ -170,13 +231,21 @@ test("declared state survives a reload, and WITHOUT the helper the same state is
     const before = preserveAcross("demo", { capture: () => state });
     before.keep();
     let got = null;
-    const after = preserveAcross("demo", { restore: (s) => { got = s; } });
+    const after = preserveAcross("demo", {
+      restore: (s) => {
+        got = s;
+      },
+    });
     assert.equal(after.restored, true);
     assert.deepEqual(got, state);
 
     // The CONTROL, and without it this proves only that sessionStorage works:
     // a surface that does not adopt the helper has nothing to restore.
-    const naive = preserveAcross("other-surface", { restore: () => { throw new Error("nothing should restore"); } });
+    const naive = preserveAcross("other-surface", {
+      restore: () => {
+        throw new Error("nothing should restore");
+      },
+    });
     assert.equal(naive.restored, false, "state leaked to a surface that never captured any");
   });
 });
@@ -185,8 +254,11 @@ test("a restored slot is consumed, so a later reload does not resurrect stale st
   withSessionStorage(() => {
     preserveAcross("demo", { capture: () => ({ n: 1 }) }).keep();
     assert.equal(preserveAcross("demo", { restore: () => {} }).restored, true);
-    assert.equal(preserveAcross("demo", { restore: () => {} }).restored, false,
-      "the slot restored twice — a stale view would come back on an unrelated reload");
+    assert.equal(
+      preserveAcross("demo", { restore: () => {} }).restored,
+      false,
+      "the slot restored twice — a stale view would come back on an unrelated reload",
+    );
   });
 });
 
@@ -219,10 +291,11 @@ test("a surface reads its OWN declared kinds out of the served manifest", async 
   // the served document, because that is what a surface actually sees.
   const r = await declaredKinds({
     surfaceId: "mine",
-    fetchImpl: async () => served([
-      { id: "other", preserve: ["playhead"] },
-      { id: "mine", preserve: ["scroll", "selection"] },
-    ]),
+    fetchImpl: async () =>
+      served([
+        { id: "other", preserve: ["playhead"] },
+        { id: "mine", preserve: ["scroll", "selection"] },
+      ]),
   });
   assert.deepEqual(r.kinds, ["scroll", "selection"], "read the wrong row's declaration");
   assert.equal(r.problem, null);
@@ -232,14 +305,16 @@ test("declaring nothing and having no row are DIFFERENT answers", async () => {
   // Collapsing them to [] hides a registration failure behind a deliberate
   // choice, and a surface can act on the difference.
   const declaredNothing = await declaredKinds({
-    surfaceId: "mine", fetchImpl: async () => served([{ id: "mine" }]),
+    surfaceId: "mine",
+    fetchImpl: async () => served([{ id: "mine" }]),
   });
   assert.deepEqual(declaredNothing.kinds, []);
   assert.equal(declaredNothing.found, true);
   assert.equal(declaredNothing.problem, null, "declaring nothing is not a problem");
 
   const noRow = await declaredKinds({
-    surfaceId: "mine", fetchImpl: async () => served([{ id: "somebody-else" }]),
+    surfaceId: "mine",
+    fetchImpl: async () => served([{ id: "somebody-else" }]),
   });
   assert.equal(noRow.found, false, "a missing row read as a present one that declared nothing");
   assert.match(noRow.problem, /no row with id/);
@@ -249,7 +324,8 @@ test("a DECLARED but unusable preserve is reported, not read as an empty list", 
   // The likeliest real mistake is a string instead of an array. Absence is
   // silent because the field is optional; a declaration that does nothing is not.
   const r = await declaredKinds({
-    surfaceId: "mine", fetchImpl: async () => served([{ id: "mine", preserve: "scroll" }]),
+    surfaceId: "mine",
+    fetchImpl: async () => served([{ id: "mine", preserve: "scroll" }]),
   });
   assert.deepEqual(r.kinds, []);
   assert.match(r.problem, /must be an array/, "an unusable declaration passed as an empty one");
@@ -258,15 +334,25 @@ test("a DECLARED but unusable preserve is reported, not read as an empty list", 
 test("preserveDeclared captures exactly the declared kinds and restores them", () => {
   withSessionStorage(() => {
     const live = { scroll: 240, playhead: 12.5, untouched: "leave me" };
-    const adapter = { get: (k) => live[k], set: (k, v) => { live[k] = v; } };
+    const adapter = {
+      get: (k) => live[k],
+      set: (k, v) => {
+        live[k] = v;
+      },
+    };
 
     preserveDeclared("demo", ["scroll", "playhead"], { adapter }).keep();
-    live.scroll = 0; live.playhead = 0;                    // the reload
+    live.scroll = 0;
+    live.playhead = 0; // the reload
     preserveDeclared("demo", ["scroll", "playhead"], { adapter });
 
     assert.equal(live.scroll, 240, "a declared kind was not restored");
     assert.equal(live.playhead, 12.5);
-    assert.equal(live.untouched, "leave me", "an UNdeclared value was written — the list is the boundary");
+    assert.equal(
+      live.untouched,
+      "leave me",
+      "an UNdeclared value was written — the list is the boundary",
+    );
   });
 });
 
@@ -279,9 +365,14 @@ test("a kind the adapter cannot handle is REPORTED, and the others still work", 
     const adapter = {
       supports: (k) => k === "scroll",
       get: (k) => live[k],
-      set: (k, v) => { live[k] = v; },
+      set: (k, v) => {
+        live[k] = v;
+      },
     };
-    preserveDeclared("demo", ["scroll", "telepathy"], { adapter, onUnsupported: (u) => reported.push(...u) }).keep();
+    preserveDeclared("demo", ["scroll", "telepathy"], {
+      adapter,
+      onUnsupported: (u) => reported.push(...u),
+    }).keep();
     live.scroll = 0;
     preserveDeclared("demo", ["scroll", "telepathy"], { adapter, onUnsupported: () => {} });
 
@@ -302,7 +393,12 @@ function withReadyState(state, fn) {
   const had = Object.hasOwn(globalThis, "document");
   const prev = globalThis.document;
   globalThis.document = { readyState: state };
-  try { return fn(); } finally { if (had) globalThis.document = prev; else delete globalThis.document; }
+  try {
+    return fn();
+  } finally {
+    if (had) globalThis.document = prev;
+    else delete globalThis.document;
+  }
 }
 
 test("restoring after the load event is REPORTED — the state still comes back, but late is named", () => {
@@ -316,7 +412,12 @@ test("restoring after the load event is REPORTED — the state still comes back,
       const late = [];
       let got = null;
       preserveAcross("demo", { capture: () => ({ n: 1 }) }).keep();
-      const r = preserveAcross("demo", { restore: (s) => { got = s; }, onLate: (m) => late.push(m) });
+      const r = preserveAcross("demo", {
+        restore: (s) => {
+          got = s;
+        },
+        onLate: (m) => late.push(m),
+      });
 
       assert.equal(late.length, 1, "a restore after the load event was not reported");
       assert.match(late[0], /after first paint|AFTER first paint/);
@@ -365,7 +466,12 @@ test("with no document at all the helper neither warns nor throws", () => {
 
 const stubDoc = (elements) => ({
   querySelectorAll: (sel) =>
-    elements.filter((el) => sel.split(",").map((s) => s.trim()).includes(el.tag)),
+    elements.filter((el) =>
+      sel
+        .split(",")
+        .map((s) => s.trim())
+        .includes(el.tag),
+    ),
   querySelector: () => null,
 });
 
@@ -375,8 +481,11 @@ test("the standard adapter DECLINES selection, rather than guessing one meaning 
   // for one app and silently wrong for the rest — the surface would declare it,
   // see no error, and lose it on every reload.
   const a = standardAdapter({ win: {}, doc: stubDoc([]) });
-  assert.equal(a.supports("selection"), false,
-    "the adapter claims a selection semantics it cannot generically have");
+  assert.equal(
+    a.supports("selection"),
+    false,
+    "the adapter claims a selection semantics it cannot generically have",
+  );
 });
 
 test("supports() covers exactly the kinds it implements — no more, no less", () => {
@@ -398,8 +507,15 @@ test("a password is NEVER captured, so a convenience feature cannot write a cred
   ]);
   const captured = standardAdapter({ win: {}, doc }).get("form");
   assert.deepEqual(captured, { who: { value: "ada" } });
-  assert.ok(!Object.hasOwn(captured, "secret"), "a password field was captured into preserved state");
-  assert.doesNotMatch(JSON.stringify(captured), /hunter2/, "the password value reached the captured state");
+  assert.ok(
+    !Object.hasOwn(captured, "secret"),
+    "a password field was captured into preserved state",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(captured),
+    /hunter2/,
+    "the password value reached the captured state",
+  );
 });
 
 test("a file input is never captured either — it cannot be restored, so keeping it would lie", () => {
@@ -423,7 +539,10 @@ test("an unnamed field is skipped rather than colliding under a made-up key", ()
 test("a change offered while the human is mid-edit is DEFERRED, not applied and not dropped", () => {
   let dirty = true;
   const applied = [];
-  const g = deferWhileDirty(() => dirty, (c) => applied.push(c));
+  const g = deferWhileDirty(
+    () => dirty,
+    (c) => applied.push(c),
+  );
 
   assert.equal(g.offer({ marker: "m1" }), "deferred");
   assert.deepEqual(applied, [], "an agent write overwrote work in progress");
@@ -433,32 +552,50 @@ test("a change offered while the human is mid-edit is DEFERRED, not applied and 
 
   dirty = false;
   assert.equal(g.flush(), true);
-  assert.deepEqual(applied, [{ marker: "m1" }], "the deferred change was dropped rather than applied later");
+  assert.deepEqual(
+    applied,
+    [{ marker: "m1" }],
+    "the deferred change was dropped rather than applied later",
+  );
 });
 
 test("a FALSY deferred change is held and applied, not silently dropped", () => {
-  // review.r2 MINOR: `null` was both the "nothing pending" sentinel and a legal
-  // deferred value, so deferring null/false/0/"" reported "deferred" and then the
-  // flush guard `!pending` read the falsy value as nothing to do — the change
-  // vanished. Every falsy value must survive a defer-then-flush.
+  // A falsy value must not double as the "nothing pending" sentinel: a flush
+  // guard like `!pending` would read a deferred null/false/0/"" as nothing to do
+  // and the change would vanish. Every falsy value must survive a
+  // defer-then-flush.
   for (const value of [null, false, 0, ""]) {
     let dirty = true;
     const applied = [];
-    const g = deferWhileDirty(() => dirty, (c) => applied.push(c));
+    const g = deferWhileDirty(
+      () => dirty,
+      (c) => applied.push(c),
+    );
 
-    assert.equal(g.offer(value), "deferred", `offering ${JSON.stringify(value)} while dirty did not defer`);
+    assert.equal(
+      g.offer(value),
+      "deferred",
+      `offering ${JSON.stringify(value)} while dirty did not defer`,
+    );
     assert.equal(g.deferred, true, `deferred(${JSON.stringify(value)}) reported nothing pending`);
 
     dirty = false;
     assert.equal(g.flush(), true, `flush dropped the deferred ${JSON.stringify(value)}`);
-    assert.deepEqual(applied, [value], `the deferred ${JSON.stringify(value)} was dropped rather than applied`);
+    assert.deepEqual(
+      applied,
+      [value],
+      `the deferred ${JSON.stringify(value)} was dropped rather than applied`,
+    );
     assert.equal(g.deferred, false, "still reports pending after a successful flush");
   }
 });
 
 test("a change offered to a CLEAN surface applies immediately — the guard is not just a block", () => {
   const applied = [];
-  const g = deferWhileDirty(() => false, (c) => applied.push(c));
+  const g = deferWhileDirty(
+    () => false,
+    (c) => applied.push(c),
+  );
   assert.equal(g.offer({ marker: "m1" }), "applied");
   assert.deepEqual(applied, [{ marker: "m1" }]);
 });
