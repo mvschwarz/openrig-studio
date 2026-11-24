@@ -22,7 +22,14 @@ function fixture(t) {
 function release(
   root,
   number,
-  { sampleApi = "v2", host = false, migrations = [], omitInstruction = false, runtime = null } = {},
+  {
+    sampleApi = "v2",
+    host = false,
+    migrations = [],
+    omitInstruction = false,
+    runtime = null,
+    initialConfig = undefined,
+  } = {},
 ) {
   const dir = path.join(root, "r" + number);
   fs.mkdirSync(dir);
@@ -92,6 +99,7 @@ function release(
     components,
     customerOwned: ["studio.json", "extensions", "project", "data"],
     migrations,
+    ...(initialConfig === undefined ? {} : { initialConfig }),
   };
   const file = path.join(dir, d.release + ".json");
   fs.writeFileSync(file, JSON.stringify(d));
@@ -672,4 +680,107 @@ test("apply A, apply B, roll back to A, apply B again: B is current from a fresh
   );
   assert.equal(rollbackWorkspace(f.workspace).outcome, "done");
   assert.equal(inspectWorkspace(f.workspace).generation, gA, "a second rollback gives A");
+});
+
+// A release can seed what a new workspace's studio.json starts with, for example the server hooks a hosted variant needs and "rig": false.
+const SEED = { serverHooks: ".studio-release/current/studioSdk/hooks.mjs", rig: false };
+
+test("initialConfig: validated; seeds a fresh workspace's studio.json under --config; never touches adoption or upgrade; inspect reports what differs", (t) => {
+  const base = { ...release(fixture(t).root, 0).descriptor };
+  for (const [bad, why] of [
+    [[], /initialConfig must be an object/],
+    ["x", /initialConfig must be an object/],
+    [{ appsRoot: "/x" }, /cannot set appsRoot/],
+    [{ serverHooks: "/abs/hooks.mjs" }, /serverHooks must be a path relative/],
+    [{ serverHooks: "../hooks.mjs" }, /serverHooks must be a path relative/],
+  ]) {
+    const v = validateRelease({ ...base, initialConfig: bad });
+    assert.equal(v.ok, false, JSON.stringify(bad));
+    assert.match(v.errors.join("; "), why);
+  }
+  assert.equal(validateRelease({ ...base, initialConfig: SEED }).ok, true);
+  assert.equal(validateRelease(base).ok, true, "optional");
+
+  // Fresh, no --config: the seed plus the default apps list, then appsRoot.
+  const f = fixture(t),
+    r0 = release(f.root, 0, { initialConfig: SEED });
+  assert.equal(applyRelease({ workspace: f.workspace, release: r0.file }).outcome, "done");
+  const fresh = JSON.parse(fs.readFileSync(path.join(f.workspace, "studio.json")));
+  assert.deepEqual(fresh, { apps: [], ...SEED, appsRoot: fresh.appsRoot });
+  assert.deepEqual(
+    inspectWorkspace(f.workspace).configDrift,
+    [],
+    "nothing differs on a fresh hosted workspace",
+  );
+
+  // Fresh with --config: the creator wins key by key; the seed fills the rest.
+  const g = fixture(t),
+    s0 = release(g.root, 0, { initialConfig: SEED });
+  applyRelease({
+    workspace: g.workspace,
+    release: s0.file,
+    config: { apps: ["files"], rig: "my-rig" },
+  });
+  const mine = JSON.parse(fs.readFileSync(path.join(g.workspace, "studio.json")));
+  assert.deepEqual(mine.apps, ["files"]);
+  assert.equal(mine.rig, "my-rig");
+  assert.equal(mine.serverHooks, SEED.serverHooks);
+  assert.deepEqual(
+    inspectWorkspace(g.workspace).configDrift,
+    [{ key: "rig", expected: false, actual: "my-rig" }],
+    "reported, not rewritten",
+  );
+
+  // Upgrade onto a seeding release: studio.json is the customer's and stays byte for byte; inspect names the missing keys.
+  const h = fixture(t),
+    u0 = release(h.root, 0),
+    u1 = release(h.root, 1, { initialConfig: SEED });
+  applyRelease({ workspace: h.workspace, release: u0.file, config: { apps: ["files"] } });
+  const before = fs.readFileSync(path.join(h.workspace, "studio.json"));
+  assert.equal(applyRelease({ workspace: h.workspace, release: u1.file }).outcome, "done");
+  assert.deepEqual(
+    fs.readFileSync(path.join(h.workspace, "studio.json")),
+    before,
+    "an upgrade never writes the seed",
+  );
+  assert.deepEqual(
+    inspectWorkspace(h.workspace).configDrift.map((d) => [d.key, d.actual]),
+    [
+      ["serverHooks", null],
+      ["rig", null],
+    ],
+  );
+
+  // Adoption of an unversioned Studio merges only appsRoot, seed or not.
+  const a = fixture(t),
+    a0 = release(a.root, 0),
+    a1 = release(a.root, 1, { initialConfig: SEED }),
+    seededWs = path.join(a.root, "seed");
+  applyRelease({ workspace: seededWs, release: a0.file });
+  const old = inspectWorkspace(seededWs).generation;
+  fs.mkdirSync(a.workspace);
+  fs.writeFileSync(
+    path.join(a.workspace, "studio.json"),
+    JSON.stringify({ appsRoot: path.join(old, "studioApps"), apps: ["files"] }),
+  );
+  assert.equal(
+    applyRelease({
+      workspace: a.workspace,
+      release: a1.file,
+      baseline: a0.file,
+      adoptSdk: path.join(old, "studioSdk"),
+      adoptApps: path.join(old, "studioApps"),
+    }).outcome,
+    "done",
+  );
+  const adopted = JSON.parse(fs.readFileSync(path.join(a.workspace, "studio.json")));
+  assert.equal(adopted.serverHooks, undefined);
+  assert.equal(adopted.rig, undefined);
+
+  // A release without initialConfig reports nothing.
+  assert.deepEqual(
+    inspectWorkspace(fixture(t).workspace).configDrift,
+    undefined,
+    "an unversioned workspace has no report",
+  );
 });

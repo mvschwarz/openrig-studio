@@ -58,6 +58,15 @@ given, and an explanation sentence for each need that isn't met. `supported` and
 `apply` don't depend on it. A descriptor that ships the runtime as a component can
 still state a hard requirement with `requires`.
 
+A descriptor may give `initialConfig`, the settings a new workspace's `studio.json`
+starts with, for example `"initialConfig": { "serverHooks": ".studio-release/current/studioSdk/hooks.mjs", "rig": false }`.
+It must be an object; it can't set `appsRoot` (the executor writes that), and a
+`serverHooks` value must be a path relative to the studio folder. It's used only when
+`apply` creates a workspace that has no `studio.json`, under the creator's own
+`--config` (the creator's value wins, key by key). Adoption and upgrades never apply
+it, because `studio.json` belongs to the customer: `inspect` reports each key that
+differs as `configDrift: [{key, expected, actual}]` instead (empty when none differ).
+
 Host dependencies stage without switching current code. The operator supplies
 `openrig.host-release-receipt/v0` with `{release, descriptorSha256, components:
 {id: {version, sha256, outcome: "done"}}, migrations: [{id, outcome: "done"}]}`.
